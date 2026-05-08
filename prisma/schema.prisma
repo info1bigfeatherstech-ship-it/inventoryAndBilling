@@ -1,0 +1,649 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== ENUMS ====================
+
+enum GSTType {
+  CGST_SGST
+  IGST
+  EXEMPT
+}
+
+enum BusinessType {
+  RETAILER
+  WHOLESALER
+  IMPORTER
+  EXPORTER
+  DISTRIBUTOR
+}
+
+/// Immutable domain values — DB uses existing "SALES" value from initial migration.
+enum MovementType {
+  PURCHASE
+  WH_TO_SHOP
+  SHOP_TO_SHOP
+  WH_TO_WH
+  SALES
+  RETURN
+  ADJUSTMENT
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  WH_MANAGER
+  SHOP_OWNER
+  BILLING_STAFF
+  STOCK_LISTER
+}
+
+/// Channels used for analytics / bill attribution (BizPro-style).
+enum SalesChannel {
+  WALK_IN
+  ONLINE
+  WHOLESALE
+  MHM
+  OWB
+  OTHER
+}
+
+enum BillType {
+  GST_INVOICE
+  NON_GST_INVOICE
+}
+
+enum PaymentMethod {
+  CASH
+  UPI
+  CARD
+  BANK_TRANSFER
+  CREDIT_ON_ACCOUNT
+  CREDIT_NOTE_REDEMPTION
+}
+
+/// Which master price was applied at sale time (BizPro bill line).
+enum PriceType {
+  MRP
+  WHOLESALE
+  RETAIL
+  ONLINE
+}
+
+enum CreditNoteStatus {
+  ACTIVE
+  REDEEMED
+  PARTIALLY_REDEEMED
+  CANCELLED
+}
+
+enum PurchaseEntryStatus {
+  DRAFT
+  RECEIVED
+  CANCELLED
+}
+
+// ==================== VENDOR MASTER ====================
+
+model Vendor {
+  vendor_id      String  @id @default(cuid())
+  company_name   String
+  contact_person String?
+  phone          String  @unique
+  whatsapp       String?
+  email          String?
+  gst_number     String?
+
+  vendor_type   String?
+  supply_city   String
+  business_type BusinessType
+
+  city      String
+  address   String?
+  is_active Boolean @default(true)
+  remarks   String?
+
+  products         Product[]
+  purchase_entries PurchaseEntry[]
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@map("vendors")
+}
+
+// ==================== WAREHOUSE MASTER ====================
+
+model Warehouse {
+  warehouse_id   String  @id @default(cuid())
+  warehouse_code String  @unique
+  warehouse_name String
+  address        String
+  city           String
+  manager_name   String?
+  is_active      Boolean @default(true)
+  remarks        String?
+
+  product_stocks    ProductStock[]
+  purchase_entries PurchaseEntry[]
+  users           User[]
+  stock_ledger_out StockLedger[] @relation("LedgerFromWarehouse")
+  stock_ledger_in  StockLedger[] @relation("LedgerToWarehouse")
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@map("warehouses")
+}
+
+// ==================== SHOP MASTER ====================
+/// Sales office: billing identity, GST registrations, bank accounts for PDFs, staff assignment.
+
+model Shop {
+  shop_id    String @id @default(cuid())
+  shop_code  String @unique
+  shop_name  String
+  address    String
+  city       String
+  phone      String
+  email      String?
+
+  /// Primary business owner account (optional at creation; set after users exist).
+  /// At most one shop may reference a user as owner (@unique).
+  owner_user_id String? @unique
+  owner         User?   @relation("ShopOwner", fields: [owner_user_id], references: [user_id], onDelete: SetNull)
+
+  /// Reporting / bill tagging — empty array = not configured.
+  sales_channels SalesChannel[] @default([])
+
+  is_active Boolean @default(true)
+  remarks   String?
+
+  gst_configs   ShopGstRegistration[]
+  users         User[]                @relation("UserShopAssignment")
+  shop_stocks   ShopStock[]
+  bills         Bill[]
+  /// Credit notes for returns processed at this shop.
+  credit_notes_issued_here CreditNote[] @relation("CreditNoteReturnShop")
+  /// Credit notes redeemed against a new sale at this shop.
+  credit_notes_redeemed_here CreditNote[] @relation("CreditNoteRedeemedAtShop")
+
+  stock_ledger_from StockLedger[] @relation("LedgerFromShop")
+  stock_ledger_to   StockLedger[] @relation("LedgerToShop")
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([city])
+  @@index([is_active])
+  @@map("shops")
+}
+
+/// One row per GSTIN registered to a shop. Tax treatment (IGST vs CGST/SGST) follows
+/// place-of-supply rules at transaction time — not duplicated here to avoid contradicting product master.
+model ShopGstRegistration {
+  gst_config_id String @id @default(cuid())
+  shop_id       String
+
+  /// 15-char GSTIN; validate format in application layer.
+  gst_number String
+  /// Trade / legal name as printed on invoice header for this registration.
+  legal_name String?
+
+  is_default Boolean @default(false)
+  is_active  Boolean @default(true)
+
+  effective_from DateTime?
+  effective_to   DateTime?
+
+  remarks String?
+
+  shop          Shop          @relation(fields: [shop_id], references: [shop_id], onDelete: Restrict)
+  bank_accounts ShopBankAccount[]
+  bills         Bill[]
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@unique([shop_id, gst_number])
+  @@index([shop_id, is_active])
+  @@map("shop_gst_registrations")
+}
+
+/// Bank details for invoice PDF dropdown; scoped to a GST registration (common in India).
+model ShopBankAccount {
+  bank_account_id String @id @default(cuid())
+  gst_config_id   String
+
+  account_holder_name String
+  bank_name           String
+  branch_name         String?
+  account_number      String
+  ifsc_code           String
+  upi_id              String?
+
+  is_default Boolean @default(false)
+  is_active  Boolean @default(true)
+  remarks    String?
+
+  gst_config ShopGstRegistration @relation(fields: [gst_config_id], references: [gst_config_id], onDelete: Restrict)
+  bills      Bill[]
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([gst_config_id, is_active])
+  @@map("shop_bank_accounts")
+}
+
+// ==================== CATEGORY MASTER ====================
+
+model Category {
+  category_id String  @id @default(cuid())
+  name        String  @unique
+  description String?
+  parent_id   String?
+  is_active   Boolean @default(true)
+  remarks     String?
+
+  parent   Category?  @relation("CategoryHierarchy", fields: [parent_id], references: [category_id])
+  children Category[] @relation("CategoryHierarchy")
+
+  products     Product[] @relation("ProductToCategory")
+  sub_products Product[] @relation("ProductToSubCategory")
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@map("categories")
+}
+
+// ==================== PRODUCT MASTER ====================
+
+model Product {
+  product_id   String  @id @default(cuid())
+  product_code String  @unique
+  name         String
+  description  String?
+  title        String?
+
+  image_filenames String?
+  brand_name      String?
+
+  system_barcode String  @unique
+  vendor_barcode String? @unique
+
+  mrp             Float
+  wholesale_price Float
+  retail_price    Float
+  online_price    Float?
+
+  purchase_cost Float?
+
+  primary_vendor_id String
+
+  hsn_code    String
+  gst_percent Float
+  gst_type    GSTType
+
+  unit_of_measure     String
+  low_stock_threshold Int    @default(10)
+  weight_per_unit     Float?
+
+  category_id     String
+  sub_category_id String?
+
+  is_active Boolean @default(true)
+  remarks   String?
+
+  primary_vendor Vendor    @relation(fields: [primary_vendor_id], references: [vendor_id])
+  category       Category  @relation("ProductToCategory", fields: [category_id], references: [category_id])
+  sub_category   Category? @relation("ProductToSubCategory", fields: [sub_category_id], references: [category_id])
+
+  product_stocks ProductStock[]
+  purchase_items PurchaseItem[]
+  stock_ledgers  StockLedger[]
+  shop_stocks    ShopStock[]
+  bill_lines     BillLineItem[]
+  credit_lines   CreditNoteLineItem[]
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([primary_vendor_id])
+  @@index([category_id])
+  @@index([is_active])
+  @@map("products")
+}
+
+// ==================== WAREHOUSE STOCK (location + batch) ====================
+/// batch_number: use "" for non-batch aggregate rows so @@unique(product_id, warehouse_id, batch_number) is stable in PostgreSQL.
+
+model ProductStock {
+  stock_id String @id @default(cuid())
+
+  product_id   String
+  warehouse_id String
+
+  quantity Int @default(0)
+
+  low_stock_threshold Int?
+
+  room_zone  String
+  rack_shelf String
+  position   String?
+
+  batch_number String  @default("")
+  expiry_date  DateTime?
+
+  last_purchase_id   String?
+  last_purchase_date DateTime?
+
+  remarks String?
+
+  product       Product        @relation(fields: [product_id], references: [product_id])
+  warehouse     Warehouse      @relation(fields: [warehouse_id], references: [warehouse_id])
+  last_purchase PurchaseEntry? @relation("LastPurchase", fields: [last_purchase_id], references: [purchase_id])
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@unique([product_id, warehouse_id, batch_number])
+  @@index([warehouse_id, product_id])
+  @@map("product_stocks")
+}
+
+// ==================== SHOP STOCK (available / reserved / in-transit) ====================
+/// Operational balances per shop for billing and transfers. Mutations must go through services + ledger.
+
+model ShopStock {
+  shop_stock_id String @id @default(cuid())
+  shop_id       String
+  product_id    String
+
+  quantity_available  Int @default(0)
+  quantity_reserved   Int @default(0)
+  quantity_in_transit Int @default(0)
+
+  shop    Shop    @relation(fields: [shop_id], references: [shop_id], onDelete: Restrict)
+  product Product @relation(fields: [product_id], references: [product_id], onDelete: Restrict)
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@unique([shop_id, product_id])
+  @@index([product_id])
+  @@map("shop_stocks")
+}
+
+// ==================== PURCHASE ====================
+
+model PurchaseEntry {
+  purchase_id     String @id @default(cuid())
+  purchase_number String @unique
+
+  vendor_id         String
+  vendor_invoice_no String @unique
+  warehouse_id      String
+
+  purchase_date DateTime @default(now())
+
+  status PurchaseEntryStatus @default(RECEIVED)
+
+  subtotal     Float
+  tax_amount   Float
+  total_amount Float
+
+  received_by String
+  received_at DateTime @default(now())
+
+  remarks String?
+
+  vendor          Vendor          @relation(fields: [vendor_id], references: [vendor_id])
+  warehouse       Warehouse       @relation(fields: [warehouse_id], references: [warehouse_id])
+  items           PurchaseItem[]
+  product_stocks  ProductStock[]  @relation("LastPurchase")
+  receivedByUser  User            @relation("PurchaseReceivedBy", fields: [received_by], references: [user_id])
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([warehouse_id, purchase_date])
+  @@map("purchase_entries")
+}
+
+model PurchaseItem {
+  purchase_item_id String @id @default(cuid())
+  purchase_id      String
+  product_id       String
+
+  quantity      Int
+  purchase_cost Float
+
+  batch_number String?
+  expiry_date  DateTime?
+
+  room_zone  String
+  rack_shelf String
+  position   String?
+
+  remarks String?
+
+  purchase PurchaseEntry @relation(fields: [purchase_id], references: [purchase_id])
+  product  Product       @relation(fields: [product_id], references: [product_id])
+
+  @@index([purchase_id])
+  @@map("purchase_items")
+}
+
+// ==================== STOCK LEDGER ====================
+
+model StockLedger {
+  ledger_id  String @id @default(cuid())
+  product_id String
+
+  movement_type MovementType
+  quantity      Int
+
+  from_warehouse_id String?
+  to_warehouse_id   String?
+  from_shop_id      String?
+  to_shop_id        String?
+
+  reference_id   String?
+  reference_type String?
+
+  batch_number String?
+  expiry_date  DateTime?
+
+  created_by String
+  remarks    String?
+
+  created_at DateTime @default(now())
+
+  product        Product    @relation(fields: [product_id], references: [product_id])
+  from_warehouse Warehouse? @relation("LedgerFromWarehouse", fields: [from_warehouse_id], references: [warehouse_id])
+  to_warehouse   Warehouse? @relation("LedgerToWarehouse", fields: [to_warehouse_id], references: [warehouse_id])
+  from_shop      Shop?      @relation("LedgerFromShop", fields: [from_shop_id], references: [shop_id])
+  to_shop        Shop?      @relation("LedgerToShop", fields: [to_shop_id], references: [shop_id])
+  createdByUser  User       @relation("StockLedgerCreatedBy", fields: [created_by], references: [user_id])
+
+  @@index([product_id, created_at])
+  @@index([from_shop_id, created_at])
+  @@index([to_shop_id, created_at])
+  @@index([movement_type, created_at])
+  @@map("stock_ledger")
+}
+
+// ==================== BILLING ====================
+/// Bills are immutable after posting except controlled cancellation flags (audit).
+
+model Bill {
+  bill_id     String @id @default(cuid())
+  bill_number String @unique
+  shop_id     String
+
+  bill_type BillType
+
+  customer_mobile String?
+  customer_name   String?
+  customer_gstin  String?
+  /// 2-digit state code for POS / tax determination snapshots.
+  place_of_supply_state_code String?
+
+  subtotal     Float
+  gst_amount   Float
+  total_amount Float
+
+  payment_method PaymentMethod
+
+  gst_config_id   String?
+  bank_account_id String?
+
+  sales_channel SalesChannel?
+
+  pdf_storage_key String?
+
+  is_cancelled         Boolean   @default(false)
+  cancelled_at         DateTime?
+  cancelled_by_user_id String?
+
+  created_by_user_id String
+
+  shop         Shop                 @relation(fields: [shop_id], references: [shop_id], onDelete: Restrict)
+  gst_config   ShopGstRegistration? @relation(fields: [gst_config_id], references: [gst_config_id], onDelete: SetNull)
+  bank_account ShopBankAccount?     @relation(fields: [bank_account_id], references: [bank_account_id], onDelete: SetNull)
+  created_by   User                 @relation("BillCreatedBy", fields: [created_by_user_id], references: [user_id])
+
+  items              BillLineItem[]
+  credit_notes_from  CreditNote[]   @relation("CreditNoteOriginalBill")
+  credit_notes_redeemed_here CreditNote[] @relation("CreditNoteRedeemedOnBill")
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([shop_id, created_at])
+  @@index([customer_mobile])
+  @@map("bills")
+}
+
+model BillLineItem {
+  line_id    String @id @default(cuid())
+  bill_id    String
+  product_id String
+
+  quantity   Int
+  price_type PriceType
+  unit_price Float
+
+  /// Snapshots at sale time — product master may change later; bill stays historically correct.
+  gst_percent  Float
+  hsn_code     String
+  line_subtotal Float
+  tax_amount    Float
+  line_total    Float
+
+  bill    Bill    @relation(fields: [bill_id], references: [bill_id], onDelete: Restrict)
+  product Product @relation(fields: [product_id], references: [product_id])
+
+  @@index([bill_id])
+  @@map("bill_line_items")
+}
+
+// ==================== CREDIT NOTES ====================
+
+model CreditNote {
+  credit_note_id     String @id @default(cuid())
+  credit_note_number String @unique
+
+  original_bill_id String
+  shop_id          String
+
+  customer_mobile String
+  customer_name   String?
+
+  subtotal     Float
+  gst_amount   Float
+  credit_amount Float
+
+  status CreditNoteStatus @default(ACTIVE)
+
+  redeemed_at               DateTime?
+  redeemed_at_shop_id       String?
+  redeemed_against_bill_id  String?
+
+  photo_storage_key String?
+
+  created_by_user_id String
+  remarks            String?
+
+  shop           Shop    @relation("CreditNoteReturnShop", fields: [shop_id], references: [shop_id], onDelete: Restrict)
+  original_bill  Bill    @relation("CreditNoteOriginalBill", fields: [original_bill_id], references: [bill_id], onDelete: Restrict)
+  redeemed_at_shop Shop? @relation("CreditNoteRedeemedAtShop", fields: [redeemed_at_shop_id], references: [shop_id], onDelete: SetNull)
+  redeemed_against_bill Bill? @relation("CreditNoteRedeemedOnBill", fields: [redeemed_against_bill_id], references: [bill_id], onDelete: SetNull)
+  created_by     User    @relation("CreditNoteCreatedBy", fields: [created_by_user_id], references: [user_id])
+
+  lines CreditNoteLineItem[]
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([shop_id, status])
+  @@index([customer_mobile])
+  @@map("credit_notes")
+}
+
+model CreditNoteLineItem {
+  line_id         String @id @default(cuid())
+  credit_note_id  String
+  product_id      String
+
+  quantity   Int
+  unit_price Float
+  gst_percent Float
+  line_total  Float
+
+  credit_note CreditNote @relation(fields: [credit_note_id], references: [credit_note_id], onDelete: Restrict)
+  product     Product    @relation(fields: [product_id], references: [product_id])
+
+  @@index([credit_note_id])
+  @@map("credit_note_line_items")
+}
+
+// ==================== USER ====================
+
+model User {
+  user_id       String   @id @default(cuid())
+  name          String
+  phone         String   @unique
+  password_hash String?
+  role          UserRole
+
+  warehouse_id String?
+  shop_id      String?
+
+  is_active Boolean @default(true)
+  remarks   String?
+
+  warehouse Warehouse? @relation(fields: [warehouse_id], references: [warehouse_id])
+  shop      Shop?      @relation("UserShopAssignment", fields: [shop_id], references: [shop_id], onDelete: SetNull)
+
+  owned_shop Shop? @relation("ShopOwner")
+
+  purchase_entries_received PurchaseEntry[] @relation("PurchaseReceivedBy")
+  stock_ledgers_created     StockLedger[]   @relation("StockLedgerCreatedBy")
+  bills_created             Bill[]          @relation("BillCreatedBy")
+  credit_notes_created      CreditNote[]    @relation("CreditNoteCreatedBy")
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([shop_id])
+  @@index([warehouse_id])
+  @@index([role, is_active])
+  @@map("users")
+}
