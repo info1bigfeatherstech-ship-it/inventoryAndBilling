@@ -3,6 +3,10 @@ const { body, param, query } = require('express-validator');
 const BUSINESS_TYPES = ['RETAILER', 'WHOLESALER', 'IMPORTER', 'EXPORTER', 'DISTRIBUTOR'];
 
 const normalizePhone = (value) => String(value || '').replace(/[^\d]/g, '');
+const normalizeGstin = (value) => {
+  const normalized = String(value || '').replace(/\s+/g, '').toUpperCase();
+  return normalized === '' ? null : normalized;
+};
 
 const gstinRegex = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/i;
 
@@ -49,7 +53,12 @@ const createVendorValidator = [
     .custom((v) => v === '' || v.length === 10)
     .withMessage('whatsapp must be a 10-digit number'),
   body('email').optional({ nullable: true }).isEmail().withMessage('email must be valid'),
-  body('gst_number').optional({ nullable: true }).matches(gstinRegex).withMessage('gst_number must be a valid GSTIN'),
+  body('gst_number')
+    .optional({ nullable: true })
+    .customSanitizer(normalizeGstin)
+    .optional({ nullable: true })
+    .matches(gstinRegex)
+    .withMessage('gst_number must be a valid GSTIN'),
   body('vendor_type').optional({ nullable: true }).isString().trim().isLength({ max: 50 }),
   body('address').optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
   body('remarks').optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
@@ -74,10 +83,15 @@ const updateVendorValidator = [
     .custom((v) => v === '' || v.length === 10)
     .withMessage('whatsapp must be a 10-digit number'),
   body('email').optional({ nullable: true }).isEmail(),
-  body('gst_number').optional({ nullable: true }).matches(gstinRegex),
+  body('gst_number')
+    .optional({ nullable: true })
+    .customSanitizer(normalizeGstin)
+    .optional({ nullable: true })
+    .matches(gstinRegex)
+    .withMessage('gst_number must be a valid GSTIN'),
   body('vendor_type').optional({ nullable: true }).isString().trim().isLength({ max: 50 }),
   body('address').optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
-  body('is_active').optional().isBoolean(),
+  body('is_active').optional().isBoolean().toBoolean(),
   body('remarks').optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
 ];
 

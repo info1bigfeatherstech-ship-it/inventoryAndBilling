@@ -71,6 +71,14 @@ const sanitizeVendorUpdate = (data) => {
       out[key] = data[key];
     }
   }
+
+  // Defensive normalization in case upstream sends boolean-like strings.
+  if (typeof out.is_active === 'string') {
+    const normalized = out.is_active.trim().toLowerCase();
+    if (normalized === 'true') out.is_active = true;
+    if (normalized === 'false') out.is_active = false;
+  }
+
   return out;
 };
 
