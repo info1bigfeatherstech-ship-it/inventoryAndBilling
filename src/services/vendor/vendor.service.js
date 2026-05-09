@@ -1,6 +1,6 @@
-const prisma = require('../utils/prisma.utils');
-const { AppError } = require('../middlewares/error.middleware');
-const { parsePagination } = require('../utils/pagination.utils');
+const prisma = require('../../utils/prisma.utils');
+const { AppError } = require('../../middlewares/error.middleware');
+const { parsePagination } = require('../../utils/pagination.utils');
 
 const buildVendorWhere = (filters = {}) => {
   const where = {};
@@ -173,7 +173,6 @@ const VendorService = {
       throw new AppError('No updatable fields provided', 400, 'EMPTY_UPDATE');
     }
 
-    // Ensure exists to return proper 404 instead of Prisma generic error.
     const exists = await prisma.vendor.findUnique({
       where: { vendor_id: vendorId },
       select: { vendor_id: true },
@@ -232,4 +231,3 @@ const VendorService = {
 };
 
 module.exports = VendorService;
-

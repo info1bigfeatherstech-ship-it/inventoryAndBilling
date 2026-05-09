@@ -2,9 +2,9 @@
 const express = require('express');
 const router = express.Router();
 
-// Import versioned routes
-const vendorRoutes = require('./v1/vendor.routes');
-const authRoutes = require('./v1/auth.routes');
+// Import versioned routes (domain folders under routes/)
+const vendorRoutes = require('./vendor/vendor.routes');
+const authRoutes = require('./auth/auth.routes');
 
 // API info route
 router.get('/', (req, res) => {
@@ -17,6 +17,8 @@ router.get('/', (req, res) => {
       health: 'GET /health',
       api: 'GET /api/v1',
       authLogin: 'POST /api/v1/auth/login',
+      authRefresh: 'POST /api/v1/auth/refresh',
+      authLogout: 'POST /api/v1/auth/logout',
       authMe: 'GET /api/v1/auth/me',
       vendors: 'GET /api/v1/vendors',
       products: 'GET /api/v1/products (coming soon)',

@@ -1,7 +1,7 @@
 const bcrypt = require('bcryptjs');
-const prisma = require('../utils/prisma.utils');
-const config = require('../config/index.config');
-const logger = require('../utils/logger.utils');
+const prisma = require('../../utils/prisma.utils');
+const config = require('../../config/index.config');
+const logger = require('../../utils/logger.utils');
 
 const SALT_ROUNDS = 12;
 
@@ -49,7 +49,6 @@ const ensureSuperAdmin = async () => {
     return { status: 'created', user: created };
   }
 
-  // If existing user isn't super admin, keep data safe and only log warning.
   if (existing.role !== 'SUPER_ADMIN') {
     logger.warn('ADMIN_PHONE belongs to non-super-admin user. Bootstrap skipped for safety.', {
       userId: existing.user_id,
@@ -58,7 +57,6 @@ const ensureSuperAdmin = async () => {
     return { status: 'conflict' };
   }
 
-  // Keep admin active and rotate hash when env password changes.
   await prisma.user.update({
     where: { user_id: existing.user_id },
     data: {
@@ -74,4 +72,3 @@ const ensureSuperAdmin = async () => {
 module.exports = {
   ensureSuperAdmin,
 };
-

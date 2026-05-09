@@ -51,8 +51,8 @@ app.use(cookieParser());
 // ============ RATE LIMITING ============
 if (limiters && typeof limiters.general === 'function') {
   app.use('/api', limiters.general);
-  if (limiters.login) app.use('/api/auth/login', limiters.login);
-  if (limiters.sensitive) app.use('/api/auth/register', limiters.sensitive);
+  if (limiters.login) app.use('/api/v1/auth/login', limiters.login);
+  if (limiters.sensitive) app.use('/api/v1/auth/refresh', limiters.sensitive);
   if (limiters.admin) app.use('/api/admin', limiters.admin);
 } else {
   logger.warn('Rate limiters not loaded — skipping rate limiting');

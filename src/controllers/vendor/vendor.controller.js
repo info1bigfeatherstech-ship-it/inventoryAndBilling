@@ -1,6 +1,6 @@
-const asyncHandler = require('../utils/asyncHandler.utils');
-const VendorService = require('../services/vendor.service');
-const { successResponse, paginatedMeta } = require('../utils/response.utils');
+const asyncHandler = require('../../utils/asyncHandler.utils');
+const VendorService = require('../../services/vendor/vendor.service');
+const { successResponse, paginatedMeta } = require('../../utils/response.utils');
 
 const VendorController = {
   create: asyncHandler(async (req, res) => {
@@ -51,4 +51,3 @@ const VendorController = {
 };
 
 module.exports = VendorController;
-

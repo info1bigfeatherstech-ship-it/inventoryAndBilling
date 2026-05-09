@@ -8,7 +8,7 @@ const shutdownService = require('./src/services/shutdown.service');
 const healthService = require('./src/services/health.service');
 const connectivityService = require('./src/services/connectivity.service');
 const { printStartupBanner } = require('./src/utils/startupBanner.utils');
-const { ensureSuperAdmin } = require('./src/services/adminBootstrap.service');
+const { ensureSuperAdmin } = require('./src/services/auth/adminBootstrap.service');
 const pkg = require('./package.json');
 
 const PORT = config.PORT;

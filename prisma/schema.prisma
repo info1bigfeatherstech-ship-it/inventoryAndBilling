@@ -638,6 +638,7 @@ model User {
   stock_ledgers_created     StockLedger[]   @relation("StockLedgerCreatedBy")
   bills_created             Bill[]          @relation("BillCreatedBy")
   credit_notes_created      CreditNote[]    @relation("CreditNoteCreatedBy")
+  refresh_tokens            RefreshToken[]
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
@@ -646,4 +647,27 @@ model User {
   @@index([warehouse_id])
   @@index([role, is_active])
   @@map("users")
+}
+
+model RefreshToken {
+  refresh_token_id String   @id @default(cuid())
+  user_id          String
+  token_jti        String   @unique
+  token_hash       String
+  expires_at       DateTime
+  revoked_at       DateTime?
+  revoked_reason   String?
+  replaced_by_jti  String?
+  last_used_at     DateTime?
+  ip_address       String?
+  user_agent       String?
+  created_at       DateTime @default(now())
+  updated_at       DateTime @updatedAt
+
+  user User @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@index([user_id, revoked_at])
+  @@index([user_id, expires_at])
+  @@index([expires_at])
+  @@map("refresh_tokens")
 }

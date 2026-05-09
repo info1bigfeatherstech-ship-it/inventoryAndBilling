@@ -1,14 +1,14 @@
 const express = require('express');
 const router = express.Router();
 
-const VendorController = require('../../controllers/vendor.controller');
+const VendorController = require('../../controllers/vendor/vendor.controller');
 const { validateRequest } = require('../../middlewares/validation.middleware');
 const {
   createVendorValidator,
   updateVendorValidator,
   listVendorsValidator,
   vendorIdParam,
-} = require('../../validators/vendor.validators');
+} = require('../../validators/vendor/vendor.validators');
 const { requireAuth, authorizeRoles } = require('../../middlewares/auth.middleware');
 
 router.use(requireAuth);
@@ -21,4 +21,3 @@ router.put('/:vendorId', updateVendorValidator, validateRequest, VendorControlle
 router.delete('/:vendorId', vendorIdParam, validateRequest, VendorController.remove);
 
 module.exports = router;
-

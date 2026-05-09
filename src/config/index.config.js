@@ -122,6 +122,10 @@ class Config {
     return process.env.JWT_EXPIRES_IN || '7d';
   }
 
+  get JWT_REFRESH_SECRET() {
+    return process.env.JWT_REFRESH_SECRET || this.JWT_SECRET;
+  }
+
   get JWT_REFRESH_EXPIRES_IN() {
     return process.env.JWT_REFRESH_EXPIRES_IN || '30d';
   }

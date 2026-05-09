@@ -48,6 +48,7 @@ const handlePrismaError = (error) => {
 // Global error handler
 const errorHandler = (err, req, res, next) => {
   let error = err;
+  const originalStack = err?.stack;
   
   // Handle Prisma errors
   const prismaError = handlePrismaError(err);
@@ -72,6 +73,9 @@ const errorHandler = (err, req, res, next) => {
   if (!(error instanceof AppError)) {
     error = new AppError(error.message || 'Internal server error', error.statusCode || 500, error.code || 'INTERNAL_ERROR');
     error.isOperational = false;
+    if (originalStack) {
+      error.stack = originalStack;
+    }
   }
 
   // Log error
