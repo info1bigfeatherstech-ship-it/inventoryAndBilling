@@ -37,9 +37,10 @@ enum MovementType {
 enum UserRole {
   SUPER_ADMIN
   WH_MANAGER
+  WH_STOCK_LISTER
   SHOP_OWNER
   BILLING_STAFF
-  STOCK_LISTER
+  SHOP_STOCK_LISTER
 }
 
 /// Channels used for analytics / bill attribution (BizPro-style).
@@ -87,6 +88,13 @@ enum PurchaseEntryStatus {
   CANCELLED
 }
 
+enum InwardStatus {
+  SCHEDULED
+  ARRIVED
+  MAPPED
+  CANCELLED
+}
+
 // ==================== VENDOR MASTER ====================
 
 model Vendor {
@@ -109,6 +117,7 @@ model Vendor {
 
   products         Product[]
   purchase_entries PurchaseEntry[]
+  inward_receipts  InwardReceipt[]
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
@@ -131,6 +140,7 @@ model Warehouse {
   product_stocks    ProductStock[]
   purchase_entries PurchaseEntry[]
   users           User[]
+  inward_receipts InwardReceipt[]
   stock_ledger_out StockLedger[] @relation("LedgerFromWarehouse")
   stock_ledger_in  StockLedger[] @relation("LedgerToWarehouse")
 
@@ -310,6 +320,7 @@ model Product {
   shop_stocks    ShopStock[]
   bill_lines     BillLineItem[]
   credit_lines   CreditNoteLineItem[]
+  inward_items   InwardReceiptItem[]
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
@@ -639,7 +650,9 @@ model User {
   bills_created             Bill[]          @relation("BillCreatedBy")
   credit_notes_created      CreditNote[]    @relation("CreditNoteCreatedBy")
   refresh_tokens            RefreshToken[]
-
+  inward_receipts_created   InwardReceipt[] @relation("InwardCreatedBy")
+  inward_receipts_received  InwardReceipt[] @relation("InwardReceivedBy")
+  
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
@@ -670,4 +683,61 @@ model RefreshToken {
   @@index([user_id, expires_at])
   @@index([expires_at])
   @@map("refresh_tokens")
+}
+
+model InwardReceipt {
+  inward_id           String       @id @default(cuid())
+  inward_number       String       @unique
+  vendor_id           String
+  warehouse_id        String
+  status              InwardStatus @default(SCHEDULED)
+  expected_date       DateTime?
+  arrived_at          DateTime?
+  vendor_invoice_no   String?
+  challan_no          String?
+  transport_details   String?
+  created_by_user_id  String
+  received_by_user_id String?
+  remarks             String?
+
+  vendor      Vendor    @relation(fields: [vendor_id], references: [vendor_id], onDelete: Restrict)
+  warehouse   Warehouse @relation(fields: [warehouse_id], references: [warehouse_id], onDelete: Restrict)
+  created_by  User      @relation("InwardCreatedBy", fields: [created_by_user_id], references: [user_id], onDelete: Restrict)
+  received_by User?     @relation("InwardReceivedBy", fields: [received_by_user_id], references: [user_id], onDelete: SetNull)
+  items       InwardReceiptItem[]
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([vendor_id, expected_date])
+  @@index([warehouse_id, status, expected_date])
+  @@index([status, created_at])
+  @@map("inward_receipts")
+}
+
+model InwardReceiptItem {
+  inward_item_id    String   @id @default(cuid())
+  inward_id         String
+  line_no           Int
+  item_name         String
+  variant_text      String?
+  quantity_received Int
+  purchase_cost     Float?
+  batch_number      String?
+  expiry_date       DateTime?
+  room_zone         String?
+  rack_shelf        String?
+  position          String?
+  mapped_product_id String?
+  remarks           String?
+
+  inward_receipt InwardReceipt @relation(fields: [inward_id], references: [inward_id], onDelete: Cascade)
+  mapped_product Product?      @relation(fields: [mapped_product_id], references: [product_id], onDelete: SetNull)
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@unique([inward_id, line_no])
+  @@index([mapped_product_id])
+  @@map("inward_receipt_items")
 }
