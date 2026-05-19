@@ -567,16 +567,17 @@ Electronics (root)
 ```
 
 ### Common HTTP Status Codes
-| Code | Meaning | Example Scenario |
-|------|---------|------------------|
-| 200 | OK | Successful GET, PUT, DELETE |
-| 201 | Created | Successful POST (create) |
-| 400 | Bad Request | Validation failure, invalid parent |
-| 401 | Unauthorized | Missing/invalid token |
-| 403 | Forbidden | Insufficient permissions |
-| 404 | Not Found | Category/parent category doesn't exist |
-| 409 | Conflict | Duplicate name, deactivation blocked |
-
+|---------------------------------------------------------------|
+| Code | Meaning      | Example Scenario                        |
+|------|--------------|-----------------------------------------|
+| 200  | OK           | Successful GET, PUT, DELETE             |
+| 201  | Created      | Successful POST (create)                |
+| 400  | Bad Request  | Validation failure, invalid parent      |
+| 401  | Unauthorized | Missing/invalid token                   |              
+| 403  | Forbidden    | Insufficient permissions                |
+| 404  | Not Found    | Category/parent category doesn't exist  |
+| 409  | Conflict     | Duplicate name, deactivation blocked    |
+|---------------------------------------------------------------|
 ---
 
 ## Request/Response Examples
