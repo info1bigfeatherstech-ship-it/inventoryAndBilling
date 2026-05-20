@@ -2,6 +2,7 @@ const asyncHandler = require('../../utils/asyncHandler.utils');
 const { AppError } = require('../../middlewares/error.middleware');
 const { successResponse, paginatedMeta } = require('../../utils/response.utils');
 const ProductService = require('../../services/product/product.service');
+const { groupVariantImageFiles } = require('../../utils/productMultipart.utils');
 
 const parseKeepImageIds = (raw) => {
   if (raw === undefined || raw === null || raw === '') return [];
@@ -30,7 +31,8 @@ const withUserContext = (req) => {
 
 const ProductController = {
   create: asyncHandler(async (req, res) => {
-    const product = await ProductService.createProduct(req.body, req.user);
+    const variantImagesByIndex = groupVariantImageFiles(req.files);
+    const product = await ProductService.createProduct(req.body, req.user, { variantImagesByIndex });
     return successResponse(res, req, {
       statusCode: 201,
       message: 'Product created successfully',
@@ -81,7 +83,10 @@ const ProductController = {
   }),
 
   createVariant: asyncHandler(async (req, res) => {
-    const product = await ProductService.createVariant(req.params.productId, req.body, req.user);
+    const variantImagesByIndex = groupVariantImageFiles(req.files);
+    const product = await ProductService.createVariant(req.params.productId, req.body, req.user, {
+      variantImagesByIndex,
+    });
     return successResponse(res, req, {
       statusCode: 201,
       message: 'Variant created successfully',

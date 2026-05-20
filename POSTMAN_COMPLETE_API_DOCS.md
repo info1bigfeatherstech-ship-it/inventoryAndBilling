@@ -257,7 +257,9 @@ Authorization: Bearer {{accessToken}}
 
 ---
 
-## 5. Category APIs (Protected: All Roles can READ, SUPER_ADMIN/WH_MANAGER can WRITE)
+## 5. Category APIs (Protected: All Roles can READ, SUPER_ADMIN only can WRITE)
+
+> Full spec: [doc/category-routes.md](./doc/category-routes.md) — WH_MANAGER cannot create categories.
 
 ### 5.1 Create Category
 ```

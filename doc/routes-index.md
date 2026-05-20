@@ -32,7 +32,7 @@ Source: `src/routes/index.routes.js`
 | Entity | Scope |
 |--------|--------|
 | Vendors | Global read; admin write |
-| Categories | Global read; admin + WH_MANAGER write |
+| Categories | Global read; **SUPER_ADMIN write only** |
 | Warehouses | WH staff: own warehouse only; admin: all |
 | Products | Per `warehouse_id` on product |
 | Stock | Per warehouse + variant |

@@ -31,7 +31,7 @@ Obtain token via `POST /api/v1/auth/login`. Refresh via cookie + `POST /api/v1/a
 | Categories | [category-routes.md](./category-routes.md) | `/api/v1/categories` |
 | Users | [user-routes.md](./user-routes.md) | `/api/v1/users` |
 | Inwards | [inward-routes.md](./inward-routes.md) | `/api/v1/inwards` |
-| Products | [product-routes.md](./product-routes.md) | `/api/v1/products` |
+| Products | [product-routes.md](./product-routes.md) — **FE/QA guide** (variants, images, multipart) | `/api/v1/products` |
 | Product stock | [product-stock-routes.md](./product-stock-routes.md) | `/api/v1/product-stocks` |
 | Media / env | [media-and-env.md](./media-and-env.md) | — |
 
@@ -40,7 +40,7 @@ Obtain token via `POST /api/v1/auth/login`. Refresh via cookie + `POST /api/v1/a
 | Role | Typical use |
 |------|-------------|
 | `SUPER_ADMIN` | All masters, all warehouses |
-| `WH_MANAGER` | Own warehouse: inwards, products, stock; read global vendors/categories |
+| `WH_MANAGER` | Own warehouse: inwards, products, stock; read global vendors/categories (cannot create categories) |
 | `WH_STOCK_LISTER` | Same as manager for stock/product listing ops |
 | Shop roles | Read catalog (products/vendors/categories); shop billing (future) |
 

@@ -18,6 +18,7 @@ const {
   createVariantValidator,
   syncVariantImagesValidator,
 } = require('../../validators/product/product.validators');
+const { middlewareParseProductJsonBody } = require('../../utils/productMultipart.utils');
 
 const READ_ROLES = [
   'SUPER_ADMIN',
@@ -42,14 +43,23 @@ const csvUpload = multer({
   },
 });
 
+const imageMimeFilter = (_req, file, cb) => {
+  const ok = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.mimetype);
+  cb(ok ? null : new Error('Invalid image type'), ok);
+};
+
 const imageUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024, files: 4 },
-  fileFilter: (_req, file, cb) => {
-    const ok = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.mimetype);
-    cb(ok ? null : new Error('Invalid image type'), ok);
-  },
+  fileFilter: imageMimeFilter,
 });
+
+/** Product/variant create with per-variant images (max 4 images × 8 variants). */
+const productMultipartUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024, files: 32 },
+  fileFilter: imageMimeFilter,
+}).any();
 
 router.use(requireAuth);
 
@@ -67,7 +77,15 @@ router.patch('/bulk', authorizeRoles(...WRITE_ROLES), bulkUpdateValidator, valid
 router.delete('/bulk', authorizeRoles(...WRITE_ROLES), bulkDeleteValidator, validateRequest, ProductController.bulkDelete);
 
 router.get('/:productId', authorizeRoles(...READ_ROLES), productIdParam, validateRequest, ProductController.getById);
-router.post('/', authorizeRoles(...WRITE_ROLES), createProductValidator, validateRequest, ProductController.create);
+router.post(
+  '/',
+  authorizeRoles(...WRITE_ROLES),
+  productMultipartUpload,
+  middlewareParseProductJsonBody,
+  createProductValidator,
+  validateRequest,
+  ProductController.create
+);
 router.patch(
   '/:productId',
   authorizeRoles(...WRITE_ROLES),
@@ -82,6 +100,8 @@ router.post(
   '/:productId/variants',
   authorizeRoles(...WRITE_ROLES),
   productIdParam,
+  productMultipartUpload,
+  middlewareParseProductJsonBody,
   createVariantValidator,
   validateRequest,
   ProductController.createVariant

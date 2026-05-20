@@ -20,7 +20,8 @@ const READ_ROLES = [
   'BILLING_STAFF',
 ];
 
-const WRITE_ROLES = ['SUPER_ADMIN', 'WH_MANAGER'];
+/** Categories are global masters — only platform admin may create/update/delete. */
+const WRITE_ROLES = ['SUPER_ADMIN'];
 
 router.use(requireAuth);
 

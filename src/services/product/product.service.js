@@ -17,6 +17,7 @@ const {
 } = require('../../utils/cache.utils');
 const MediaService = require('../storage/media.service');
 const { generateSystemBarcode } = require('../../utils/barcode.utils');
+const { assertVariantImageUploads } = require('../../utils/productMultipart.utils');
 
 const VARIANT_INCLUDE = {
   orderBy: [{ sort_order: 'asc' }, { created_at: 'asc' }],
@@ -662,8 +663,105 @@ const buildProductWhere = (query = {}, user) => {
   return where;
 };
 
+const persistVariantImages = async ({ productId, variantId, warehouseId, files, startSortOrder = 0 }) => {
+  const incoming = Array.isArray(files) ? files.filter(Boolean) : [];
+  if (!incoming.length) return [];
+
+  const existingCount = await prisma.productVariantImage.count({ where: { variant_id: variantId } });
+  if (existingCount + incoming.length > MediaService.MAX_IMAGES_PER_VARIANT) {
+    throw new AppError(
+      `A variant can have at most ${MediaService.MAX_IMAGES_PER_VARIANT} images`,
+      400,
+      'MAX_VARIANT_IMAGES_EXCEEDED',
+      { max: MediaService.MAX_IMAGES_PER_VARIANT, existing: existingCount, requested: incoming.length }
+    );
+  }
+
+  const uploads = [];
+  for (const file of incoming) {
+    uploads.push(
+      await MediaService.uploadVariantImage({
+        warehouseId,
+        productId,
+        variantId,
+        file,
+      })
+    );
+  }
+
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const rows = [];
+      for (let i = 0; i < uploads.length; i += 1) {
+        const row = await tx.productVariantImage.create({
+          data: {
+            variant_id: variantId,
+            url: uploads[i].url,
+            storage_key: uploads[i].storage_key,
+            storage_provider: uploads[i].storage_provider,
+            sort_order: startSortOrder + i,
+          },
+          select: {
+            image_id: true,
+            url: true,
+            storage_key: true,
+            storage_provider: true,
+            alt_text: true,
+            sort_order: true,
+          },
+        });
+        rows.push(row);
+      }
+      return rows;
+    });
+  } catch (error) {
+    await Promise.all(
+      uploads.map((u) => MediaService.deleteStoredImage(u.storage_provider, u.storage_key))
+    );
+    throw error;
+  }
+};
+
+const applyVariantImagesOnCreate = async (productId, warehouseId, data, variantImagesByIndex) => {
+  const variants = await prisma.productVariant.findMany({
+    where: { product_id: productId },
+    orderBy: [{ sort_order: 'asc' }, { created_at: 'asc' }],
+    select: { variant_id: true },
+  });
+
+  const stagedForRollback = [];
+
+  try {
+    for (let index = 0; index < variants.length; index += 1) {
+      const files = variantImagesByIndex.get(index);
+      if (!files?.length) continue;
+
+      const rows = await persistVariantImages({
+        productId,
+        variantId: variants[index].variant_id,
+        warehouseId,
+        files,
+        startSortOrder: 0,
+      });
+      stagedForRollback.push(...rows);
+    }
+  } catch (error) {
+    await Promise.all(
+      stagedForRollback.map((row) =>
+        MediaService.deleteStoredImage(row.storage_provider, row.storage_key)
+      )
+    );
+    if (stagedForRollback.length) {
+      await prisma.productVariantImage.deleteMany({
+        where: { image_id: { in: stagedForRollback.map((r) => r.image_id) } },
+      });
+    }
+    throw error;
+  }
+};
+
 const ProductService = {
-  async createProduct(data, user) {
+  async createProduct(data, user, { variantImagesByIndex } = {}) {
     const warehouseId = resolveWarehouseId(user, data.warehouse_id);
     await assertWarehouseActive(warehouseId);
     await assertVendorActive(data.primary_vendor_id);
@@ -674,6 +772,9 @@ const ProductService = {
     if (!data.name?.trim()) throw new AppError('name is required', 400, 'PRODUCT_NAME_REQUIRED');
 
     assertNoStockOnListing(data);
+
+    const imageMap = variantImagesByIndex instanceof Map ? variantImagesByIndex : new Map();
+    assertVariantImageUploads(data, imageMap);
 
     const existingBase = await prisma.product.findFirst({
       where: { warehouse_id: warehouseId, product_code: baseProductCode },
@@ -726,11 +827,15 @@ const ProductService = {
         });
       }
 
-      return created.product_id;
+      return { product_id: created.product_id, warehouse_id: created.warehouse_id };
     });
 
-    await invalidateProductCaches(product, warehouseId);
-    return attachListingMeta(await fetchProductDetail(product));
+    if (imageMap.size > 0) {
+      await applyVariantImagesOnCreate(product.product_id, product.warehouse_id, data, imageMap);
+    }
+
+    await invalidateProductCaches(product.product_id, product.warehouse_id);
+    return attachListingMeta(await fetchProductDetail(product.product_id));
   },
 
   async listProducts(query = {}, user) {
@@ -953,7 +1058,7 @@ const ProductService = {
     return attachListingMeta(await fetchProductDetail(productId));
   },
 
-  async createVariant(productId, data, user) {
+  async createVariant(productId, data, user, { variantImagesByIndex } = {}) {
     const existing = await prisma.product.findUnique({
       where: { product_id: productId },
       select: {
@@ -977,7 +1082,10 @@ const ProductService = {
     const variantOwnPrices = extractVariantPrices(data, 'New variant', { required: true });
     const variantOwnShipping = extractVariantShipping(data, 'New variant', { required: true });
 
-    await prisma.$transaction(async (tx) => {
+    const imageMap = variantImagesByIndex instanceof Map ? variantImagesByIndex : new Map();
+    assertVariantImageUploads({ variants: [{}] }, imageMap);
+
+    const newVariantId = await prisma.$transaction(async (tx) => {
       const serial = await getNextVariantSerial(tx, productId, existing.product_code);
       const sanitized = await buildVariantInput(tx, data, {
         baseProductCode: existing.product_code,
@@ -993,14 +1101,27 @@ const ProductService = {
         data: { is_default: false },
       });
 
-      await tx.productVariant.create({
+      const created = await tx.productVariant.create({
         data: {
           product_id: productId,
           ...sanitized,
           is_default: false,
         },
+        select: { variant_id: true },
       });
+
+      return created.variant_id;
     });
+
+    const newVariantFiles = imageMap.get(0) || imageMap.get('0') || [];
+    if (newVariantFiles.length) {
+      await persistVariantImages({
+        productId,
+        variantId: newVariantId,
+        warehouseId: existing.warehouse_id,
+        files: newVariantFiles,
+      });
+    }
 
     await invalidateProductCaches(productId, existing.warehouse_id);
     return attachListingMeta(await fetchProductDetail(productId));
@@ -1051,51 +1172,12 @@ const ProductService = {
     const incoming = Array.isArray(files) ? files : [];
     if (!incoming.length) throw new AppError('At least one image file is required', 400, 'IMAGE_REQUIRED');
 
-    const existingCount = variant._count.images;
-    if (existingCount + incoming.length > MediaService.MAX_IMAGES_PER_VARIANT) {
-      throw new AppError(
-        `A variant can have at most ${MediaService.MAX_IMAGES_PER_VARIANT} images`,
-        400,
-        'MAX_VARIANT_IMAGES_EXCEEDED',
-        { max: MediaService.MAX_IMAGES_PER_VARIANT, existing: existingCount }
-      );
-    }
-
-    const uploads = [];
-    for (const file of incoming) {
-      uploads.push(
-        await MediaService.uploadVariantImage({
-          warehouseId: product.warehouse_id,
-          productId,
-          variantId,
-          file,
-        })
-      );
-    }
-
-    const created = await prisma.$transaction(async (tx) => {
-      const rows = [];
-      for (let i = 0; i < uploads.length; i += 1) {
-        const row = await tx.productVariantImage.create({
-          data: {
-            variant_id: variantId,
-            url: uploads[i].url,
-            storage_key: uploads[i].storage_key,
-            storage_provider: uploads[i].storage_provider,
-            sort_order: existingCount + i,
-          },
-          select: {
-            image_id: true,
-            url: true,
-            storage_key: true,
-            storage_provider: true,
-            alt_text: true,
-            sort_order: true,
-          },
-        });
-        rows.push(row);
-      }
-      return rows;
+    const created = await persistVariantImages({
+      productId,
+      variantId,
+      warehouseId: product.warehouse_id,
+      files: incoming,
+      startSortOrder: variant._count.images,
     });
 
     await invalidateProductCaches(productId, product.warehouse_id);
