@@ -296,7 +296,6 @@ model Product {
   gst_type    GSTType
 
   unit_of_measure String
-  weight_per_unit Float?
 
   category_id     String
   sub_category_id String?
@@ -355,6 +354,12 @@ model ProductVariant {
   retail_price    Float
   online_price    Float?
   purchase_cost   Float?
+
+  /// Shipping (ecomm sync) — per variant, not product-level.
+  weight Float?
+  length Float?
+  width  Float?
+  height Float?
 
   low_stock_threshold Int     @default(10)
   sort_order          Int     @default(0)

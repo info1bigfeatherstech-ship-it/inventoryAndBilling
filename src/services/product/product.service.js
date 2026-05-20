@@ -33,6 +33,10 @@ const VARIANT_INCLUDE = {
     retail_price: true,
     online_price: true,
     purchase_cost: true,
+    weight: true,
+    length: true,
+    width: true,
+    height: true,
     low_stock_threshold: true,
     sort_order: true,
     is_default: true,
@@ -100,6 +104,10 @@ const PRODUCT_LIST_SELECT = {
       system_barcode: true,
       attributes: true,
       ...PRODUCT_PRICE_SELECT,
+      weight: true,
+      length: true,
+      width: true,
+      height: true,
       is_default: true,
       sort_order: true,
       images: { orderBy: { sort_order: 'asc' }, take: 1, select: { url: true } },
@@ -120,7 +128,6 @@ const PRODUCT_DETAIL_SELECT = {
   gst_percent: true,
   gst_type: true,
   unit_of_measure: true,
-  weight_per_unit: true,
   category_id: true,
   sub_category_id: true,
   ...PRODUCT_PRICE_SELECT,
@@ -213,6 +220,99 @@ const extractVariantPrices = (variant, indexLabel, { required = false } = {}) =>
   return prices;
 };
 
+const SHIPPING_KEYS = ['weight', 'length', 'width', 'height'];
+
+const shippingFieldPresent = (obj, key) =>
+  obj[key] !== null && obj[key] !== undefined && obj[key] !== '';
+
+const parseShippingInput = (input = {}) => {
+  const nested = input.shipping;
+  const dims = input.dimensions || nested?.dimensions || {};
+
+  const pick = (...sources) => {
+    for (const src of sources) {
+      if (src == null) continue;
+      if (shippingFieldPresent(src, 'weight')) return Number(src.weight);
+      if (shippingFieldPresent(src, 'weight_per_unit')) return Number(src.weight_per_unit);
+    }
+    return null;
+  };
+
+  const pickDim = (key) => {
+    if (shippingFieldPresent(input, key)) return Number(input[key]);
+    if (shippingFieldPresent(dims, key)) return Number(dims[key]);
+    if (nested?.dimensions && shippingFieldPresent(nested.dimensions, key)) return Number(nested.dimensions[key]);
+    return null;
+  };
+
+  return {
+    weight: pick(input, nested),
+    length: pickDim('length'),
+    width: pickDim('width'),
+    height: pickDim('height'),
+  };
+};
+
+const validateVariantShipping = (shipping, indexLabel = '') => {
+  const prefix = indexLabel ? `${indexLabel}: ` : '';
+  for (const key of SHIPPING_KEYS) {
+    if (shipping[key] != null && shipping[key] < 0) {
+      throw new AppError(`${prefix}${key} cannot be negative`, 400, 'INVALID_VARIANT_SHIPPING');
+    }
+  }
+};
+
+const extractVariantShipping = (variant, indexLabel, { required = false } = {}) => {
+  const shipping = parseShippingInput(variant);
+
+  if (required) {
+    for (const key of SHIPPING_KEYS) {
+      if (shipping[key] == null) {
+        throw new AppError(
+          `${indexLabel}: ${key} is required — each variant has its own weight and dimensions for shipping.`,
+          400,
+          'VARIANT_SHIPPING_REQUIRED'
+        );
+      }
+    }
+  }
+
+  validateVariantShipping(shipping, indexLabel);
+  return shipping;
+};
+
+const resolveCreateShippingContext = (data) => {
+  const rawVariants = Array.isArray(data.variants) ? data.variants : [];
+
+  if (rawVariants.length >= 1) {
+    return {
+      eachVariantOwnShipping: true,
+      variantOnlyShipping: rawVariants.map((v, i) =>
+        extractVariantShipping(v, `Variant ${i + 1}`, { required: true })
+      ),
+      productShipping: null,
+    };
+  }
+
+  return {
+    eachVariantOwnShipping: false,
+    variantOnlyShipping: null,
+    productShipping: extractVariantShipping(data, 'Product', { required: false }),
+  };
+};
+
+const mergeVariantShipping = (productShipping, variantInput = {}) => {
+  const parsed = parseShippingInput(variantInput);
+  const base = productShipping || { weight: null, length: null, width: null, height: null };
+
+  return {
+    weight: parsed.weight ?? base.weight,
+    length: parsed.length ?? base.length,
+    width: parsed.width ?? base.width,
+    height: parsed.height ?? base.height,
+  };
+};
+
 /** Product-level defaults for DB; each variant still stores its own four prices. */
 const resolveCreatePricingContext = (data) => {
   const rawVariants = Array.isArray(data.variants) ? data.variants : [];
@@ -264,11 +364,27 @@ const getNextVariantSerial = async (tx, productId, baseProductCode) => {
   return maxSerial + 1;
 };
 
+const formatVariantShipping = (variant) => {
+  if (!variant) return variant;
+  return {
+    ...variant,
+    shipping: {
+      weight: variant.weight ?? 0,
+      dimensions: {
+        length: variant.length ?? 0,
+        width: variant.width ?? 0,
+        height: variant.height ?? 0,
+      },
+    },
+  };
+};
+
 const attachListingMeta = (product) => {
   if (!product) return product;
-  const variants = product.variants || [];
+  const variants = (product.variants || []).map(formatVariantShipping);
   return {
     ...product,
+    variants,
     variant_count: variants.length,
     is_single_variant: variants.length <= 1,
     /** variant[0] is the primary sellable unit when only one exists */
@@ -405,11 +521,20 @@ const assertVariantUsesProductBase = (variant, baseProductCode, indexLabel) => {
   }
 };
 
-const buildVariantInput = async (tx, variant, { baseProductCode, serial, productPrices, variantOnlyPrice, indexLabel }) => {
+const buildVariantInput = async (tx, variant, {
+  baseProductCode,
+  serial,
+  productPrices,
+  variantOnlyPrice,
+  productShipping,
+  variantOnlyShipping,
+  indexLabel,
+}) => {
   assertVariantUsesProductBase(variant, baseProductCode, indexLabel);
 
   const variantCode = buildVariantCode(baseProductCode, serial);
   const prices = variantOnlyPrice ?? mergeVariantPrices(productPrices, variant);
+  const shipping = variantOnlyShipping ?? mergeVariantShipping(productShipping, variant);
 
   let systemBarcode = variant.system_barcode ? normalizeCode(variant.system_barcode) : null;
   if (!systemBarcode) {
@@ -423,6 +548,7 @@ const buildVariantInput = async (tx, variant, { baseProductCode, serial, product
     vendor_barcode: variant.vendor_barcode ? normalizeCode(variant.vendor_barcode) : null,
     attributes: parseAttributes(variant.attributes),
     ...prices,
+    ...shipping,
     low_stock_threshold: variant.low_stock_threshold != null ? Number(variant.low_stock_threshold) : 10,
     sort_order: serial - 1,
     is_default: serial === 1,
@@ -434,8 +560,9 @@ const buildVariantInput = async (tx, variant, { baseProductCode, serial, product
   return payload;
 };
 
-const normalizeVariantsForCreate = async (tx, data, baseProductCode, pricingContext) => {
+const normalizeVariantsForCreate = async (tx, data, baseProductCode, pricingContext, shippingContext) => {
   const { productPrices, eachVariantOwnPrices, variantOnlyPrices } = pricingContext;
+  const { eachVariantOwnShipping, variantOnlyShipping, productShipping } = shippingContext;
   const rawList = Array.isArray(data.variants) ? data.variants : [];
 
   const list =
@@ -446,6 +573,13 @@ const normalizeVariantsForCreate = async (tx, data, baseProductCode, pricingCont
             system_barcode: data.system_barcode,
             vendor_barcode: data.vendor_barcode,
             attributes: data.attributes,
+            weight: data.weight,
+            length: data.length,
+            width: data.width,
+            height: data.height,
+            weight_per_unit: data.weight_per_unit,
+            shipping: data.shipping,
+            dimensions: data.dimensions,
             low_stock_threshold: data.low_stock_threshold,
             remarks: data.remarks,
           },
@@ -459,6 +593,8 @@ const normalizeVariantsForCreate = async (tx, data, baseProductCode, pricingCont
         serial: index + 1,
         productPrices,
         variantOnlyPrice: eachVariantOwnPrices ? variantOnlyPrices[index] : null,
+        productShipping,
+        variantOnlyShipping: eachVariantOwnShipping ? variantOnlyShipping[index] : null,
         indexLabel: `Variant ${index + 1}`,
       })
     );
@@ -552,6 +688,7 @@ const ProductService = {
     }
 
     const pricingContext = resolveCreatePricingContext(data);
+    const shippingContext = resolveCreateShippingContext(data);
     const { productPrices } = pricingContext;
 
     const productPayload = {
@@ -566,7 +703,6 @@ const ProductService = {
       gst_percent: Number(data.gst_percent),
       gst_type: data.gst_type,
       unit_of_measure: String(data.unit_of_measure).trim(),
-      weight_per_unit: data.weight_per_unit != null ? Number(data.weight_per_unit) : null,
       category_id: data.category_id,
       sub_category_id: data.sub_category_id ?? null,
       remarks: data.remarks ?? null,
@@ -579,7 +715,7 @@ const ProductService = {
         select: { product_id: true, warehouse_id: true },
       });
 
-      const variants = await normalizeVariantsForCreate(tx, data, baseProductCode, pricingContext);
+      const variants = await normalizeVariantsForCreate(tx, data, baseProductCode, pricingContext, shippingContext);
 
       for (const v of variants) {
         await tx.productVariant.create({
@@ -658,7 +794,6 @@ const ProductService = {
       'gst_percent',
       'gst_type',
       'unit_of_measure',
-      'weight_per_unit',
       'category_id',
       'sub_category_id',
       'mrp',
@@ -762,6 +897,10 @@ const ProductService = {
       'retail_price',
       'online_price',
       'purchase_cost',
+      'weight',
+      'length',
+      'width',
+      'height',
       'low_stock_threshold',
       'sort_order',
       'is_default',
@@ -782,6 +921,19 @@ const ProductService = {
     }
     if (variantPayload.vendor_barcode) variantPayload.vendor_barcode = normalizeCode(variantPayload.vendor_barcode);
     if (variantPayload.attributes !== undefined) variantPayload.attributes = parseAttributes(variantPayload.attributes);
+
+    const hasShippingField = ['weight', 'length', 'width', 'height'].some((k) =>
+      Object.prototype.hasOwnProperty.call(variantPayload, k)
+    );
+    if (hasShippingField) {
+      const merged = mergeVariantShipping(current, variantPayload);
+      for (const key of ['weight', 'length', 'width', 'height']) {
+        if (Object.prototype.hasOwnProperty.call(variantPayload, key)) {
+          variantPayload[key] = merged[key];
+        }
+      }
+      validateVariantShipping(variantPayload);
+    }
 
     if (!Object.keys(variantPayload).length) {
       throw new AppError('No updatable variant fields provided', 400, 'EMPTY_UPDATE');
@@ -823,6 +975,7 @@ const ProductService = {
     assertNoStockOnListing(data);
 
     const variantOwnPrices = extractVariantPrices(data, 'New variant', { required: true });
+    const variantOwnShipping = extractVariantShipping(data, 'New variant', { required: true });
 
     await prisma.$transaction(async (tx) => {
       const serial = await getNextVariantSerial(tx, productId, existing.product_code);
@@ -831,6 +984,7 @@ const ProductService = {
         serial,
         productPrices: existing,
         variantOnlyPrice: variantOwnPrices,
+        variantOnlyShipping: variantOwnShipping,
         indexLabel: `Variant ${serial}`,
       });
 
@@ -1100,7 +1254,10 @@ const ProductService = {
             gst_percent: row.gst_percent,
             gst_type: row.gst_type,
             unit_of_measure: row.unit_of_measure,
-            weight_per_unit: row.weight_per_unit || null,
+            weight: row.weight || row.weight_per_unit || null,
+            length: row.length || null,
+            width: row.width || null,
+            height: row.height || null,
             category_id: row.category_id,
             sub_category_id: row.sub_category_id || null,
             remarks: row.remarks || null,
@@ -1120,6 +1277,10 @@ const ProductService = {
                     wholesale_price: row.variant_wholesale_price,
                     retail_price: row.variant_retail_price,
                     online_price: row.variant_online_price || null,
+                    weight: row.variant_weight || null,
+                    length: row.variant_length || null,
+                    width: row.variant_width || null,
+                    height: row.variant_height || null,
                   },
                 ]
               : undefined,

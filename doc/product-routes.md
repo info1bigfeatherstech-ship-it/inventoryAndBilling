@@ -19,6 +19,12 @@ Warehouse-scoped products with serial variant codes and four price channels.
 - **Multiple variants:** set **all four prices on each object** in `variants[]` — they are not copied from each other.
 - Product row keeps variant-1 prices as catalog defaults only.
 
+**Shipping (per variant, for ecomm sync):** `weight`, `length`, `width`, `height` (or nested `shipping: { weight, dimensions: { length, width, height } }`)
+
+- **Not stored on product** — each variant/SKU has its own weight and box dimensions (e.g. size S vs XL).
+- Response also includes `shipping` object on each variant (same shape as ecomm Mongoose model).
+- **Multiple variants:** required on every item in `variants[]`.
+
 ### Industry flow
 
 1. **List product** → master data + prices + **barcode generated** (print label)
@@ -97,21 +103,33 @@ Then: `POST /api/v1/product-stocks` with `variant_id`, `room_zone`, `rack_shelf`
       "mrp": 999,
       "wholesale_price": 700,
       "retail_price": 850,
-      "online_price": 799
+      "online_price": 799,
+      "weight": 0.25,
+      "length": 30,
+      "width": 20,
+      "height": 5
     },
     {
       "attributes": [{ "key": "Color", "value": "Blue" }],
       "mrp": 1099,
       "wholesale_price": 800,
       "retail_price": 949,
-      "online_price": 899
+      "online_price": 899,
+      "weight": 0.28,
+      "length": 32,
+      "width": 22,
+      "height": 6
     },
     {
       "attributes": [{ "key": "Color", "value": "Green" }],
       "mrp": 1049,
       "wholesale_price": 780,
       "retail_price": 999,
-      "online_price": 879
+      "online_price": 879,
+      "weight": 0.3,
+      "length": 34,
+      "width": 24,
+      "height": 7
     }
   ]
 }
@@ -154,6 +172,7 @@ Each product includes: `variant_count`, `is_single_variant`, `primary_variant` (
 | `PRODUCT_CODE_ALREADY_EXISTS` | 409 — duplicate base in warehouse |
 | `VARIANT_BASE_CODE_MISMATCH` | 400 — e.g. 8878 vs 9978 on same product |
 | `VARIANT_PRICES_REQUIRED` | 400 — missing price on a variant in `variants[]` |
+| `VARIANT_SHIPPING_REQUIRED` | 400 — missing weight/dimension on a variant in `variants[]` |
 | `STOCK_NOT_ALLOWED_ON_LISTING` | 400 — use product-stocks |
 | `VARIANT_CODE_IMMUTABLE` | 400 |
 | `MAX_VARIANT_IMAGES_EXCEEDED` | 400 |
