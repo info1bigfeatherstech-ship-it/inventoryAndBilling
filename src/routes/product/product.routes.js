@@ -20,6 +20,14 @@ const {
 } = require('../../validators/product/product.validators');
 const { middlewareParseProductJsonBody } = require('../../utils/productMultipart.utils');
 
+/** Multer must forward errors to the global handler (clear 400 messages). */
+const runUpload = (uploadMiddleware) => (req, res, next) => {
+  uploadMiddleware(req, res, (err) => {
+    if (err) return next(err);
+    next();
+  });
+};
+
 const READ_ROLES = [
   'SUPER_ADMIN',
   'WH_MANAGER',
@@ -80,7 +88,7 @@ router.get('/:productId', authorizeRoles(...READ_ROLES), productIdParam, validat
 router.post(
   '/',
   authorizeRoles(...WRITE_ROLES),
-  productMultipartUpload,
+  runUpload(productMultipartUpload),
   middlewareParseProductJsonBody,
   createProductValidator,
   validateRequest,
@@ -100,7 +108,7 @@ router.post(
   '/:productId/variants',
   authorizeRoles(...WRITE_ROLES),
   productIdParam,
-  productMultipartUpload,
+  runUpload(productMultipartUpload),
   middlewareParseProductJsonBody,
   createVariantValidator,
   validateRequest,
@@ -126,7 +134,7 @@ router.post(
   authorizeRoles(...WRITE_ROLES),
   productIdParam,
   variantIdParam,
-  imageUpload.array('images', 4),
+  runUpload(imageUpload.array('images', 4)),
   validateRequest,
   ProductController.uploadVariantImages
 );
@@ -135,7 +143,7 @@ router.put(
   authorizeRoles(...WRITE_ROLES),
   productIdParam,
   variantIdParam,
-  imageUpload.array('images', 4),
+  runUpload(imageUpload.array('images', 4)),
   syncVariantImagesValidator,
   validateRequest,
   ProductController.syncVariantImages

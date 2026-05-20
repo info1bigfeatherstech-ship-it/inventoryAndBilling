@@ -27,6 +27,25 @@ R2_PUBLIC_BASE_URL=https://cdn.example.com
 
 Only the active provider is used for upload/delete. Each image row stores `storage_provider` so old files delete from the correct cloud.
 
+### Cloudinary troubleshooting
+
+If uploads return `CLOUDINARY_AUTH_FAILED` / "Invalid Signature":
+
+1. Open [Cloudinary Console](https://console.cloudinary.com/) → **Settings → API Keys**.
+2. Copy **Cloud name**, **API Key**, and **API Secret** into `.env` with **no quotes** and no trailing spaces.
+3. Restart the API server after changing `.env`.
+4. Ensure the key is enabled and belongs to the same cloud as `CLOUDINARY_CLOUD_NAME`.
+
+Example `.env`:
+
+```env
+CLOUDINARY_CLOUD_NAME=your_cloud
+CLOUDINARY_API_KEY=123456789012345
+CLOUDINARY_API_SECRET=your_secret_without_quotes
+```
+
+API responses use a short `message` + `code` (no stack trace). Check server logs for `requestId` if you need more context.
+
 ## Redis (product detail cache)
 
 ```env

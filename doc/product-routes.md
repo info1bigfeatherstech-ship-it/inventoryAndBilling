@@ -367,6 +367,9 @@ Full variant list with all `images[]`, optional `stocks[]` summary.
 | `INVALID_PRODUCT_DATA_JSON` | 400 | Invalid `data` field in multipart |
 | `IMAGE_REQUIRED` | 400 | Append images with empty files |
 | `DUPLICATE_BARCODE` | 409 | Same `system_barcode` twice in request |
+| `CLOUDINARY_AUTH_FAILED` | 502 | Wrong Cloudinary secret/key — fix `.env` |
+| `CLOUDINARY_UPLOAD_FAILED` | 502 | Other Cloudinary upload error |
+| `CLOUDINARY_MISCONFIGURED` | 503 | Missing Cloudinary env vars |
 | `VALIDATION_ERROR` | 400 | See `details.fields` |
 | `CATEGORY_NOT_FOUND` / `CATEGORY_INACTIVE` | 404 / 400 | Bad `category_id` |
 

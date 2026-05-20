@@ -2,18 +2,8 @@
 const logger = require('../utils/logger.utils');
 const config = require('../config/index.config');
 const { Prisma } = require('@prisma/client');
-
-// Custom error class
-class AppError extends Error {
-  constructor(message, statusCode, code = null, details = null) {
-    super(message);
-    this.statusCode = statusCode;
-    this.code = code;
-    this.details = details;
-    this.isOperational = true;
-    Error.captureStackTrace(this, this.constructor);
-  }
-}
+const { AppError } = require('../errors/AppError');
+const { normalizeExternalError } = require('../utils/externalError.utils');
 
 // 404 handler
 const notFound = (req, res, next) => {
@@ -69,6 +59,11 @@ const errorHandler = (err, req, res, next) => {
     error = new AppError('Access token expired', 401, 'TOKEN_EXPIRED');
   }
 
+  const externalError = normalizeExternalError(err);
+  if (externalError) {
+    error = externalError;
+  }
+
   // Unknown errors should still be treated as operational response
   if (!(error instanceof AppError)) {
     error = new AppError(error.message || 'Internal server error', error.statusCode || 500, error.code || 'INTERNAL_ERROR');
@@ -78,28 +73,38 @@ const errorHandler = (err, req, res, next) => {
     }
   }
 
-  // Log error
-  logger.error(error.message, {
-    requestId: req.id,
-    url: req.url,
-    method: req.method,
-    stack: error.stack,
-    ...(error.isOperational ? {} : { critical: true }),
-  });
-  
-  // Send response
   const statusCode = error.statusCode || 500;
-  const message = config.isProduction && statusCode === 500
-    ? 'Internal server error'
-    : error.message;
-  
+  const isServerFault = statusCode >= 500 && !error.isOperational;
+
+  // Log: concise for expected errors; stack only in debug for unexpected faults
+  const logPayload = {
+    requestId: req.id,
+    method: req.method,
+    url: req.originalUrl || req.url,
+    statusCode,
+    code: error.code || null,
+  };
+
+  if (isServerFault && config.LOG_LEVEL === 'debug') {
+    logPayload.stack = error.stack;
+  } else if (!error.isOperational) {
+    logPayload.stack = error.stack;
+    logPayload.critical = true;
+  }
+
+  logger.error(error.message, logPayload);
+
+  const message =
+    config.isProduction && isServerFault
+      ? 'Internal server error'
+      : error.message;
+
   res.status(statusCode).json({
     success: false,
     message,
     code: error.code || null,
     ...(error.details ? { details: error.details } : {}),
     requestId: req.id,
-    ...(config.isDevelopment && { stack: error.stack }),
   });
 };
 

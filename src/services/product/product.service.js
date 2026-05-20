@@ -163,19 +163,31 @@ const parseVariantSerial = (variantCode, baseProductCode) => {
   return Number.isFinite(n) && n > 0 ? n : null;
 };
 
+// const sanitizeProductPrices = (data) => {
+//   const prices = {
+//     mrp: Number(data.mrp),
+//     wholesale_price: Number(data.wholesale_price),
+//     retail_price: Number(data.retail_price),
+//     online_price:
+//       data.online_price === null || data.online_price === undefined || data.online_price === ''
+//         ? null
+//         : Number(data.online_price),
+//     purchase_cost:
+//       data.purchase_cost === null || data.purchase_cost === undefined || data.purchase_cost === ''
+//         ? null
+//         : Number(data.purchase_cost),
+//   };
+
+//   validateVariantPricing(prices, 'Product');
+//   return prices;
+// };
 const sanitizeProductPrices = (data) => {
   const prices = {
-    mrp: Number(data.mrp),
-    wholesale_price: Number(data.wholesale_price),
-    retail_price: Number(data.retail_price),
-    online_price:
-      data.online_price === null || data.online_price === undefined || data.online_price === ''
-        ? null
-        : Number(data.online_price),
-    purchase_cost:
-      data.purchase_cost === null || data.purchase_cost === undefined || data.purchase_cost === ''
-        ? null
-        : Number(data.purchase_cost),
+    mrp: data.mrp ? Number(data.mrp) : 0,  // ✅ Default to 0 instead of NaN
+    wholesale_price: data.wholesale_price ? Number(data.wholesale_price) : 0,
+    retail_price: data.retail_price ? Number(data.retail_price) : 0,
+    online_price: data.online_price ? Number(data.online_price) : null,
+    purchase_cost: data.purchase_cost ? Number(data.purchase_cost) : null,
   };
 
   validateVariantPricing(prices, 'Product');
@@ -791,24 +803,33 @@ const ProductService = {
     const pricingContext = resolveCreatePricingContext(data);
     const shippingContext = resolveCreateShippingContext(data);
     const { productPrices } = pricingContext;
-
+   
+   
     const productPayload = {
-      warehouse_id: warehouseId,
+      // Relations (connect)
+      warehouse: { connect: { warehouse_id: warehouseId } },
+      primary_vendor: { connect: { vendor_id: data.primary_vendor_id } },
+      category: { connect: { category_id: data.category_id } },
+      
+      // Direct fields
       product_code: baseProductCode,
       name: String(data.name).trim(),
       description: data.description ?? null,
       title: data.title ?? null,
       brand_name: data.brand_name ?? null,
-      primary_vendor_id: data.primary_vendor_id,
       hsn_code: normalizeCode(data.hsn_code),
       gst_percent: Number(data.gst_percent),
       gst_type: data.gst_type,
       unit_of_measure: String(data.unit_of_measure).trim(),
-      category_id: data.category_id,
-      sub_category_id: data.sub_category_id ?? null,
       remarks: data.remarks ?? null,
       ...productPrices,
     };
+    
+    // ⭐ Only add sub_category if provided (not null)
+    if (data.sub_category_id) {
+      productPayload.sub_category = { connect: { category_id: data.sub_category_id } };
+    }
+
 
     const product = await prisma.$transaction(async (tx) => {
       const created = await tx.product.create({

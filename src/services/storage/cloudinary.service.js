@@ -1,28 +1,35 @@
 const { v2: cloudinary } = require('cloudinary');
 const config = require('../../config/index.config');
 const { AppError } = require('../../middlewares/error.middleware');
+const { mapCloudinaryError } = require('../../utils/externalError.utils');
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 
 let configured = false;
 
+const trimEnv = (value) => String(value || '').trim().replace(/^['"]|['"]$/g, '');
+
 const ensureConfigured = () => {
   if (configured) return;
 
+  const cloudName = trimEnv(config.CLOUDINARY_CLOUD_NAME);
+  const apiKey = trimEnv(config.CLOUDINARY_API_KEY);
+  const apiSecret = trimEnv(config.CLOUDINARY_API_SECRET);
+
   const missing = [];
-  if (!config.CLOUDINARY_CLOUD_NAME) missing.push('CLOUDINARY_CLOUD_NAME');
-  if (!config.CLOUDINARY_API_KEY) missing.push('CLOUDINARY_API_KEY');
-  if (!config.CLOUDINARY_API_SECRET) missing.push('CLOUDINARY_API_SECRET');
+  if (!cloudName) missing.push('CLOUDINARY_CLOUD_NAME');
+  if (!apiKey) missing.push('CLOUDINARY_API_KEY');
+  if (!apiSecret) missing.push('CLOUDINARY_API_SECRET');
 
   if (missing.length) {
     throw new AppError(`Cloudinary is not configured: ${missing.join(', ')}`, 503, 'CLOUDINARY_MISCONFIGURED');
   }
 
   cloudinary.config({
-    cloud_name: config.CLOUDINARY_CLOUD_NAME,
-    api_key: config.CLOUDINARY_API_KEY,
-    api_secret: config.CLOUDINARY_API_SECRET,
+    cloud_name: cloudName,
+    api_key: apiKey,
+    api_secret: apiSecret,
     secure: true,
   });
 
@@ -40,7 +47,7 @@ const validateFile = (file) => {
 };
 
 const buildFolder = ({ warehouseId, productId, variantId }) =>
-  `${config.CLOUDINARY_FOLDER}/wh-${warehouseId}/p-${productId}/v-${variantId}`;
+  `${trimEnv(config.CLOUDINARY_FOLDER) || 'vyaapar/products'}/wh-${warehouseId}/p-${productId}/v-${variantId}`;
 
 const uploadVariantImage = async ({ warehouseId, productId, variantId, file }) => {
   validateFile(file);
@@ -48,27 +55,23 @@ const uploadVariantImage = async ({ warehouseId, productId, variantId, file }) =
 
   const folder = buildFolder({ warehouseId, productId, variantId });
 
-  const result = await new Promise((resolve, reject) => {
-    const stream = cloudinary.uploader.upload_stream(
+  try {
+    const result = await cloudinary.uploader.upload(
+      `data:${file.mimetype};base64,${file.buffer.toString('base64')}`,
       {
         folder,
         resource_type: 'image',
-        use_filename: true,
-        unique_filename: true,
-      },
-      (error, uploaded) => {
-        if (error) return reject(error);
-        return resolve(uploaded);
       }
     );
-    stream.end(file.buffer);
-  });
 
-  return {
-    url: result.secure_url,
-    storage_key: result.public_id,
-    storage_provider: 'CLOUDINARY',
-  };
+    return {
+      url: result.secure_url,
+      storage_key: result.public_id,
+      storage_provider: 'CLOUDINARY',
+    };
+  } catch (err) {
+    throw mapCloudinaryError(err);
+  }
 };
 
 const deleteObject = async (publicId) => {
