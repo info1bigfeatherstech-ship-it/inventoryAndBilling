@@ -9,6 +9,8 @@ const warehouseRoutes = require('./warehouse/warehouse.routes');
 const userRoutes = require('./user/user.routes');
 const inwardRoutes = require('./inward/inward.routes');
 const categoryRoutes = require('./category/category.routes');
+const productRoutes = require('./product/product.routes');
+const productStockRoutes = require('./product/productStock.routes');
 
 // API info route
 router.get('/', (req, res) => {
@@ -25,7 +27,9 @@ router.get('/', (req, res) => {
       authLogout: 'POST /api/v1/auth/logout',
       authMe: 'GET /api/v1/auth/me',
       vendors: 'GET /api/v1/vendors',
-      products: 'GET /api/v1/products (coming soon)',
+      products: 'GET /api/v1/products',
+      productStocks: 'GET /api/v1/product-stocks',
+      warehousePeerStock: 'GET /api/v1/warehouses/peer-stock-summary',
       categories: 'GET /api/v1/categories',
       warehouses: 'GET /api/v1/warehouses',
       users: 'GET /api/v1/users',
@@ -53,6 +57,8 @@ v1Router.use('/warehouses', warehouseRoutes);
 v1Router.use('/users', userRoutes);
 v1Router.use('/inwards', inwardRoutes);
 v1Router.use('/categories', categoryRoutes);
+v1Router.use('/product-stocks', productStockRoutes);
+v1Router.use('/products', productRoutes);
 
 // Mount versioned routes
 router.use('/v1', v1Router);

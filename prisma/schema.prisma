@@ -95,6 +95,11 @@ enum InwardStatus {
   CANCELLED
 }
 
+enum MediaStorageProvider {
+  CLOUDINARY
+  CLOUDFLARE_R2
+}
+
 // ==================== VENDOR MASTER ====================
 
 model Vendor {
@@ -137,6 +142,7 @@ model Warehouse {
   is_active      Boolean @default(true)
   remarks        String?
 
+  products          Product[]
   product_stocks    ProductStock[]
   purchase_entries PurchaseEntry[]
   users           User[]
@@ -272,27 +278,16 @@ model Category {
   @@map("categories")
 }
 
-// ==================== PRODUCT MASTER ====================
+// ==================== PRODUCT MASTER (warehouse-scoped parent) ====================
 
 model Product {
-  product_id   String  @id @default(cuid())
-  product_code String  @unique
+  product_id   String @id @default(cuid())
+  warehouse_id String
+  product_code String
   name         String
   description  String?
   title        String?
-
-  image_filenames String?
-  brand_name      String?
-
-  system_barcode String  @unique
-  vendor_barcode String? @unique
-
-  mrp             Float
-  wholesale_price Float
-  retail_price    Float
-  online_price    Float?
-
-  purchase_cost Float?
+  brand_name   String?
 
   primary_vendor_id String
 
@@ -300,20 +295,28 @@ model Product {
   gst_percent Float
   gst_type    GSTType
 
-  unit_of_measure     String
-  low_stock_threshold Int    @default(10)
-  weight_per_unit     Float?
+  unit_of_measure String
+  weight_per_unit Float?
 
   category_id     String
   sub_category_id String?
 
+  /// Default prices shared by variants; each variant may override its own four prices.
+  mrp             Float
+  wholesale_price Float
+  retail_price    Float
+  online_price    Float?
+  purchase_cost   Float?
+
   is_active Boolean @default(true)
   remarks   String?
 
+  warehouse      Warehouse @relation(fields: [warehouse_id], references: [warehouse_id], onDelete: Restrict)
   primary_vendor Vendor    @relation(fields: [primary_vendor_id], references: [vendor_id])
   category       Category  @relation("ProductToCategory", fields: [category_id], references: [category_id])
   sub_category   Category? @relation("ProductToSubCategory", fields: [sub_category_id], references: [category_id])
 
+  variants       ProductVariant[]
   product_stocks ProductStock[]
   purchase_items PurchaseItem[]
   stock_ledgers  StockLedger[]
@@ -325,10 +328,69 @@ model Product {
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
+  @@unique([warehouse_id, product_code])
+  @@index([warehouse_id, is_active])
   @@index([primary_vendor_id])
   @@index([category_id])
   @@index([is_active])
   @@map("products")
+}
+
+/// Purchasable SKU — barcode and prices live on the variant.
+model ProductVariant {
+  variant_id   String @id @default(cuid())
+  product_id   String
+  sku          String
+  /// Serial suffix code: {product.product_code}-{n} e.g. 7834-1, 7834-2
+  variant_code String
+
+  system_barcode String  @unique
+  vendor_barcode String? @unique
+
+  /// [{ "key": "Color", "value": "Red" }]
+  attributes Json?
+
+  mrp             Float
+  wholesale_price Float
+  retail_price    Float
+  online_price    Float?
+  purchase_cost   Float?
+
+  low_stock_threshold Int     @default(10)
+  sort_order          Int     @default(0)
+  is_default          Boolean @default(false)
+  is_active           Boolean @default(true)
+  remarks             String?
+
+  product Product               @relation(fields: [product_id], references: [product_id], onDelete: Cascade)
+  images  ProductVariantImage[]
+  stocks  ProductStock[]
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@unique([product_id, sku])
+  @@unique([product_id, variant_code])
+  @@index([product_id, is_active])
+  @@map("product_variants")
+}
+
+model ProductVariantImage {
+  image_id         String               @id @default(cuid())
+  variant_id       String
+  url              String
+  storage_key      String
+  storage_provider MediaStorageProvider @default(CLOUDINARY)
+  alt_text         String?
+  sort_order       Int                  @default(0)
+
+  variant ProductVariant @relation(fields: [variant_id], references: [variant_id], onDelete: Cascade)
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([variant_id, sort_order])
+  @@map("product_variant_images")
 }
 
 // ==================== WAREHOUSE STOCK (location + batch) ====================
@@ -337,6 +399,7 @@ model Product {
 model ProductStock {
   stock_id String @id @default(cuid())
 
+  variant_id   String
   product_id   String
   warehouse_id String
 
@@ -356,6 +419,7 @@ model ProductStock {
 
   remarks String?
 
+  variant       ProductVariant @relation(fields: [variant_id], references: [variant_id], onDelete: Restrict)
   product       Product        @relation(fields: [product_id], references: [product_id])
   warehouse     Warehouse      @relation(fields: [warehouse_id], references: [warehouse_id])
   last_purchase PurchaseEntry? @relation("LastPurchase", fields: [last_purchase_id], references: [purchase_id])
@@ -363,8 +427,9 @@ model ProductStock {
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
-  @@unique([product_id, warehouse_id, batch_number])
+  @@unique([variant_id, warehouse_id, batch_number])
   @@index([warehouse_id, product_id])
+  @@index([warehouse_id, variant_id])
   @@map("product_stocks")
 }
 

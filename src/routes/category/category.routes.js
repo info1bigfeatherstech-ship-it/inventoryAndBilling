@@ -20,7 +20,7 @@ const READ_ROLES = [
   'BILLING_STAFF',
 ];
 
-const WRITE_ROLES = ['SUPER_ADMIN', 'WH_MANAGER', 'WH_STOCK_LISTER'];
+const WRITE_ROLES = ['SUPER_ADMIN', 'WH_MANAGER'];
 
 router.use(requireAuth);
 

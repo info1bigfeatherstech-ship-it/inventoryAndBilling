@@ -92,6 +92,32 @@ class Config {
     return String(process.env.ENABLE_REDIS_RATE_LIMIT || 'false').toLowerCase() === 'true';
   }
 
+  /**
+   * Active media backend: cloudinary | cloudflare_r2
+   * Falls back to cloudinary when unset (dev-friendly).
+   */
+  get MEDIA_PROVIDER() {
+    const raw = String(process.env.MEDIA_PROVIDER || 'cloudinary').trim().toLowerCase();
+    if (raw === 'r2' || raw === 'cloudflare' || raw === 'cloudflare_r2') return 'cloudflare_r2';
+    return 'cloudinary';
+  }
+
+  get CLOUDINARY_CLOUD_NAME() {
+    return process.env.CLOUDINARY_CLOUD_NAME || '';
+  }
+
+  get CLOUDINARY_API_KEY() {
+    return process.env.CLOUDINARY_API_KEY || '';
+  }
+
+  get CLOUDINARY_API_SECRET() {
+    return process.env.CLOUDINARY_API_SECRET || '';
+  }
+
+  get CLOUDINARY_FOLDER() {
+    return process.env.CLOUDINARY_FOLDER || 'vyaapar/products';
+  }
+
   // Cloudflare R2
   get R2_ENABLED() {
     return String(process.env.R2_ENABLED || 'false').toLowerCase() === 'true';
@@ -111,6 +137,14 @@ class Config {
 
   get R2_SECRET_ACCESS_KEY() {
     return process.env.R2_SECRET_ACCESS_KEY || '';
+  }
+
+  get R2_PUBLIC_BASE_URL() {
+    return process.env.R2_PUBLIC_BASE_URL || '';
+  }
+
+  get PRODUCT_CACHE_TTL_SEC() {
+    return parseInt(process.env.PRODUCT_CACHE_TTL_SEC, 10) || 300;
   }
 
   // JWT

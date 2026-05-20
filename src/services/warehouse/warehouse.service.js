@@ -1,6 +1,11 @@
 const prisma = require('../../utils/prisma.utils');
 const { AppError } = require('../../middlewares/error.middleware');
 const { parsePagination } = require('../../utils/pagination.utils');
+const {
+  assertCanReadWarehouse,
+  applyWarehouseListScope,
+  isWarehouseStaff,
+} = require('../../utils/warehouseAccess.utils');
 
 const WAREHOUSE_SELECT = {
   warehouse_id: true,
@@ -106,9 +111,10 @@ const WarehouseService = {
     return warehouse;
   },
 
-  async listWarehouses(query = {}) {
+  async listWarehouses(query = {}, user = null) {
     const { page, limit, skip, take } = parsePagination(query, { page: 1, limit: 50, maxLimit: 100 });
     const where = buildWarehouseWhere(query);
+    if (user) applyWarehouseListScope(where, user);
 
     const [total, warehouses] = await Promise.all([
       prisma.warehouse.count({ where }),
@@ -133,7 +139,9 @@ const WarehouseService = {
     return { total, page, limit, warehouses };
   },
 
-  async getWarehouseById(warehouseId) {
+  async getWarehouseById(warehouseId, user = null) {
+    if (user) assertCanReadWarehouse(user, warehouseId);
+
     const warehouse = await prisma.warehouse.findUnique({
       where: { warehouse_id: warehouseId },
       select: {
@@ -153,6 +161,50 @@ const WarehouseService = {
     }
 
     return warehouse;
+  },
+
+  /** Quantity-only visibility for other warehouses (warehouse staff). */
+  async listPeerWarehouseStockSummary(user) {
+    if (!isWarehouseStaff(user) || !user.warehouseId) {
+      throw new AppError('Insufficient permissions', 403, 'FORBIDDEN');
+    }
+
+    const peers = await prisma.warehouse.findMany({
+      where: {
+        is_active: true,
+        warehouse_id: { not: user.warehouseId },
+      },
+      orderBy: { warehouse_name: 'asc' },
+      select: {
+        warehouse_id: true,
+        warehouse_code: true,
+        warehouse_name: true,
+        city: true,
+      },
+    });
+
+    if (!peers.length) return [];
+
+    const stockAgg = await prisma.productStock.groupBy({
+      by: ['warehouse_id'],
+      where: {
+        warehouse_id: { in: peers.map((p) => p.warehouse_id) },
+        quantity: { gt: 0 },
+      },
+      _sum: { quantity: true },
+      _count: { stock_id: true },
+    });
+
+    const aggMap = new Map(stockAgg.map((row) => [row.warehouse_id, row]));
+
+    return peers.map((peer) => {
+      const agg = aggMap.get(peer.warehouse_id);
+      return {
+        ...peer,
+        stock_row_count: agg?._count?.stock_id || 0,
+        total_quantity: agg?._sum?.quantity || 0,
+      };
+    });
   },
 
   async updateWarehouse(warehouseId, data) {

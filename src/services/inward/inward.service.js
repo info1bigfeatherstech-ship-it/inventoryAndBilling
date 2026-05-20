@@ -96,14 +96,17 @@ const assertVendorWarehouseActive = async (vendorId, warehouseId) => {
   if (!warehouse.is_active) throw new AppError('Warehouse is inactive', 409, 'WAREHOUSE_INACTIVE');
 };
 
-const assertMappedProduct = async (productId) => {
+const assertMappedProduct = async (productId, warehouseId) => {
   if (!productId) return;
   const product = await prisma.product.findUnique({
     where: { product_id: productId },
-    select: { product_id: true, is_active: true },
+    select: { product_id: true, is_active: true, warehouse_id: true },
   });
   if (!product) throw new AppError('Mapped product not found', 404, 'PRODUCT_NOT_FOUND');
   if (!product.is_active) throw new AppError('Mapped product is inactive', 409, 'PRODUCT_INACTIVE');
+  if (warehouseId && product.warehouse_id !== warehouseId) {
+    throw new AppError('Mapped product belongs to a different warehouse', 409, 'PRODUCT_WAREHOUSE_MISMATCH');
+  }
 };
 
 const sanitizeInwardCreate = (data) => ({
@@ -127,9 +130,31 @@ const sanitizeItemPayload = (data) => ({
   remarks: data.remarks ?? null,
 });
 
+const resolveInwardWarehouseId = (data, user) => {
+  if (user?.role === 'SUPER_ADMIN') {
+    if (!data.warehouse_id) {
+      throw new AppError('warehouse_id is required', 400, 'WAREHOUSE_ID_REQUIRED');
+    }
+    return data.warehouse_id;
+  }
+
+  if (!user?.warehouseId) {
+    throw new AppError('User is not assigned to a warehouse', 403, 'WAREHOUSE_NOT_ASSIGNED');
+  }
+
+  if (data.warehouse_id && data.warehouse_id !== user.warehouseId) {
+    throw new AppError('Cannot create inward for another warehouse', 403, 'WAREHOUSE_FORBIDDEN');
+  }
+
+  return user.warehouseId;
+};
+
 const InwardService = {
-  async createInward(data, createdByUserId) {
-    await assertVendorWarehouseActive(data.vendor_id, data.warehouse_id);
+  async createInward(data, createdByUserId, user) {
+    const warehouseId = resolveInwardWarehouseId(data, user);
+    const inwardData = { ...data, warehouse_id: warehouseId };
+
+    await assertVendorWarehouseActive(inwardData.vendor_id, warehouseId);
 
     if (data.transport_details || data.vendor_invoice_no || data.challan_no) {
       throw new AppError(
@@ -147,7 +172,7 @@ const InwardService = {
       );
     }
 
-    const payload = sanitizeInwardCreate(data);
+    const payload = sanitizeInwardCreate(inwardData);
 
     return prisma.$transaction(async (tx) => {
       let inward = null;
@@ -210,9 +235,18 @@ const InwardService = {
     });
   },
 
-  async listInwards(query = {}) {
+  async listInwards(query = {}, user) {
     const { page, limit, skip, take } = parsePagination(query, { page: 1, limit: 50, maxLimit: 100 });
     const where = buildInwardWhere(query);
+
+    if (user && user.role !== 'SUPER_ADMIN') {
+      if (!user.warehouseId) {
+        throw new AppError('User is not assigned to a warehouse', 403, 'WAREHOUSE_NOT_ASSIGNED');
+      }
+      where.warehouse_id = user.warehouseId;
+    } else if (user?.role === 'SUPER_ADMIN' && query.warehouse_id) {
+      where.warehouse_id = query.warehouse_id;
+    }
 
     const [total, inwards] = await Promise.all([
       prisma.inwardReceipt.count({ where }),
@@ -233,7 +267,7 @@ const InwardService = {
     return { total, page, limit, inwards };
   },
 
-  async getInwardById(inwardId) {
+  async getInwardById(inwardId, user) {
     const inward = await prisma.inwardReceipt.findUnique({
       where: { inward_id: inwardId },
       select: {
@@ -247,13 +281,29 @@ const InwardService = {
           select: {
             ...ITEM_SELECT,
             mapped_product: {
-              select: { product_id: true, product_code: true, name: true, system_barcode: true },
+              select: {
+                product_id: true,
+                product_code: true,
+                name: true,
+                variants: {
+                  where: { is_default: true },
+                  take: 1,
+                  select: { variant_id: true, system_barcode: true, sku: true },
+                },
+              },
             },
           },
         },
       },
     });
     if (!inward) throw new AppError('Inward receipt not found', 404, 'INWARD_NOT_FOUND');
+
+    if (user && user.role !== 'SUPER_ADMIN') {
+      if (!user.warehouseId || inward.warehouse_id !== user.warehouseId) {
+        throw new AppError('Inward receipt not found', 404, 'INWARD_NOT_FOUND');
+      }
+    }
+
     return inward;
   },
 
@@ -267,7 +317,11 @@ const InwardService = {
       throw new AppError('Items can only be edited for scheduled/arrived inwards', 409, 'INWARD_NOT_MUTABLE');
     }
 
-    await assertMappedProduct(data.mapped_product_id);
+    const inwardWarehouse = await prisma.inwardReceipt.findUnique({
+      where: { inward_id: inwardId },
+      select: { warehouse_id: true },
+    });
+    await assertMappedProduct(data.mapped_product_id, inwardWarehouse?.warehouse_id);
 
     return prisma.$transaction(async (tx) => {
       const lineNo = await nextLineNo(tx, inwardId);
@@ -301,7 +355,11 @@ const InwardService = {
     }
 
     if (Object.prototype.hasOwnProperty.call(data, 'mapped_product_id')) {
-      await assertMappedProduct(data.mapped_product_id);
+      const inwardWarehouse = await prisma.inwardReceipt.findUnique({
+        where: { inward_id: inwardId },
+        select: { warehouse_id: true },
+      });
+      await assertMappedProduct(data.mapped_product_id, inwardWarehouse?.warehouse_id);
     }
 
     const allowed = [

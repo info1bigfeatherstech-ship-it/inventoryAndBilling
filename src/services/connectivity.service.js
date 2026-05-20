@@ -104,16 +104,33 @@ class ConnectivityService {
     };
   }
 
+  checkCloudinaryConfig() {
+    const missing = [];
+    if (!config.CLOUDINARY_CLOUD_NAME) missing.push('CLOUDINARY_CLOUD_NAME');
+    if (!config.CLOUDINARY_API_KEY) missing.push('CLOUDINARY_API_KEY');
+    if (!config.CLOUDINARY_API_SECRET) missing.push('CLOUDINARY_API_SECRET');
+
+    if (missing.length) {
+      return { name: 'cloudinary', status: 'misconfigured', missing };
+    }
+
+    return { name: 'cloudinary', status: 'configured', cloud_name: config.CLOUDINARY_CLOUD_NAME };
+  }
+
   async getSnapshot() {
     const [database, redis] = await Promise.all([
       this.checkDatabase(),
       this.checkRedis(),
     ]);
 
+    const MediaService = require('./storage/media.service');
+
     return {
       database,
       redis,
       cloudflareR2: this.checkR2Config(),
+      cloudinary: this.checkCloudinaryConfig(),
+      media: MediaService.getMediaStatus(),
     };
   }
 }

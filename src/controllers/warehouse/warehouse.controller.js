@@ -13,7 +13,7 @@ const WarehouseController = {
   }),
 
   list: asyncHandler(async (req, res) => {
-    const { total, page, limit, warehouses } = await WarehouseService.listWarehouses(req.query);
+    const { total, page, limit, warehouses } = await WarehouseService.listWarehouses(req.query, req.user);
     return successResponse(res, req, {
       statusCode: 200,
       message: 'Warehouses fetched successfully',
@@ -22,8 +22,17 @@ const WarehouseController = {
     });
   }),
 
+  peerStockSummary: asyncHandler(async (req, res) => {
+    const peers = await WarehouseService.listPeerWarehouseStockSummary(req.user);
+    return successResponse(res, req, {
+      statusCode: 200,
+      message: 'Peer warehouse stock summary fetched successfully',
+      data: peers,
+    });
+  }),
+
   getById: asyncHandler(async (req, res) => {
-    const warehouse = await WarehouseService.getWarehouseById(req.params.warehouseId);
+    const warehouse = await WarehouseService.getWarehouseById(req.params.warehouseId, req.user);
     return successResponse(res, req, {
       statusCode: 200,
       message: 'Warehouse fetched successfully',

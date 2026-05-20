@@ -11,13 +11,23 @@ const {
 } = require('../../validators/vendor/vendor.validators');
 const { requireAuth, authorizeRoles } = require('../../middlewares/auth.middleware');
 
-router.use(requireAuth);
-router.use(authorizeRoles('SUPER_ADMIN'));
+const ADMIN_ONLY = ['SUPER_ADMIN'];
+const VENDOR_READ_ROLES = [
+  'SUPER_ADMIN',
+  'WH_MANAGER',
+  'WH_STOCK_LISTER',
+  'SHOP_OWNER',
+  'SHOP_STOCK_LISTER',
+  'BILLING_STAFF',
+];
 
-router.post('/', createVendorValidator, validateRequest, VendorController.create);
-router.get('/', listVendorsValidator, validateRequest, VendorController.list);
-router.get('/:vendorId', vendorIdParam, validateRequest, VendorController.getById);
-router.put('/:vendorId', updateVendorValidator, validateRequest, VendorController.update);
-router.delete('/:vendorId', vendorIdParam, validateRequest, VendorController.remove);
+router.use(requireAuth);
+
+router.get('/', authorizeRoles(...VENDOR_READ_ROLES), listVendorsValidator, validateRequest, VendorController.list);
+router.get('/:vendorId', authorizeRoles(...VENDOR_READ_ROLES), vendorIdParam, validateRequest, VendorController.getById);
+
+router.post('/', authorizeRoles(...ADMIN_ONLY), createVendorValidator, validateRequest, VendorController.create);
+router.put('/:vendorId', authorizeRoles(...ADMIN_ONLY), updateVendorValidator, validateRequest, VendorController.update);
+router.delete('/:vendorId', authorizeRoles(...ADMIN_ONLY), vendorIdParam, validateRequest, VendorController.remove);
 
 module.exports = router;

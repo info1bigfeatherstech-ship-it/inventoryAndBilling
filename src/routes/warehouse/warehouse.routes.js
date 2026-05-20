@@ -11,13 +11,28 @@ const {
 } = require('../../validators/warehouse/warehouse.validators');
 const { requireAuth, authorizeRoles } = require('../../middlewares/auth.middleware');
 
-router.use(requireAuth);
-router.use(authorizeRoles('SUPER_ADMIN'));
+const ADMIN_ONLY = ['SUPER_ADMIN'];
+const WAREHOUSE_READ_ROLES = ['SUPER_ADMIN', 'WH_MANAGER', 'WH_STOCK_LISTER'];
 
-router.post('/', createWarehouseValidator, validateRequest, WarehouseController.create);
-router.get('/', listWarehousesValidator, validateRequest, WarehouseController.list);
-router.get('/:warehouseId', warehouseIdParam, validateRequest, WarehouseController.getById);
-router.put('/:warehouseId', updateWarehouseValidator, validateRequest, WarehouseController.update);
-router.delete('/:warehouseId', warehouseIdParam, validateRequest, WarehouseController.remove);
+router.use(requireAuth);
+
+router.get(
+  '/peer-stock-summary',
+  authorizeRoles(...WAREHOUSE_READ_ROLES),
+  WarehouseController.peerStockSummary
+);
+
+router.get('/', authorizeRoles(...WAREHOUSE_READ_ROLES), listWarehousesValidator, validateRequest, WarehouseController.list);
+router.get('/:warehouseId', authorizeRoles(...WAREHOUSE_READ_ROLES), warehouseIdParam, validateRequest, WarehouseController.getById);
+
+router.post('/', authorizeRoles(...ADMIN_ONLY), createWarehouseValidator, validateRequest, WarehouseController.create);
+router.put(
+  '/:warehouseId',
+  authorizeRoles(...ADMIN_ONLY),
+  updateWarehouseValidator,
+  validateRequest,
+  WarehouseController.update
+);
+router.delete('/:warehouseId', authorizeRoles(...ADMIN_ONLY), warehouseIdParam, validateRequest, WarehouseController.remove);
 
 module.exports = router;

@@ -14,6 +14,8 @@ const sanitizeUser = (user) => ({
   role: user.role,
   shop_id: user.shop_id,
   warehouse_id: user.warehouse_id,
+  warehouse: user.warehouse || null,
+  shop: user.shop || null,
 });
 
 const getRefreshTokenDelegate = (dbClient) => {
@@ -109,6 +111,25 @@ const AuthService = {
         shop_id: true,
         warehouse_id: true,
         password_hash: true,
+        warehouse: {
+          select: {
+            warehouse_id: true,
+            warehouse_code: true,
+            warehouse_name: true,
+            address: true,
+            city: true,
+            is_active: true,
+          },
+        },
+        shop: {
+          select: {
+            shop_id: true,
+            shop_code: true,
+            shop_name: true,
+            city: true,
+            is_active: true,
+          },
+        },
       },
     });
 
@@ -178,6 +199,25 @@ const AuthService = {
           is_active: true,
           shop_id: true,
           warehouse_id: true,
+          warehouse: {
+            select: {
+              warehouse_id: true,
+              warehouse_code: true,
+              warehouse_name: true,
+              address: true,
+              city: true,
+              is_active: true,
+            },
+          },
+          shop: {
+            select: {
+              shop_id: true,
+              shop_code: true,
+              shop_name: true,
+              city: true,
+              is_active: true,
+            },
+          },
         },
       });
 
@@ -239,6 +279,26 @@ const AuthService = {
         warehouse_id: true,
         created_at: true,
         updated_at: true,
+        warehouse: {
+          select: {
+            warehouse_id: true,
+            warehouse_code: true,
+            warehouse_name: true,
+            address: true,
+            city: true,
+            manager_name: true,
+            is_active: true,
+          },
+        },
+        shop: {
+          select: {
+            shop_id: true,
+            shop_code: true,
+            shop_name: true,
+            city: true,
+            is_active: true,
+          },
+        },
       },
     });
 

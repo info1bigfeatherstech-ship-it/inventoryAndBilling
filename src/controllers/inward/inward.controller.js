@@ -4,7 +4,7 @@ const InwardService = require('../../services/inward/inward.service');
 
 const InwardController = {
   create: asyncHandler(async (req, res) => {
-    const inward = await InwardService.createInward(req.body, req.user.userId);
+    const inward = await InwardService.createInward(req.body, req.user.userId, req.user);
     return successResponse(res, req, {
       statusCode: 201,
       message: 'Inward schedule created successfully',
@@ -13,7 +13,7 @@ const InwardController = {
   }),
 
   list: asyncHandler(async (req, res) => {
-    const { total, page, limit, inwards } = await InwardService.listInwards(req.query);
+    const { total, page, limit, inwards } = await InwardService.listInwards(req.query, req.user);
     return successResponse(res, req, {
       statusCode: 200,
       message: 'Inward schedules fetched successfully',
@@ -23,7 +23,7 @@ const InwardController = {
   }),
 
   getById: asyncHandler(async (req, res) => {
-    const inward = await InwardService.getInwardById(req.params.inwardId);
+    const inward = await InwardService.getInwardById(req.params.inwardId, req.user);
     return successResponse(res, req, {
       statusCode: 200,
       message: 'Inward detail fetched successfully',
