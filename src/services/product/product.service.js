@@ -1618,6 +1618,11 @@ const ProductService = {
         height: row.height ? Number(row.height) : null,
         quantity: Number(row.quantity) || 0,
         low_stock_threshold: Number(row.low_stock_threshold) || 10,
+        title: row.title || null,           // ⭐ ADD THIS
+        description: row.description || null, // ⭐ ADD THIS
+        brand_name: row.brand_name || "Generic", // ⭐ ADD THIS
+        remarks: row.remarks || null, // ⭐ ADD THIS
+        purchase_cost: row.purchase_cost ? Number(row.purchase_cost) : null,
         imageFolderPath,  // Store folder path for later
       });
 
@@ -1732,6 +1737,12 @@ const ProductService = {
           mrp: variantsData[0].mrp,
           wholesale_price: variantsData[0].wholesale_price,
           retail_price: variantsData[0].retail_price,
+          online_price: variantsData[0].online_price,
+          purchase_cost: variantsData[0].purchase_cost,
+          title: variantsData[0].title,
+          description: variantsData[0].description,
+          brand_name: variantsData[0].brand_name,
+          remarks: variantsData[0].remarks,
         }
       });
 
