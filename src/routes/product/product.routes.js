@@ -92,9 +92,19 @@ router.post(
 router.patch('/bulk', authorizeRoles(...WRITE_ROLES), bulkUpdateValidator, validateRequest, ProductController.bulkUpdate);
 router.delete('/bulk', authorizeRoles(...WRITE_ROLES), bulkDeleteValidator, validateRequest, ProductController.bulkDelete);
 
+// Bulk restore (activate multiple soft-deleted products)
+router.patch('/bulk/restore', authorizeRoles(...WRITE_ROLES), ProductController.bulkRestore);
+
+
 router.delete('/hard-delete-by-date', authorizeRoles('SUPER_ADMIN'), ProductController.hardDeleteByDate);
 
 router.get('/:productId', authorizeRoles(...READ_ROLES), productIdParam, validateRequest, ProductController.getById);
+
+// Restore single product
+router.patch('/:productId/restore', authorizeRoles(...WRITE_ROLES), productIdParam, validateRequest, ProductController.restore);
+
+
+
 router.post(
   '/',
   authorizeRoles(...WRITE_ROLES),

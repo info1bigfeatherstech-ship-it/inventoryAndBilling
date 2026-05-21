@@ -1854,6 +1854,51 @@ const ProductService = {
     return results;
   },
 
+// ========== RESTORE PRODUCTS (Soft Delete se wapas active) ==========
+
+async restoreProduct(productId, user) {
+  const existing = await prisma.product.findUnique({
+    where: { product_id: productId },
+    select: { product_id: true, warehouse_id: true, is_active: true },
+  });
+  if (!existing) throw new AppError('Product not found', 404, 'PRODUCT_NOT_FOUND');
+  assertProductWarehouseAccess(existing.warehouse_id, user);
+
+  if (existing.is_active) return { alreadyActive: true };
+
+  await prisma.$transaction([
+    prisma.product.update({ where: { product_id: productId }, data: { is_active: true } }),
+    prisma.productVariant.updateMany({ where: { product_id: productId }, data: { is_active: true } }),
+  ]);
+
+  await invalidateProductCaches(productId, existing.warehouse_id);
+  return { alreadyActive: false };
+},
+
+async bulkRestore(productIds, user) {
+  if (!Array.isArray(productIds) || !productIds.length) {
+    throw new AppError('product_ids array is required', 400, 'PRODUCT_IDS_REQUIRED');
+  }
+
+  const results = { restored: 0, failed: [] };
+
+  for (const productId of productIds) {
+    try {
+      const result = await this.restoreProduct(productId, user);
+      if (!result.alreadyActive) results.restored += 1;
+    } catch (error) {
+      results.failed.push({
+        product_id: productId,
+        message: error.message,
+        code: error.code || 'RESTORE_FAILED',
+      });
+    }
+  }
+
+  return results;
+},
+
+
   // ⭐ Permanent delete with cascade (for testing)
   async hardDeleteProductsByDate(dateThreshold, user) {
     // Only SUPER_ADMIN can do this

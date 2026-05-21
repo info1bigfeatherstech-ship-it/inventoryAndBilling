@@ -289,6 +289,25 @@ const ProductController = {
         data: result,
       });
     }),
+    // ========== RESTORE SINGLE PRODUCT ==========
+restore: asyncHandler(async (req, res) => {
+  const result = await ProductService.restoreProduct(req.params.productId, req.user);
+  return successResponse(res, req, {
+    statusCode: 200,
+    message: result.alreadyActive ? 'Product already active' : 'Product restored successfully',
+    data: { product_id: req.params.productId, is_active: true },
+  });
+}),
+
+// ========== BULK RESTORE PRODUCTS ==========
+bulkRestore: asyncHandler(async (req, res) => {
+  const results = await ProductService.bulkRestore(req.body.product_ids, req.user);
+  return successResponse(res, req, {
+    statusCode: 200,
+    message: 'Bulk product restore completed',
+    data: results,
+  });
+}),
 };
 
 module.exports = ProductController;
