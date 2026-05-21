@@ -337,47 +337,40 @@ model Product {
 
 /// Purchasable SKU — barcode and prices live on the variant.
 model ProductVariant {
-  variant_id   String @id @default(cuid())
-  product_id   String
-  sku          String
-  /// Serial suffix code: {product.product_code}-{n} e.g. 7834-1, 7834-2
-  variant_code String
-
-  system_barcode String  @unique
-  vendor_barcode String? @unique
-
-  /// [{ "key": "Color", "value": "Red" }]
-  attributes Json?
-
-  mrp             Float
+  variant_id     String   @id @default(cuid())
+  product_id     String
+  product_code   String   // Full code like "6767-1"
+  sku            String
+  system_barcode String?
+  vendor_barcode String?
+  attributes     Json?
+  
+  mrp            Float
   wholesale_price Float
-  retail_price    Float
-  online_price    Float?
-  purchase_cost   Float?
-
-  /// Shipping (ecomm sync) — per variant, not product-level.
-  weight Float?
-  length Float?
-  width  Float?
-  height Float?
-
-  low_stock_threshold Int     @default(10)
-  sort_order          Int     @default(0)
-  is_default          Boolean @default(false)
-  is_active           Boolean @default(true)
-  remarks             String?
-
-  product Product               @relation(fields: [product_id], references: [product_id], onDelete: Cascade)
-  images  ProductVariantImage[]
-  stocks  ProductStock[]
-
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
-
+  retail_price   Float
+  online_price   Float?
+  purchase_cost  Float?
+  
+  weight         Float?
+  length         Float?
+  width          Float?
+  height         Float?
+  
+  low_stock_threshold Int @default(10)
+  sort_order     Int    @default(0)
+  is_default     Boolean @default(false)
+  is_active      Boolean @default(true)
+  remarks        String?
+  
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+  
+  product        Product @relation(fields: [product_id], references: [product_id], onDelete: Cascade)
+  images         ProductVariantImage[]
+  stocks         ProductStock[]
+  
   @@unique([product_id, sku])
-  @@unique([product_id, variant_code])
-  @@index([product_id, is_active])
-  @@map("product_variants")
+  @@unique([product_id, product_code])  // ← FIXED
 }
 
 model ProductVariantImage {

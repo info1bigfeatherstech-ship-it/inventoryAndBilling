@@ -51,6 +51,14 @@ const csvUpload = multer({
   },
 });
 
+const bulkFileUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 },
+}).fields([
+  { name: 'file', maxCount: 1 },      // CSV file
+  { name: 'imagesZip', maxCount: 1 }  // ZIP file
+]);
+
 const imageMimeFilter = (_req, file, cb) => {
   const ok = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.mimetype);
   cb(ok ? null : new Error('Invalid image type'), ok);
@@ -76,13 +84,15 @@ router.get('/', authorizeRoles(...READ_ROLES), listProductsValidator, validateRe
 router.post(
   '/bulk/csv',
   authorizeRoles(...WRITE_ROLES),
-  csvUpload.single('file'),
+  bulkFileUpload,
   bulkCsvValidator,
   validateRequest,
   ProductController.bulkCreateCsv
 );
 router.patch('/bulk', authorizeRoles(...WRITE_ROLES), bulkUpdateValidator, validateRequest, ProductController.bulkUpdate);
 router.delete('/bulk', authorizeRoles(...WRITE_ROLES), bulkDeleteValidator, validateRequest, ProductController.bulkDelete);
+
+router.delete('/hard-delete-by-date', authorizeRoles('SUPER_ADMIN'), ProductController.hardDeleteByDate);
 
 router.get('/:productId', authorizeRoles(...READ_ROLES), productIdParam, validateRequest, ProductController.getById);
 router.post(

@@ -3,6 +3,45 @@ const { AppError } = require('../../middlewares/error.middleware');
 const { successResponse, paginatedMeta } = require('../../utils/response.utils');
 const ProductService = require('../../services/product/product.service');
 const { groupVariantImageFiles } = require('../../utils/productMultipart.utils');
+const AdmZip = require('adm-zip');  // ⭐ NEW
+const fs = require('fs');           // ⭐ NEW
+const path = require('path');       // ⭐ NEW
+
+// ========== HELPER FUNCTIONS FOR ZIP EXTRACTION (Copy from ecomm) ==========
+
+const ZIP_OS_JUNK_NAMES = new Set(['__MACOSX', '.DS_Store', 'Thumbs.db', 'desktop.ini', '.localized']);
+
+const isOsJunkEntryName = (name) => {
+  if (!name || typeof name !== 'string') return true;
+  if (ZIP_OS_JUNK_NAMES.has(name)) return true;
+  if (name.startsWith('._')) return true;
+  if (name.startsWith('.')) return true;
+  return false;
+};
+
+const listRealEntries = (dirPath) => {
+  if (!dirPath) return [];
+  try {
+    return fs.readdirSync(dirPath, { withFileTypes: true }).filter(e => !isOsJunkEntryName(e.name));
+  } catch {
+    return [];
+  }
+};
+
+const resolveZipContentRoot = (extractPath, { maxDepth = 5 } = {}) => {
+  if (!extractPath) return extractPath;
+  let current = extractPath;
+  for (let depth = 0; depth < maxDepth; depth++) {
+    const entries = listRealEntries(current);
+    if (entries.length === 1 && entries[0].isDirectory()) {
+      current = path.join(current, entries[0].name);
+      continue;
+    }
+    break;
+  }
+  return current;
+};
+
 
 const parseKeepImageIds = (raw) => {
   if (raw === undefined || raw === null || raw === '') return [];
@@ -133,7 +172,59 @@ const ProductController = {
     });
   }),
 
+  // ========== UPDATED: Bulk Create CSV with Images Support ==========
   bulkCreateCsv: asyncHandler(async (req, res) => {
+    const csvFile = req.files?.file?.[0];
+    const zipFile = req.files?.imagesZip?.[0];
+  
+    if (!csvFile?.buffer) {
+      throw new AppError('CSV file is required (field name: file)', 400, 'CSV_FILE_REQUIRED');
+    }
+  
+    const isPreview = req.query.preview === 'true';
+    
+    let imagesRootFolder = null;
+    let tempExtractPath = null;
+    
+    if (!isPreview && zipFile) {
+      tempExtractPath = path.join(__dirname, '../../../uploads/bulk_temp_' + Date.now());
+      fs.mkdirSync(tempExtractPath, { recursive: true });
+      
+      const zip = new AdmZip(zipFile.buffer);
+      zip.extractAllTo(tempExtractPath, true);
+      imagesRootFolder = resolveZipContentRoot(tempExtractPath);
+      
+      console.log(`📦 ZIP extracted to: ${imagesRootFolder}`);
+    }
+  
+    const user = { ...req.user };
+    const warehouseId = req.body?.warehouse_id || req.query?.warehouse_id;
+    if (warehouseId) user.forcedWarehouseId = warehouseId;
+  
+    // ⭐ FIXED: Use csvFile.buffer instead of req.file.buffer
+    const results = await ProductService.bulkCreateFromCsv(
+      csvFile.buffer, 
+      user, 
+      { 
+        warehouseId,
+        preview: isPreview,
+        imagesRootFolder 
+      }
+    );
+  
+    if (tempExtractPath && fs.existsSync(tempExtractPath)) {
+      fs.rmSync(tempExtractPath, { recursive: true, force: true });
+    }
+  
+    return successResponse(res, req, {
+      statusCode: isPreview ? 200 : 201,
+      message: isPreview ? 'Preview generated successfully' : 'Bulk product import completed',
+      data: results,
+    });
+  }), 
+
+  // ========== NEW: Preview Bulk Upload (Alternative endpoint) ==========
+  previewBulkCsv: asyncHandler(async (req, res) => {
     if (!req.file?.buffer) {
       throw new AppError('CSV file is required (field name: file)', 400, 'CSV_FILE_REQUIRED');
     }
@@ -142,11 +233,20 @@ const ProductController = {
     const warehouseId = req.body?.warehouse_id || req.query?.warehouse_id;
     if (warehouseId) user.forcedWarehouseId = warehouseId;
 
-    const results = await ProductService.bulkCreateFromCsv(req.file.buffer, user, { warehouseId });
+    // Preview mode: validate only, no DB writes
+    const results = await ProductService.bulkCreateFromCsv(
+      req.file.buffer, 
+      user, 
+      { 
+        warehouseId,
+        preview: true,
+        imagesRootFolder: null 
+      }
+    );
 
     return successResponse(res, req, {
       statusCode: 200,
-      message: 'Bulk product import completed',
+      message: 'Preview generated — no data saved',
       data: results,
     });
   }),
@@ -168,6 +268,27 @@ const ProductController = {
       data: results,
     });
   }),
+    // ========== HARD DELETE PRODUCTS BY DATE (For Testing) ==========
+    hardDeleteByDate: asyncHandler(async (req, res) => {
+      const { date } = req.query;
+      
+      if (!date) {
+        throw new AppError('date query parameter is required (ISO format)', 400, 'DATE_REQUIRED');
+      }
+      
+      const dateThreshold = new Date(date);
+      if (isNaN(dateThreshold.getTime())) {
+        throw new AppError('Invalid date format. Use ISO format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS', 400, 'INVALID_DATE');
+      }
+      
+      const result = await ProductService.hardDeleteProductsByDate(dateThreshold, req.user);
+      
+      return successResponse(res, req, {
+        statusCode: 200,
+        message: `${result.deleted} product(s) permanently deleted`,
+        data: result,
+      });
+    }),
 };
 
 module.exports = ProductController;

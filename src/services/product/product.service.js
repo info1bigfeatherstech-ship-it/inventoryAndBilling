@@ -1,3 +1,5 @@
+const fs = require('fs');           // ⭐ ADD THIS
+const path = require('path');       // ⭐ ADD THIS
 const { parse } = require('csv-parse/sync');
 const prisma = require('../../utils/prisma.utils');
 const { AppError } = require('../../middlewares/error.middleware');
@@ -19,13 +21,147 @@ const MediaService = require('../storage/media.service');
 const { generateSystemBarcode } = require('../../utils/barcode.utils');
 const { assertVariantImageUploads } = require('../../utils/productMultipart.utils');
 
+
+// ========== CSV BULK UPLOAD HELPERS (Resolve Name → ID) ==========
+
+const resolveVendorByName = async (vendorName) => {
+  if (!vendorName) {
+    throw new Error('vendor_name is required in CSV');
+  }
+  
+  const vendor = await prisma.vendor.findFirst({
+    where: {
+      company_name: { equals: vendorName, mode: 'insensitive' },
+      is_active: true
+    },
+    select: { vendor_id: true, company_name: true }
+  });
+  
+  if (!vendor) {
+    throw new Error(`Vendor not found: "${vendorName}". Please check vendor name in CSV.`);
+  }
+  
+  return vendor.vendor_id;
+};
+
+const resolveCategoryByName = async (categoryName, subCategoryName = null) => {
+  if (!categoryName) {
+    throw new Error('category_name is required in CSV');
+  }
+  
+  // Find main category
+  const mainCategory = await prisma.category.findFirst({
+    where: {
+      name: { equals: categoryName, mode: 'insensitive' },
+      parent_id: null,
+      is_active: true
+    },
+    select: { category_id: true }
+  });
+  
+  if (!mainCategory) {
+    throw new Error(`Category not found: "${categoryName}". Please check category name in CSV.`);
+  }
+  
+  // If sub-category provided
+  if (subCategoryName) {
+    const subCategory = await prisma.category.findFirst({
+      where: {
+        name: { equals: subCategoryName, mode: 'insensitive' },
+        parent_id: mainCategory.category_id,
+        is_active: true
+      },
+      select: { category_id: true }
+    });
+    
+    if (!subCategory) {
+      throw new Error(`Sub-category not found: "${subCategoryName}" under category "${categoryName}".`);
+    }
+    
+    return { category_id: mainCategory.category_id, sub_category_id: subCategory.category_id };
+  }
+  
+  return { category_id: mainCategory.category_id, sub_category_id: null };
+};
+
+// Helper to check if a string looks like a valid UUID/CUID (ID format)
+const looksLikeId = (str) => {
+  if (!str) return false;
+  // CUID format: starts with 'c' followed by alphanumeric, typically 25 chars
+  // UUID format: 8-4-4-4-12 pattern
+  return /^c[a-z0-9]{24}$/.test(str) || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+};
+
+// Smart resolver: if input is ID, use directly; if name, resolve
+const resolveVendorSmart = async (input, rowNumber) => {
+  if (!input) {
+    throw new Error(`Row ${rowNumber}: Either vendor_id or vendor_name is required`);
+  }
+  
+  // If input looks like an ID (CUID/UUID), use as ID
+  if (looksLikeId(input)) {
+    const vendor = await prisma.vendor.findUnique({
+      where: { vendor_id: input, is_active: true },
+      select: { vendor_id: true }
+    });
+    if (!vendor) {
+      throw new Error(`Row ${rowNumber}: Vendor not found with ID: "${input}"`);
+    }
+    return vendor.vendor_id;
+  }
+  
+  // Otherwise treat as name and resolve
+  return await resolveVendorByName(input);
+};
+
+const resolveCategorySmart = async (categoryInput, subCategoryInput, rowNumber) => {
+  if (!categoryInput) {
+    throw new Error(`Row ${rowNumber}: category_name or category_id is required`);
+  }
+  
+  // If input looks like an ID (CUID/UUID), use as ID
+  if (looksLikeId(categoryInput)) {
+    const category = await prisma.category.findUnique({
+      where: { category_id: categoryInput, is_active: true },
+      select: { category_id: true, parent_id: true }
+    });
+    if (!category) {
+      throw new Error(`Row ${rowNumber}: Category not found with ID: "${categoryInput}"`);
+    }
+    
+    // If sub-category ID provided
+    if (subCategoryInput && looksLikeId(subCategoryInput)) {
+      const subCategory = await prisma.category.findUnique({
+        where: { category_id: subCategoryInput, is_active: true },
+        select: { category_id: true, parent_id: true }
+      });
+      if (!subCategory) {
+        throw new Error(`Row ${rowNumber}: Sub-category not found with ID: "${subCategoryInput}"`);
+      }
+      if (subCategory.parent_id !== category.category_id) {
+        throw new Error(`Row ${rowNumber}: Sub-category does not belong to parent category`);
+      }
+      return { category_id: category.category_id, sub_category_id: subCategory.category_id };
+    }
+    
+    return { category_id: category.category_id, sub_category_id: null };
+  }
+  
+  // Otherwise treat as names and resolve
+  return await resolveCategoryByName(categoryInput, subCategoryInput);
+};
+
+
+
+
+
 const VARIANT_INCLUDE = {
   orderBy: [{ sort_order: 'asc' }, { created_at: 'asc' }],
   select: {
     variant_id: true,
     product_id: true,
     sku: true,
-    variant_code: true,
+    product_code: true,  // ⭐ FIXED: variant_code → product_code
     system_barcode: true,
     vendor_barcode: true,
     attributes: true,
@@ -100,7 +236,7 @@ const PRODUCT_LIST_SELECT = {
     orderBy: { sort_order: 'asc' },
     select: {
       variant_id: true,
-      variant_code: true,
+      product_code: true,  // ⭐ FIXED: variant_code → product_code
       sku: true,
       system_barcode: true,
       attributes: true,
@@ -163,27 +299,9 @@ const parseVariantSerial = (variantCode, baseProductCode) => {
   return Number.isFinite(n) && n > 0 ? n : null;
 };
 
-// const sanitizeProductPrices = (data) => {
-//   const prices = {
-//     mrp: Number(data.mrp),
-//     wholesale_price: Number(data.wholesale_price),
-//     retail_price: Number(data.retail_price),
-//     online_price:
-//       data.online_price === null || data.online_price === undefined || data.online_price === ''
-//         ? null
-//         : Number(data.online_price),
-//     purchase_cost:
-//       data.purchase_cost === null || data.purchase_cost === undefined || data.purchase_cost === ''
-//         ? null
-//         : Number(data.purchase_cost),
-//   };
-
-//   validateVariantPricing(prices, 'Product');
-//   return prices;
-// };
 const sanitizeProductPrices = (data) => {
   const prices = {
-    mrp: data.mrp ? Number(data.mrp) : 0,  // ✅ Default to 0 instead of NaN
+    mrp: data.mrp ? Number(data.mrp) : 0,
     wholesale_price: data.wholesale_price ? Number(data.wholesale_price) : 0,
     retail_price: data.retail_price ? Number(data.retail_price) : 0,
     online_price: data.online_price ? Number(data.online_price) : null,
@@ -365,12 +483,12 @@ const mergeVariantPrices = (productPrices, variantInput = {}) => {
 const getNextVariantSerial = async (tx, productId, baseProductCode) => {
   const variants = await tx.productVariant.findMany({
     where: { product_id: productId },
-    select: { variant_code: true },
+    select: { product_code: true },
   });
 
   let maxSerial = 0;
   for (const row of variants) {
-    const serial = parseVariantSerial(row.variant_code, baseProductCode);
+    const serial = parseVariantSerial(row.product_code, baseProductCode);
     if (serial && serial > maxSerial) maxSerial = serial;
   }
 
@@ -508,13 +626,13 @@ const assertVariantUsesProductBase = (variant, baseProductCode, indexLabel) => {
     }
   }
 
-  if (variant.variant_code) {
-    const code = normalizeCode(variant.variant_code);
+  if (variant.product_code) {
+    const code = normalizeCode(variant.product_code);
     const serial = parseVariantSerial(code, baseProductCode);
     if (!serial) {
       const incomingBase = normalizeBaseProductCode(code);
       throw new AppError(
-        `${indexLabel}: variant_code must be "${baseProductCode}-<n>". Cannot use base "${incomingBase}".`,
+        `${indexLabel}: product_code must be "${baseProductCode}-<n>". Cannot use base "${incomingBase}".`,
         400,
         'VARIANT_BASE_CODE_MISMATCH'
       );
@@ -556,7 +674,7 @@ const buildVariantInput = async (tx, variant, {
 
   const payload = {
     sku: normalizeSku(variant.sku || variantCode),
-    variant_code: variantCode,
+    product_code: variantCode,
     system_barcode: systemBarcode,
     vendor_barcode: variant.vendor_barcode ? normalizeCode(variant.vendor_barcode) : null,
     attributes: parseAttributes(variant.attributes),
@@ -661,7 +779,7 @@ const buildProductWhere = (query = {}, user) => {
           some: {
             OR: [
               { sku: { contains: search, mode: 'insensitive' } },
-              { variant_code: { contains: search, mode: 'insensitive' } },
+              { product_code: { contains: search, mode: 'insensitive' } },
               { system_barcode: { contains: search, mode: 'insensitive' } },
               { vendor_barcode: { contains: search, mode: 'insensitive' } },
             ],
@@ -770,6 +888,20 @@ const applyVariantImagesOnCreate = async (productId, warehouseId, data, variantI
     }
     throw error;
   }
+};
+
+// ⭐ ADD THIS FUNCTION
+const normalizeProductCode = (value) => {
+  const s = String(value ?? '').trim().toUpperCase();
+  if (!s) return '';
+  const match = s.match(/^([A-Z0-9]+)-(\d+)$/);
+  if (match) {
+    const baseToken = match[1];
+    const seq = Number(match[2]);
+    if (!Number.isFinite(seq)) return s;
+    return `${baseToken}-${seq}`;
+  }
+  return s;
 };
 
 const ProductService = {
@@ -1005,11 +1137,8 @@ const ProductService = {
     });
     if (!current) throw new AppError('Variant not found', 404, 'VARIANT_NOT_FOUND');
 
-    if (Object.prototype.hasOwnProperty.call(data, 'variant_code')) {
-      throw new AppError('variant_code cannot be changed after creation', 400, 'VARIANT_CODE_IMMUTABLE');
-    }
     if (Object.prototype.hasOwnProperty.call(data, 'product_code')) {
-      throw new AppError('product_code is set at product level only', 400, 'PRODUCT_CODE_IMMUTABLE');
+      throw new AppError('product_code cannot be changed after creation', 400, 'PRODUCT_CODE_IMMUTABLE');
     }
 
     const variantPayload = {};
@@ -1324,10 +1453,19 @@ const ProductService = {
     return synced;
   },
 
-  async bulkCreateFromCsv(fileBuffer, user, { warehouseId: requestedWarehouseId } = {}) {
+  // product.service.js - Updated bulkCreateFromCsv
+
+  async bulkCreateFromCsv(fileBuffer, user, options = {}) {
+    const {
+      warehouseId: requestedWarehouseId,
+      preview = false,
+      imagesRootFolder = null,
+    } = options;
+
     const warehouseId = resolveWarehouseId(user, requestedWarehouseId || user.forcedWarehouseId);
     await assertWarehouseActive(warehouseId);
 
+    // Parse CSV
     const records = parse(fileBuffer, {
       columns: true,
       skip_empty_lines: true,
@@ -1339,69 +1477,327 @@ const ProductService = {
       throw new AppError('CSV file is empty', 400, 'CSV_EMPTY');
     }
 
-    const results = { created: 0, failed: [] };
+    const results = { 
+      created: 0, 
+      failed: [],
+      preview: preview ? { valid: 0, invalid: 0, rows: [] } : null
+    };
 
-    for (let i = 0; i < records.length; i += 1) {
+    // Group rows by product name
+    const productMap = new Map();
+    for (let i = 0; i < records.length; i++) {
       const row = records[i];
-      try {
-        await this.createProduct(
-          {
-            warehouse_id: warehouseId,
-            product_code: row.product_code,
-            name: row.name,
-            description: row.description || null,
-            title: row.title || null,
-            brand_name: row.brand_name || null,
-            primary_vendor_id: row.primary_vendor_id,
-            hsn_code: row.hsn_code,
-            gst_percent: row.gst_percent,
-            gst_type: row.gst_type,
-            unit_of_measure: row.unit_of_measure,
-            weight: row.weight || row.weight_per_unit || null,
-            length: row.length || null,
-            width: row.width || null,
-            height: row.height || null,
-            category_id: row.category_id,
-            sub_category_id: row.sub_category_id || null,
-            remarks: row.remarks || null,
-            mrp: row.mrp,
-            wholesale_price: row.wholesale_price,
-            retail_price: row.retail_price,
-            online_price: row.online_price || null,
-            purchase_cost: row.purchase_cost || null,
-            system_barcode: row.system_barcode || null,
-            vendor_barcode: row.vendor_barcode || null,
-            attributes: row.attributes || null,
-            variants: row.variant_system_barcode
-              ? [
-                  {
-                    system_barcode: row.variant_system_barcode,
-                    mrp: row.variant_mrp,
-                    wholesale_price: row.variant_wholesale_price,
-                    retail_price: row.variant_retail_price,
-                    online_price: row.variant_online_price || null,
-                    weight: row.variant_weight || null,
-                    length: row.variant_length || null,
-                    width: row.variant_width || null,
-                    height: row.variant_height || null,
-                  },
-                ]
-              : undefined,
-          },
-          user
-        );
-        results.created += 1;
-      } catch (error) {
-        results.failed.push({
-          row: i + 2,
-          message: error.message,
-          code: error.code || 'ROW_FAILED',
-        });
+      const productName = row.name;
+      if (!productName) continue;
+      
+      const key = productName.toLowerCase();
+      if (!productMap.has(key)) {
+        productMap.set(key, { name: productName, rows: [] });
+      }
+      productMap.get(key).rows.push({ ...row, rowNumber: i + 2 });
+    }
+
+    const productGroups = Array.from(productMap.values());
+    
+    // ⭐ BATCH PROCESSING (50 products per batch)
+    const BATCH_SIZE = 50;
+    const BATCH_DELAY_MS = 1000;
+    
+    for (let i = 0; i < productGroups.length; i += BATCH_SIZE) {
+      const batch = productGroups.slice(i, i + BATCH_SIZE);
+      const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+      const totalBatches = Math.ceil(productGroups.length / BATCH_SIZE);
+      
+      console.log(`📦 Processing batch ${batchNumber}/${totalBatches} (${batch.length} products)`);
+      
+      // Process batch sequentially (not parallel) to avoid DB overload
+      for (const productData of batch) {
+        try {
+          await this.processSingleProductGroup(productData, {
+            warehouseId,
+            preview,
+            imagesRootFolder,
+            results
+          });
+        } catch (error) {
+          results.failed.push({
+            product: productData.name,
+            rows: productData.rows.map(r => r.rowNumber),
+            message: error.message,
+            code: error.code || 'ROW_FAILED',
+          });
+        }
+      }
+      
+      // ⭐ Wait between batches to let DB breathe
+      if (i + BATCH_SIZE < productGroups.length) {
+        console.log(`⏳ Waiting ${BATCH_DELAY_MS}ms before next batch...`);
+        await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS));
       }
     }
 
-    await cacheDelByPattern(productListCachePattern(warehouseId));
     return results;
+  },
+
+  // ⭐ NEW HELPER METHOD — Extract single product processing logic
+  async processSingleProductGroup(productData, { warehouseId, preview, imagesRootFolder, results }) {
+    const { name: productName, rows: productRows } = productData;
+    
+    // Resolve vendor and category (same as before)
+    const firstRow = productRows[0];
+    let primary_vendor_id;
+    if (firstRow.primary_vendor_id) {
+      primary_vendor_id = firstRow.primary_vendor_id;
+    } else if (firstRow.vendor_name) {
+      const vendor = await prisma.vendor.findFirst({
+        where: { company_name: { equals: firstRow.vendor_name, mode: 'insensitive' }, is_active: true }
+      });
+      if (!vendor) throw new Error(`Vendor not found: ${firstRow.vendor_name}`);
+      primary_vendor_id = vendor.vendor_id;
+    } else {
+      throw new Error('Either primary_vendor_id or vendor_name is required');
+    }
+
+    let category_id, sub_category_id;
+    if (firstRow.category_id) {
+      category_id = firstRow.category_id;
+    } else if (firstRow.category_name) {
+      const category = await prisma.category.findFirst({
+        where: { name: { equals: firstRow.category_name, mode: 'insensitive' }, parent_id: null }
+      });
+      if (!category) throw new Error(`Category not found: ${firstRow.category_name}`);
+      category_id = category.category_id;
+      
+      if (firstRow.sub_category_name) {
+        const subCategory = await prisma.category.findFirst({
+          where: { name: { equals: firstRow.sub_category_name, mode: 'insensitive' }, parent_id: category_id }
+        });
+        if (!subCategory) throw new Error(`Sub-category not found: ${firstRow.sub_category_name}`);
+        sub_category_id = subCategory.category_id;
+      }
+    } else {
+      throw new Error('Either category_id or category_name is required');
+    }
+
+    // ========== FIRST: Build variants data (without images) ==========
+    const variantsData = [];
+    const missingImageVariants = [];
+
+    for (const row of productRows) {
+      const productCode = normalizeProductCode(row.product_code);
+      if (!productCode) throw new Error(`product_code required for variant at row ${row.rowNumber}`);
+
+      // Check if images folder exists (store path for later)
+      let imageFolderPath = null;
+      let imagesMissing = false;
+
+      if (!preview && imagesRootFolder) {
+        const folderPath = path.join(imagesRootFolder, productCode);
+        if (fs.existsSync(folderPath) && fs.statSync(folderPath).isDirectory()) {
+          const files = fs.readdirSync(folderPath).filter(f => /\.(jpg|jpeg|png|gif|webp)$/i.test(f));
+          if (files.length > 0) {
+            imageFolderPath = folderPath;
+          } else {
+            imagesMissing = true;
+          }
+        } else {
+          console.log(`   ❌ Folder NOT found for ${productCode}`);
+          imagesMissing = true;
+        }
+      }
+
+      variantsData.push({
+        product_code: productCode,
+        mrp: Number(row.mrp) || 0,
+        wholesale_price: Number(row.wholesale_price) || 0,
+        retail_price: Number(row.retail_price) || 0,
+        online_price: row.online_price ? Number(row.online_price) : null,
+        weight: row.weight ? Number(row.weight) : null,
+        length: row.length ? Number(row.length) : null,
+        width: row.width ? Number(row.width) : null,
+        height: row.height ? Number(row.height) : null,
+        quantity: Number(row.quantity) || 0,
+        low_stock_threshold: Number(row.low_stock_threshold) || 10,
+        imageFolderPath,  // Store folder path for later
+      });
+
+      if (imagesMissing) {
+        missingImageVariants.push(productCode);
+      }
+    }
+
+    // Add warning for missing images
+    if (missingImageVariants.length > 0 && !preview) {
+      if (!results.warnings) results.warnings = [];
+      results.warnings.push({
+        product: productName,
+        variants: missingImageVariants,
+        message: `Image folder(s) not found or empty for variants: ${missingImageVariants.join(', ')}. Product created without images.`
+      });
+    }
+
+    if (preview) {
+      results.preview.valid++;
+      results.preview.rows.push({
+        name: productName,
+        variants_count: variantsData.length,
+        has_images: variantsData.some(v => v.imageFolderPath !== null),
+        vendor_id: primary_vendor_id,
+        category_id: category_id,
+        sub_category_id: sub_category_id,
+        errors: []
+      });
+      return;
+    }
+
+    // ========== SECOND: Create Product ==========
+    let existingProduct = await prisma.product.findFirst({
+      where: {
+        warehouse_id: warehouseId,
+        name: { equals: productName, mode: 'insensitive' }
+      }
+    });
+
+    if (existingProduct) {
+      // Add variants to existing product
+      for (const variantData of variantsData) {
+        const existingVariant = await prisma.productVariant.findFirst({
+          where: {
+            product_id: existingProduct.product_id,
+            product_code: variantData.product_code
+          }
+        });
+        
+        if (!existingVariant) {
+          const newVariant = await prisma.productVariant.create({
+            data: {
+              product_id: existingProduct.product_id,
+              product_code: variantData.product_code,
+              system_barcode: variantData.product_code,
+              sku: `SKU-${variantData.product_code}`,
+              mrp: variantData.mrp,
+              wholesale_price: variantData.wholesale_price,
+              retail_price: variantData.retail_price,
+              online_price: variantData.online_price,
+              weight: variantData.weight,
+              length: variantData.length,
+              width: variantData.width,
+              height: variantData.height,
+              low_stock_threshold: variantData.low_stock_threshold,
+            }
+          });
+          
+          // ========== THIRD: Upload images using REAL IDs ==========
+          if (variantData.imageFolderPath) {
+            const files = fs.readdirSync(variantData.imageFolderPath).filter(f => /\.(jpg|jpeg|png|gif|webp)$/i.test(f));
+            for (let i = 0; i < Math.min(files.length, 10); i++) {
+              const filePath = path.join(variantData.imageFolderPath, files[i]);
+              const fileBuffer = fs.readFileSync(filePath);
+              const uploadResult = await MediaService.uploadVariantImage({
+                warehouseId,
+                productId: existingProduct.product_id,
+                variantId: newVariant.variant_id,
+                file: { buffer: fileBuffer, mimetype: 'image/jpeg', originalname: files[i] }
+              });
+              
+              await prisma.productVariantImage.create({
+                data: {
+                  variant_id: newVariant.variant_id,
+                  url: uploadResult.url,
+                  storage_key: uploadResult.storage_key,
+                  storage_provider: uploadResult.storage_provider,
+                  alt_text: productName,
+                  sort_order: i
+                }
+              });
+            }
+          }
+        }
+      }
+      results.created++;
+    } else {
+      // Create new product
+      const product = await prisma.product.create({
+        data: {
+          warehouse: { connect: { warehouse_id: warehouseId } },
+          primary_vendor: { connect: { vendor_id: primary_vendor_id } },
+          category: { connect: { category_id: category_id } },
+          ...(sub_category_id && { sub_category: { connect: { category_id: sub_category_id } } }),
+          product_code: variantsData[0].product_code.split('-')[0],
+          name: productName,
+          hsn_code: firstRow.hsn_code,
+          gst_percent: Number(firstRow.gst_percent) || 18,
+          gst_type: firstRow.gst_type || 'CGST_SGST',
+          unit_of_measure: firstRow.unit_of_measure || 'PCS',
+          mrp: variantsData[0].mrp,
+          wholesale_price: variantsData[0].wholesale_price,
+          retail_price: variantsData[0].retail_price,
+        }
+      });
+
+      for (const variantData of variantsData) {
+        const newVariant = await prisma.productVariant.create({
+          data: {
+            product_id: product.product_id,
+            product_code: variantData.product_code,
+            system_barcode: variantData.product_code,
+            sku: `SKU-${variantData.product_code}`,
+            mrp: variantData.mrp,
+            wholesale_price: variantData.wholesale_price,
+            retail_price: variantData.retail_price,
+            online_price: variantData.online_price,
+            weight: variantData.weight,
+            length: variantData.length,
+            width: variantData.width,
+            height: variantData.height,
+            low_stock_threshold: variantData.low_stock_threshold,
+          }
+        });
+        
+        // ========== THIRD: Upload images using REAL IDs ==========
+        if (variantData.imageFolderPath) {
+          const files = fs.readdirSync(variantData.imageFolderPath).filter(f => /\.(jpg|jpeg|png|gif|webp)$/i.test(f));
+          for (let i = 0; i < Math.min(files.length, 10); i++) {
+            const filePath = path.join(variantData.imageFolderPath, files[i]);
+            const fileBuffer = fs.readFileSync(filePath);
+            const uploadResult = await MediaService.uploadVariantImage({
+              warehouseId,
+              productId: product.product_id,
+              variantId: newVariant.variant_id,
+              file: { buffer: fileBuffer, mimetype: 'image/jpeg', originalname: files[i] }
+            });
+            
+            await prisma.productVariantImage.create({
+              data: {
+                variant_id: newVariant.variant_id,
+                url: uploadResult.url,
+                storage_key: uploadResult.storage_key,
+                storage_provider: uploadResult.storage_provider,
+                alt_text: productName,
+                sort_order: i
+              }
+            });
+          }
+        }
+        
+        // Create stock entry if quantity > 0
+        if (variantData.quantity > 0) {
+          await prisma.productStock.create({
+            data: {
+              variant_id: newVariant.variant_id,
+              product_id: product.product_id,
+              warehouse_id: warehouseId,
+              quantity: variantData.quantity,
+              room_zone: 'DEFAULT',
+              rack_shelf: 'DEFAULT',
+              batch_number: '',
+              low_stock_threshold: variantData.low_stock_threshold,
+            }
+          });
+        }
+      }
+      results.created++;
+    }
   },
 
   async bulkUpdate(items, user) {
@@ -1456,6 +1852,44 @@ const ProductService = {
     }
 
     return results;
+  },
+
+  // ⭐ Permanent delete with cascade (for testing)
+  async hardDeleteProductsByDate(dateThreshold, user) {
+    // Only SUPER_ADMIN can do this
+    if (user.role !== 'SUPER_ADMIN') {
+      throw new AppError('Only SUPER_ADMIN can permanently delete products', 403);
+    }
+
+    // Delete all products created after date
+    const deleted = await prisma.$transaction(async (tx) => {
+      // Get products to delete
+      const products = await tx.product.findMany({
+        where: { created_at: { gt: dateThreshold } },
+        select: { product_id: true }
+      });
+
+      const productIds = products.map(p => p.product_id);
+      if (productIds.length === 0) return 0;
+
+      // Delete in correct order (child first)
+      await tx.productStock.deleteMany({ where: { product_id: { in: productIds } } });
+      
+      // Get all variant IDs for these products
+      const variants = await tx.productVariant.findMany({
+        where: { product_id: { in: productIds } },
+        select: { variant_id: true }
+      });
+      const variantIds = variants.map(v => v.variant_id);
+      
+      await tx.productVariantImage.deleteMany({ where: { variant_id: { in: variantIds } } });
+      await tx.productVariant.deleteMany({ where: { product_id: { in: productIds } } });
+      
+      const result = await tx.product.deleteMany({ where: { product_id: { in: productIds } } });
+      return result.count;
+    });
+
+    return { deleted: deleted };
   },
 };
 

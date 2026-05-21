@@ -381,3 +381,208 @@ Full variant list with all `images[]`, optional `stocks[]` summary.
 - [product-stock-routes.md](./product-stock-routes.md) — stock after labeling
 - [vendor-routes.md](./vendor-routes.md) — `primary_vendor_id`
 - [media-and-env.md](./media-and-env.md) — `MEDIA_PROVIDER`, Cloudinary, R2
+
+
+
+
+//bulk upload 
+Upload Products with Images (CSV + ZIP)
+text
+POST /api/v1/products/bulk/csv
+Preview Only (Validate without saving)
+text
+POST /api/v1/products/bulk/csv?preview=true
+📋 Headers
+Header	Value	Required
+Authorization	Bearer <access_token>	✅ Yes
+Content-Type	multipart/form-data	✅ Yes (auto-set by browser)
+📦 Request Body (FormData)
+Field Name	Type	Required	Description
+file	File	✅ Yes	CSV file with product data
+imagesZip	File	❌ No	ZIP file containing product images
+📁 CSV Format
+Required Columns
+Column	Type	Example	Description
+name	String	Premium Cotton T-Shirt	Product name (groups variants)
+product_code	String	6767-1	Variant code (BASE-N format)
+mrp	Number	1299	Maximum retail price
+wholesale_price	Number	899	Wholesale price
+retail_price	Number	999	Retail price
+hsn_code	String	6109	HSN code for GST
+gst_percent	Number	12	GST percentage
+gst_type	String	CGST_SGST	CGST_SGST / IGST
+unit_of_measure	String	PCS	Unit (PCS, KG, LTR, etc.)
+quantity	Number	50	Initial stock quantity
+Optional Columns
+Column	Type	Example	Description
+title	String	Premium Cotton T-Shirt - White	SEO title (variant-specific)
+description	String	100% combed cotton	Product description
+brand_name	String	Apple	Brand (defaults to "Generic")
+online_price	Number	1099	E-commerce price
+weight	Number	200	Weight in grams (per unit)
+length	Number	35	Length in cm (per unit)
+width	Number	25	Width in cm (per unit)
+height	Number	3	Height in cm (per unit)
+vendor_name	String	Apple India	Vendor name (instead of vendor_id)
+category_name	String	Electronics	Category name (instead of category_id)
+sub_category_name	String	Mobile Accessories	Sub-category name
+remarks	String	Summer collection	Internal notes
+📁 ZIP File Structure
+text
+images.zip
+│
+├── 6767-1/                    ← Folder name = product_code from CSV
+│   ├── front.jpg
+│   ├── back.jpg
+│   └── side.jpg
+│
+├── 6767-2/                    ← Another variant
+│   └── image.jpg
+│
+├── 8765-1/                    ← Another product variant
+│   ├── front.png
+│   └── back.png
+│
+└── 1112-1/                    ← Single variant product
+    └── product.jpg
+Rules:
+
+Folder name MUST EXACTLY MATCH product_code from CSV
+
+Supported image formats: .jpg, .jpeg, .png, .gif, .webp
+
+Max 10 images per variant
+
+Missing folders = product created without images (warning in response)
+
+📝 Sample CSV File
+csv
+name,title,product_code,vendor_name,category_name,mrp,wholesale_price,retail_price,quantity,hsn_code,gst_percent,gst_type,unit_of_measure,weight,length,width,height
+Premium Cotton T-Shirt,Premium Cotton T-Shirt - White,6767-1,Apple India,Electronics,1299,899,999,50,6109,12,CGST_SGST,PCS,200,35,25,3
+Premium Cotton T-Shirt,Premium Cotton T-Shirt - Black,6767-2,Apple India,Electronics,1299,899,999,40,6109,12,CGST_SGST,PCS,200,35,25,3
+Slim Fit Jeans,Slim Fit Jeans - Light Blue,8765-1,Samsung India,Apparel,2499,1799,1999,100,6204,18,CGST_SGST,PCS,600,45,35,12
+Slim Fit Jeans,Slim Fit Jeans - Dark Blue,8765-2,Samsung India,Apparel,2499,1799,1999,80,6204,18,CGST_SGST,PCS,600,45,35,12
+Wireless Mouse,Wireless Bluetooth Mouse,1112-1,Local Supplier,Electronics,1499,999,1199,75,8471,12,CGST_SGST,PCS,150,12,8,4
+📤 Response Format
+Success Response (Final Upload)
+json
+{
+  "success": true,
+  "message": "Bulk product import completed",
+  "data": {
+    "created": 5,
+    "failed": [],
+    "warnings": [
+      {
+        "product": "Premium Cotton T-Shirt",
+        "variants": ["6767-3"],
+        "message": "Image folder(s) not found or empty for variants: 6767-3. Product created without images."
+      }
+    ]
+  },
+  "requestId": "abc123"
+}
+Preview Response (?preview=true)
+json
+{
+  "success": true,
+  "message": "Preview generated successfully",
+  "data": {
+    "preview": {
+      "valid": 5,
+      "invalid": 1,
+      "rows": [
+        {
+          "name": "Premium Cotton T-Shirt",
+          "variants_count": 3,
+          "has_images": true,
+          "vendor_id": "vendor_123",
+          "category_id": "cat_456",
+          "errors": []
+        }
+      ]
+    },
+    "failed": []
+  },
+  "requestId": "abc123"
+}
+Error Response
+json
+{
+  "success": false,
+  "message": "CSV file is required (field name: file)",
+  "code": "CSV_FILE_REQUIRED",
+  "requestId": "abc123"
+}
+🔄 Complete Flow (Recommended)
+Step 1: Preview First (Validate)
+javascript
+const formData = new FormData();
+formData.append('file', csvFile);
+// No ZIP in preview
+
+const response = await fetch('/api/v1/products/bulk/csv?preview=true', {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${token}`
+  },
+  body: formData
+});
+
+const preview = await response.json();
+if (preview.data.preview.valid === preview.data.preview.rows.length) {
+  // All valid, proceed to Step 2
+}
+Step 2: Final Upload with Images
+javascript
+const formData = new FormData();
+formData.append('file', csvFile);
+formData.append('imagesZip', zipFile);  // Optional
+
+const response = await fetch('/api/v1/products/bulk/csv', {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${token}`
+  },
+  body: formData
+});
+
+const result = await response.json();
+console.log(`Created: ${result.data.created}`);
+console.log(`Failed: ${result.data.failed.length}`);
+if (result.data.warnings) {
+  console.warn('Warnings:', result.data.warnings);
+}
+⚠️ Important Rules for Frontend
+Rule	Explanation
+Same name = same product	All variants of a product must have identical name
+product_code format	Must be BASE-N (e.g., 6767-1, 6767-2, 6767-3)
+Sequence continuity	For multi-variant products, codes must be continuous: -1, -2, -3
+Single variant	Can be -1 only (e.g., 1112-1)
+Vendor name OR ID	Use vendor_name column (easier) or primary_vendor_id
+Category name OR ID	Use category_name column (easier)
+Images optional	Products created without images if ZIP missing or folder not found
+Max images	10 images per variant
+Batch processing	50 products per batch, 1 sec delay between batches
+🧪 Postman Testing
+Setup:
+Method: POST
+
+URL: http://localhost:3441/api/v1/products/bulk/csv
+
+Headers: Authorization: Bearer <token>
+
+Body: form-data
+
+Form Data Fields:
+Key	Type	Value
+file	File	products.csv
+imagesZip	File	images.zip
+📞 Error Codes
+Code	Description
+CSV_FILE_REQUIRED	No CSV file uploaded
+CSV_EMPTY	CSV file is empty
+PRODUCT_CODE_REQUIRED	Missing product_code in CSV
+VENDOR_NOT_FOUND	Vendor name/ID doesn't exist
+CATEGORY_NOT_FOUND	Category name/ID doesn't exist
+ROW_FAILED	Individual row failed (check message)
