@@ -635,3 +635,211 @@ GET /api/v1/product-stocks?product_id=prod_iphone_123
 # Response should show quantity = quantity_received from inward
 # last_purchase_id should equal inward_id
 # last_purchase_date should be current date
+
+
+
+
+
+
+//updated with purchase entry 
+# Inward Receipt (GRN) API Documentation - UPDATED
+
+## 🎯 Important Changes
+
+**Stock is now added ONLY when inward status becomes MAPPED. No other way to add stock.**
+
+When you mark inward as MAPPED, the system automatically:
+1. ✅ Creates a Purchase Entry
+2. ✅ Adds stock to warehouse with purchase reference
+3. ✅ Creates Stock Ledger entry for audit trail
+4. ✅ Updates last_purchase_id and last_purchase_date
+
+---
+
+## Complete API Flow
+
+### Step 1: Create Inward (SCHEDULED)
+
+**Endpoint:** `POST /api/v1/inwards`
+
+**Request Body:**
+```json
+{
+  "vendor_id": "vendor_abc123",
+  "warehouse_id": "wh_001",
+  "expected_date": "2025-06-15T10:00:00.000Z",
+  "remarks": "Monthly stock order"
+}
+Response: Get inward_id and inward_number
+
+Step 2: Update Arrival Details (ARRIVED)
+Endpoint: PATCH /api/v1/inwards/:inwardId/arrival-details
+
+Request Body:
+
+json
+{
+  "vendor_invoice_no": "INV-2025-001",
+  "challan_no": "CH-2025-001",
+  "transport_details": "Truck No: HR 55 AB 1234",
+  "remarks": "Goods received in good condition"
+}
+After this step: Status changes from SCHEDULED → ARRIVED
+
+Step 3: Add Items (Two Options)
+Option A: Add Single Item
+Endpoint: POST /api/v1/inwards/:inwardId/items
+
+Request Body:
+
+json
+{
+  "item_name": "iPhone 15 Pro Case - Black",
+  "variant_text": "BLACK-15PRO",
+  "quantity_received": 100,
+  "purchase_cost": 450,
+  "batch_number": "BATCH-2025-001",
+  "room_zone": "Aisle-A",
+  "rack_shelf": "Rack-01",
+  "position": "Shelf-02",
+  "remarks": "Premium quality"
+}
+Option B: Add Bulk Items (Max 50)
+Endpoint: POST /api/v1/inwards/:inwardId/items/bulk
+
+Request Body:
+
+json
+{
+  "items": [
+    {
+      "item_name": "iPhone 15 Pro Case - Black",
+      "variant_text": "BLACK-15PRO",
+      "quantity_received": 100,
+      "purchase_cost": 450,
+      "batch_number": "BATCH-001"
+    },
+    {
+      "item_name": "Samsung S24 Case - Blue",
+      "variant_text": "BLUE-S24",
+      "quantity_received": 50,
+      "purchase_cost": 350,
+      "batch_number": "BATCH-002"
+    }
+  ]
+}
+Response: Get inward_item_id for each item (needed for mapping)
+
+Step 4: Get All Items (To Get Item IDs)
+Endpoint: GET /api/v1/inwards/:inwardId
+
+Response: Returns all items with their inward_item_id
+
+Step 5: Map Each Item to a Product
+Endpoint: PUT /api/v1/inwards/:inwardId/items/:inwardItemId
+
+Request Body:
+
+json
+{
+  "mapped_product_id": "prod_iphone_case_123"
+}
+⚠️ Important: Map ALL items before proceeding to Step 6
+
+Step 6: Mark as MAPPED (STOCK CREATED HERE)
+Endpoint: PATCH /api/v1/inwards/:inwardId/status
+
+Request Body:
+
+json
+{
+  "status": "MAPPED",
+  "remarks": "All items mapped successfully"
+}
+✅ What happens automatically:
+
+Purchase Entry created
+
+Stock added to warehouse
+
+Stock Ledger entry created
+
+last_purchase_id and last_purchase_date updated
+
+Status Flow
+Status	Meaning	Can Add Items?	Can Map Items?	Stock Added?
+SCHEDULED	Order placed	❌ No	❌ No	❌ No
+ARRIVED	Goods received	✅ Yes	✅ Yes	❌ No
+MAPPED	All items mapped	❌ No	❌ No	✅ Yes
+CANCELLED	Cancelled	❌ No	❌ No	❌ No
+Error Codes
+Code	Description	Solution
+INWARD_ITEMS_UNMAPPED	Trying to mark MAPPED with unmapped items	Map all items first
+INWARD_NOT_ARRIVED	Cannot mark MAPPED directly from SCHEDULED	Call arrival-details endpoint first
+MAPPED_PRODUCT_NO_VARIANT	Product has no active variant	Add variant to product first
+PRODUCT_NOT_FOUND	Invalid product ID	Use existing product ID
+Complete Example (All API Calls in Order)
+bash
+# 1. Create inward
+POST /api/v1/inwards
+{"vendor_id":"vendor_123","warehouse_id":"wh_001"}
+# → inward_id: "inw_001"
+
+# 2. Update arrival details
+PATCH /api/v1/inwards/inw_001/arrival-details
+{"vendor_invoice_no":"INV-001"}
+
+# 3. Add items (bulk)
+POST /api/v1/inwards/inw_001/items/bulk
+{"items":[{"item_name":"iPhone Case","quantity_received":100},{"item_name":"Samsung Cover","quantity_received":50}]}
+# → items created with IDs
+
+# 4. Get inward details to see item IDs
+GET /api/v1/inwards/inw_001
+
+# 5. Map item 1
+PUT /api/v1/inwards/inw_001/items/item_001
+{"mapped_product_id":"prod_iphone_123"}
+
+# 6. Map item 2
+PUT /api/v1/inwards/inw_001/items/item_002
+{"mapped_product_id":"prod_samsung_456"}
+
+# 7. Mark MAPPED (THIS CREATES STOCK)
+PATCH /api/v1/inwards/inw_001/status
+{"status":"MAPPED"}
+
+# ✅ Stock automatically added to both products!
+Important Rules
+Rule	Why
+Stock only from MAPPED status	Ensures complete purchase tracking
+Map all items before MAPPED	System validates all items are mapped
+Cannot modify after MAPPED	Maintains audit integrity
+Product must have variant	Stock needs variant to add quantity
+After MAPPED — Verify Stock
+bash
+# Check stock was added
+GET /api/v1/product-stocks?product_id=prod_iphone_123
+
+# Response shows:
+# - quantity: 100
+# - last_purchase_id: purchase entry ID (not null)
+# - last_purchase_date: current timestamp
+This is the complete flow. Stock will ONLY be added when status becomes MAPPED. 🚀
+
+text
+
+---
+
+## 📋 Summary — Frontend Dev Ko Kya Batana Hai
+
+| Point | Explanation |
+|-------|-------------|
+| **Stock kab add hota hai?** | Sirf jab status `MAPPED` karte ho |
+| **Purchase Entry** | Auto-create hota hai jab MAPPED karte ho |
+| **last_purchase_id** | Ab null nahi rahega — proper ID set hogi |
+| **Items add** | Single ya bulk — dono support hai |
+| **Map karna** | Har item ko product se map karna mandatory hai |
+| **MAPPED se pehle** | Saare items mapped hone chahiye |
+
+**Ye doc frontend dev ko bhej do — wo integration kar lega! 🚀**

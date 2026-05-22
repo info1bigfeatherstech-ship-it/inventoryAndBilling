@@ -188,7 +188,7 @@ const resolveVariantForInwardItem = async (tx, item) => {
   return firstVariant;
 };
 
-const applyStockFromMappedInward = async (tx, inwardId, warehouseId, actorUserId) => {
+const applyStockFromMappedInward = async (tx, inwardId, warehouseId, actorUserId, purchaseEntryId = null) => {
   const inward = await tx.inwardReceipt.findUnique({
     where: { inward_id: inwardId },
     select: { inward_number: true },
@@ -231,7 +231,7 @@ const applyStockFromMappedInward = async (tx, inwardId, warehouseId, actorUserId
         rack_shelf: rackShelf,
         ...(item.position !== undefined && item.position !== null ? { position: item.position } : {}),
         ...(item.expiry_date ? { expiry_date: item.expiry_date } : {}),
-        last_purchase_id: inwardId,
+        ...(purchaseEntryId && { last_purchase_id: purchaseEntryId }),
         last_purchase_date: new Date(),
       },
       create: {
@@ -245,7 +245,7 @@ const applyStockFromMappedInward = async (tx, inwardId, warehouseId, actorUserId
         batch_number: batchNumber,
         expiry_date: item.expiry_date ?? null,
         low_stock_threshold: variant.low_stock_threshold,
-        last_purchase_id: inwardId,
+        ...(purchaseEntryId && { last_purchase_id: purchaseEntryId }),
         last_purchase_date: new Date(),
       },
     });
@@ -256,8 +256,8 @@ const applyStockFromMappedInward = async (tx, inwardId, warehouseId, actorUserId
       movementType: 'PURCHASE',
       quantity: item.quantity_received,
       toWarehouseId: warehouseId,
-      referenceId: inwardId,
-      referenceType: 'INWARD_RECEIPT',
+      referenceId: purchaseEntryId || inwardId,
+      referenceType: purchaseEntryId ? 'PURCHASE_ENTRY' : 'INWARD_RECEIPT',
       batchNumber: batchNumber || null,
       expiryDate: item.expiry_date ?? null,
       createdBy: actorUserId,
@@ -603,6 +603,9 @@ const InwardService = {
       where: { inward_id: inwardId },
       select: {
         inward_id: true,
+        inward_number: true,      // ⭐ ADDED
+        vendor_id: true,          // ⭐ ADDED
+        vendor_invoice_no: true,  // ⭐ ADDED
         status: true,
         warehouse_id: true,
         items: { select: { inward_item_id: true }, take: 1 },
@@ -612,15 +615,15 @@ const InwardService = {
     if (inward.status === 'CANCELLED') {
       throw new AppError('Cancelled inward cannot be updated', 409, 'INWARD_ALREADY_CANCELLED');
     }
-
+  
     if (status === 'ARRIVED') {
       throw new AppError('Use arrival-details endpoint to mark ARRIVED', 400, 'USE_ARRIVAL_DETAILS_ENDPOINT');
     }
-
+  
     if (status === 'MAPPED' && inward.status !== 'ARRIVED') {
       throw new AppError('Only ARRIVED inward can move to MAPPED', 409, 'INWARD_NOT_ARRIVED');
     }
-
+  
     if (status === 'MAPPED') {
       const unmapped = await prisma.inwardReceiptItem.count({
         where: { inward_id: inwardId, mapped_product_id: null },
@@ -629,30 +632,65 @@ const InwardService = {
         throw new AppError('All inward items must be mapped before status MAPPED', 409, 'INWARD_ITEMS_UNMAPPED', { unmappedItems: unmapped });
       }
     }
-
+  
     const previousStatus = inward.status;
     const shouldApplyStock = status === 'MAPPED' && previousStatus !== 'MAPPED';
-
+  
     const data = {
       status,
       ...(remarks !== undefined ? { remarks } : {}),
       ...(status === 'ARRIVED' ? { arrived_at: new Date(), received_by_user_id: actorUserId } : {}),
     };
-
+  
     const updated = await prisma.$transaction(async (tx) => {
       const receipt = await tx.inwardReceipt.update({
         where: { inward_id: inwardId },
         data,
         select: INWARD_SELECT,
       });
-
+  
       if (shouldApplyStock) {
-        await applyStockFromMappedInward(tx, inwardId, inward.warehouse_id, actorUserId);
+        // ⭐⭐⭐ NEW CODE STARTS HERE ⭐⭐⭐
+        
+        // Get all mapped items to calculate total
+        const mappedItemsForPurchase = await tx.inwardReceiptItem.findMany({
+          where: { inward_id: inwardId, mapped_product_id: { not: null } },
+          select: { purchase_cost: true, quantity_received: true }
+        });
+        
+        let subtotal = 0;
+        for (const item of mappedItemsForPurchase) {
+          subtotal += (item.purchase_cost || 0) * item.quantity_received;
+        }
+        
+        // Create Purchase Entry
+        const purchaseEntry = await tx.purchaseEntry.create({
+          data: {
+            purchase_number: `PO-${inward.inward_number}`,
+            vendor_id: inward.vendor_id,
+            warehouse_id: inward.warehouse_id,
+            vendor_invoice_no: inward.vendor_invoice_no || null,
+            purchase_date: new Date(),
+            status: 'RECEIVED',
+            subtotal: subtotal,
+            tax_amount: 0,
+            total_amount: subtotal,
+            received_by: actorUserId,
+            received_at: new Date(),
+            remarks: `Created from inward: ${inward.inward_number}`,
+          },
+          select: { purchase_id: true }
+        });
+        
+        // Apply stock with purchase entry ID
+        await applyStockFromMappedInward(tx, inwardId, inward.warehouse_id, actorUserId, purchaseEntry.purchase_id);
+        
+        // ⭐⭐⭐ NEW CODE ENDS HERE ⭐⭐⭐
       }
-
+  
       return receipt;
     });
-
+  
     if (shouldApplyStock) {
       const mappedItems = await prisma.inwardReceiptItem.findMany({
         where: { inward_id: inwardId, mapped_product_id: { not: null } },
@@ -664,7 +702,7 @@ const InwardService = {
         )
       );
     }
-
+  
     return updated;
   },
 };

@@ -15,6 +15,7 @@ const shopRoutes = require('./shop/shop.routes');
 const shopStockRoutes = require('./shop/shopStock.routes');
 const stockTransferRoutes = require('./stock/stockTransfer.routes');
 const stockLedgerRoutes = require('./stock/stockLedger.routes');
+const purchaseEntryRoutes = require('./purchase/purchaseEntry.routes');
 
 // API info route
 router.get('/', (req, res) => {
@@ -71,7 +72,7 @@ v1Router.use('/shops', shopRoutes);
 v1Router.use('/shop-stocks', shopStockRoutes);
 v1Router.use('/stock', stockTransferRoutes);
 v1Router.use('/stock/ledger', stockLedgerRoutes);
-
+v1Router.use('/purchase-entries', purchaseEntryRoutes);
 // Mount versioned routes
 router.use('/v1', v1Router);
 

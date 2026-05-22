@@ -66,7 +66,7 @@ async function startServer() {
     const liveUrl = `http://localhost:${PORT}/live`;
 
     printStartupBanner({
-      appName: 'Vyaapar Inventory & Billing API',
+      appName: 'Inventory & Billing System',
       version: `v${pkg.version}`,
       env: config.NODE_ENV,
       port: PORT,
