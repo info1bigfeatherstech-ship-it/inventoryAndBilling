@@ -53,6 +53,24 @@ const addInwardItemValidator = [
   ...inwardItemRules,
 ];
 
+const bulkAddInwardItemsValidator = [
+  ...inwardIdParam,
+  body('items').isArray({ min: 1, max: 50 }).withMessage('items must be an array with 1-50 items'),
+  body('items.*.item_name').isString().trim().notEmpty().withMessage('item_name is required for each item'),
+  body('items.*.quantity_received').isInt({ min: 1 }).toInt().withMessage('quantity_received must be >= 1'),
+  body('items.*.purchase_cost').optional({ nullable: true }).isFloat({ gt: 0 }).toFloat(),
+  body('items.*.batch_number').optional({ nullable: true }).isString().trim().isLength({ max: 100 }),
+  body('items.*.expiry_date').optional({ nullable: true }).isISO8601().toDate(),
+  body('items.*.room_zone').optional({ nullable: true }).isString().trim().isLength({ max: 100 }),
+  body('items.*.rack_shelf').optional({ nullable: true }).isString().trim().isLength({ max: 100 }),
+  body('items.*.position').optional({ nullable: true }).isString().trim().isLength({ max: 100 }),
+  body('items.*.variant_text').optional({ nullable: true }).isString().trim().isLength({ max: 200 }),
+  body('items.*.mapped_product_id').optional({ nullable: true }).isString().trim().notEmpty(),
+  body('items.*.remarks').optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
+];
+
+
+
 const updateInwardItemValidator = [
   ...inwardItemIdParam,
   body('item_name').optional().isString().trim().isLength({ min: 2, max: 200 }),
@@ -95,4 +113,5 @@ module.exports = {
   updateInwardItemValidator,
   updateInwardStatusValidator,
   listInwardsValidator,
+  bulkAddInwardItemsValidator,
 };

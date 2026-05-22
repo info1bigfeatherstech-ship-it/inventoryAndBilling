@@ -48,6 +48,19 @@ const InwardController = {
       data: item,
     });
   }),
+  // ========== ADD BULK ITEMS ==========
+  addBulkItems: asyncHandler(async (req, res) => {
+    const results = await InwardService.addBulkInwardItems(
+      req.params.inwardId,
+      req.body,
+      req.user
+    );
+    return successResponse(res, req, {
+      statusCode: 201,
+      message: 'Bulk items added successfully',
+      data: results,
+    });
+  }),
 
   updateItem: asyncHandler(async (req, res) => {
     const item = await InwardService.updateInwardItem(req.params.inwardId, req.params.inwardItemId, req.body);

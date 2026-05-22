@@ -158,7 +158,7 @@ const resolveVariantForInwardItem = async (tx, item) => {
         product_id: productId,
         is_active: true,
         OR: [
-          { variant_code: { equals: variantText, mode: 'insensitive' } },
+          { product_code: { equals: variantText, mode: 'insensitive' } },
           { sku: { equals: variantText, mode: 'insensitive' } },
           { system_barcode: { equals: variantText, mode: 'insensitive' } },
         ],
@@ -231,6 +231,8 @@ const applyStockFromMappedInward = async (tx, inwardId, warehouseId, actorUserId
         rack_shelf: rackShelf,
         ...(item.position !== undefined && item.position !== null ? { position: item.position } : {}),
         ...(item.expiry_date ? { expiry_date: item.expiry_date } : {}),
+        last_purchase_id: inwardId,
+        last_purchase_date: new Date(),
       },
       create: {
         variant_id: variant.variant_id,
@@ -243,6 +245,8 @@ const applyStockFromMappedInward = async (tx, inwardId, warehouseId, actorUserId
         batch_number: batchNumber,
         expiry_date: item.expiry_date ?? null,
         low_stock_threshold: variant.low_stock_threshold,
+        last_purchase_id: inwardId,
+        last_purchase_date: new Date(),
       },
     });
 
@@ -470,6 +474,53 @@ const InwardService = {
         select: ITEM_SELECT,
       });
     });
+  },
+
+  async addBulkInwardItems(inwardId, data, user) {
+    const inward = await prisma.inwardReceipt.findUnique({
+      where: { inward_id: inwardId },
+      select: { inward_id: true, status: true },
+    });
+    if (!inward) throw new AppError('Inward receipt not found', 404);
+    if (!MUTABLE_STATUSES.has(inward.status)) {
+      throw new AppError('Items can only be added for ARRIVED inwards', 409);
+    }
+  
+    const items = data.items;
+    if (!Array.isArray(items) || items.length === 0) {
+      throw new AppError('items array is required', 400);
+    }
+  
+    // ✅ Limit bulk items (industry standard: 50)
+    const MAX_BULK_ITEMS = 50;
+    if (items.length > MAX_BULK_ITEMS) {
+      throw new AppError(`Maximum ${MAX_BULK_ITEMS} items per bulk request`, 400);
+    }
+  
+    const results = { created: [], failed: [] };
+  
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      try {
+        // ✅ Validate required fields (same as single item)
+        if (!item.item_name) throw new Error('item_name is required');
+        if (!item.quantity_received || item.quantity_received < 1) {
+          throw new Error('quantity_received must be >= 1');
+        }
+  
+        // ✅ Reuse existing addInwardItem logic
+        const created = await this.addInwardItem(inwardId, item);
+        results.created.push(created);
+      } catch (error) {
+        results.failed.push({
+          index: i,
+          item_name: item.item_name || `Item ${i + 1}`,
+          message: error.message,
+        });
+      }
+    }
+  
+    return results;
   },
 
   async updateInwardItem(inwardId, inwardItemId, data) {

@@ -13,6 +13,7 @@ const {
   updateInwardItemValidator,
   updateInwardStatusValidator,
   listInwardsValidator,
+  bulkAddInwardItemsValidator,
 } = require('../../validators/inward/inward.validators');
 
 router.use(requireAuth);
@@ -22,6 +23,7 @@ router.post('/', createInwardValidator, validateRequest, InwardController.create
 router.get('/', listInwardsValidator, validateRequest, InwardController.list);
 router.get('/:inwardId', inwardIdParam, validateRequest, InwardController.getById);
 router.patch('/:inwardId/arrival-details', updateArrivalDetailsValidator, validateRequest, InwardController.updateArrivalDetails);
+router.post('/:inwardId/items/bulk',bulkAddInwardItemsValidator,validateRequest,InwardController.addBulkItems);
 router.post('/:inwardId/items', addInwardItemValidator, validateRequest, InwardController.addItem);
 router.put('/:inwardId/items/:inwardItemId', updateInwardItemValidator, validateRequest, InwardController.updateItem);
 router.delete('/:inwardId/items/:inwardItemId', inwardItemIdParam, validateRequest, InwardController.removeItem);
