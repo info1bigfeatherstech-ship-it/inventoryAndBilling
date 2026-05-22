@@ -1,6 +1,13 @@
 const prisma = require('../../utils/prisma.utils');
 const { AppError } = require('../../middlewares/error.middleware');
 const { parsePagination } = require('../../utils/pagination.utils');
+const {
+  cacheDel,
+  cacheDelByPattern,
+  productDetailCacheKey,
+  productListCachePattern,
+} = require('../../utils/cache.utils');
+const { createStockLedgerEntry } = require('../stock/stockLedger.helpers');
 
 const MUTABLE_STATUSES = new Set(['ARRIVED']);
 
@@ -129,6 +136,135 @@ const sanitizeItemPayload = (data) => ({
   mapped_product_id: data.mapped_product_id ?? null,
   remarks: data.remarks ?? null,
 });
+
+const invalidateProductCaches = async (productId, warehouseId) => {
+  await Promise.all([
+    cacheDel(productDetailCacheKey(productId)),
+    cacheDelByPattern(productListCachePattern(warehouseId)),
+  ]);
+};
+
+/** Resolve which variant receives stock when an inward line maps to a product. */
+const resolveVariantForInwardItem = async (tx, item) => {
+  const productId = item.mapped_product_id;
+  if (!productId) {
+    throw new AppError('Inward item has no mapped product', 400, 'INWARD_ITEM_NOT_MAPPED');
+  }
+
+  const variantText = item.variant_text ? String(item.variant_text).trim() : '';
+  if (variantText) {
+    const matched = await tx.productVariant.findFirst({
+      where: {
+        product_id: productId,
+        is_active: true,
+        OR: [
+          { variant_code: { equals: variantText, mode: 'insensitive' } },
+          { sku: { equals: variantText, mode: 'insensitive' } },
+          { system_barcode: { equals: variantText, mode: 'insensitive' } },
+        ],
+      },
+      select: { variant_id: true, product_id: true, low_stock_threshold: true },
+    });
+    if (matched) return matched;
+  }
+
+  const defaultVariant = await tx.productVariant.findFirst({
+    where: { product_id: productId, is_active: true, is_default: true },
+    orderBy: { sort_order: 'asc' },
+    select: { variant_id: true, product_id: true, low_stock_threshold: true },
+  });
+  if (defaultVariant) return defaultVariant;
+
+  const firstVariant = await tx.productVariant.findFirst({
+    where: { product_id: productId, is_active: true },
+    orderBy: [{ sort_order: 'asc' }, { created_at: 'asc' }],
+    select: { variant_id: true, product_id: true, low_stock_threshold: true },
+  });
+
+  if (!firstVariant) {
+    throw new AppError('Mapped product has no active variant for stock', 409, 'MAPPED_PRODUCT_NO_VARIANT');
+  }
+
+  return firstVariant;
+};
+
+const applyStockFromMappedInward = async (tx, inwardId, warehouseId, actorUserId) => {
+  const inward = await tx.inwardReceipt.findUnique({
+    where: { inward_id: inwardId },
+    select: { inward_number: true },
+  });
+
+  const mappedItems = await tx.inwardReceiptItem.findMany({
+    where: { inward_id: inwardId, mapped_product_id: { not: null } },
+    select: {
+      mapped_product_id: true,
+      item_name: true,
+      variant_text: true,
+      quantity_received: true,
+      batch_number: true,
+      expiry_date: true,
+      room_zone: true,
+      rack_shelf: true,
+      position: true,
+    },
+  });
+
+  const touchedProducts = new Set();
+
+  for (const item of mappedItems) {
+    const variant = await resolveVariantForInwardItem(tx, item);
+    const batchNumber = item.batch_number ? String(item.batch_number).trim() : '';
+    const roomZone = item.room_zone?.trim() || 'DEFAULT';
+    const rackShelf = item.rack_shelf?.trim() || 'DEFAULT';
+
+    await tx.productStock.upsert({
+      where: {
+        variant_id_warehouse_id_batch_number: {
+          variant_id: variant.variant_id,
+          warehouse_id: warehouseId,
+          batch_number: batchNumber,
+        },
+      },
+      update: {
+        quantity: { increment: item.quantity_received },
+        room_zone: roomZone,
+        rack_shelf: rackShelf,
+        ...(item.position !== undefined && item.position !== null ? { position: item.position } : {}),
+        ...(item.expiry_date ? { expiry_date: item.expiry_date } : {}),
+      },
+      create: {
+        variant_id: variant.variant_id,
+        product_id: variant.product_id,
+        warehouse_id: warehouseId,
+        quantity: item.quantity_received,
+        room_zone: roomZone,
+        rack_shelf: rackShelf,
+        position: item.position ?? null,
+        batch_number: batchNumber,
+        expiry_date: item.expiry_date ?? null,
+        low_stock_threshold: variant.low_stock_threshold,
+      },
+    });
+
+    await createStockLedgerEntry(tx, {
+      productId: variant.product_id,
+      variantId: variant.variant_id,
+      movementType: 'PURCHASE',
+      quantity: item.quantity_received,
+      toWarehouseId: warehouseId,
+      referenceId: inwardId,
+      referenceType: 'INWARD_RECEIPT',
+      batchNumber: batchNumber || null,
+      expiryDate: item.expiry_date ?? null,
+      createdBy: actorUserId,
+      remarks: `Inward: ${inward?.inward_number || inwardId} - ${item.item_name}`,
+    });
+
+    touchedProducts.add(`${variant.product_id}:${warehouseId}`);
+  }
+
+  return touchedProducts;
+};
 
 const resolveInwardWarehouseId = (data, user) => {
   if (user?.role === 'SUPER_ADMIN') {
@@ -414,7 +550,12 @@ const InwardService = {
   async updateInwardStatus(inwardId, status, actorUserId, remarks) {
     const inward = await prisma.inwardReceipt.findUnique({
       where: { inward_id: inwardId },
-      select: { inward_id: true, status: true, items: { select: { inward_item_id: true }, take: 1 } },
+      select: {
+        inward_id: true,
+        status: true,
+        warehouse_id: true,
+        items: { select: { inward_item_id: true }, take: 1 },
+      },
     });
     if (!inward) throw new AppError('Inward receipt not found', 404, 'INWARD_NOT_FOUND');
     if (inward.status === 'CANCELLED') {
@@ -438,17 +579,42 @@ const InwardService = {
       }
     }
 
+    const previousStatus = inward.status;
+    const shouldApplyStock = status === 'MAPPED' && previousStatus !== 'MAPPED';
+
     const data = {
       status,
       ...(remarks !== undefined ? { remarks } : {}),
       ...(status === 'ARRIVED' ? { arrived_at: new Date(), received_by_user_id: actorUserId } : {}),
     };
 
-    return prisma.inwardReceipt.update({
-      where: { inward_id: inwardId },
-      data,
-      select: INWARD_SELECT,
+    const updated = await prisma.$transaction(async (tx) => {
+      const receipt = await tx.inwardReceipt.update({
+        where: { inward_id: inwardId },
+        data,
+        select: INWARD_SELECT,
+      });
+
+      if (shouldApplyStock) {
+        await applyStockFromMappedInward(tx, inwardId, inward.warehouse_id, actorUserId);
+      }
+
+      return receipt;
     });
+
+    if (shouldApplyStock) {
+      const mappedItems = await prisma.inwardReceiptItem.findMany({
+        where: { inward_id: inwardId, mapped_product_id: { not: null } },
+        select: { mapped_product_id: true },
+      });
+      await Promise.all(
+        [...new Set(mappedItems.map((i) => i.mapped_product_id))].map((productId) =>
+          invalidateProductCaches(productId, inward.warehouse_id)
+        )
+      );
+    }
+
+    return updated;
   },
 };
 

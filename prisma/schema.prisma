@@ -319,7 +319,6 @@ model Product {
   product_stocks ProductStock[]
   purchase_items PurchaseItem[]
   stock_ledgers  StockLedger[]
-  shop_stocks    ShopStock[]
   bill_lines     BillLineItem[]
   credit_lines   CreditNoteLineItem[]
   inward_items   InwardReceiptItem[]
@@ -368,7 +367,9 @@ model ProductVariant {
   product        Product @relation(fields: [product_id], references: [product_id], onDelete: Cascade)
   images         ProductVariantImage[]
   stocks         ProductStock[]
-  
+  shop_stocks    ShopStock[]
+  stock_ledgers  StockLedger[]
+
   @@unique([product_id, sku])
   @@unique([product_id, product_code])  // ← FIXED
 }
@@ -437,20 +438,22 @@ model ProductStock {
 model ShopStock {
   shop_stock_id String @id @default(cuid())
   shop_id       String
-  product_id    String
+  variant_id    String
 
   quantity_available  Int @default(0)
   quantity_reserved   Int @default(0)
   quantity_in_transit Int @default(0)
+  low_stock_threshold Int @default(5)
 
-  shop    Shop    @relation(fields: [shop_id], references: [shop_id], onDelete: Restrict)
-  product Product @relation(fields: [product_id], references: [product_id], onDelete: Restrict)
+  shop    Shop           @relation(fields: [shop_id], references: [shop_id], onDelete: Restrict)
+  variant ProductVariant @relation(fields: [variant_id], references: [variant_id], onDelete: Restrict)
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
-  @@unique([shop_id, product_id])
-  @@index([product_id])
+  @@unique([shop_id, variant_id])
+  @@index([shop_id, quantity_available])
+  @@index([variant_id])
   @@map("shop_stocks")
 }
 
@@ -519,6 +522,7 @@ model PurchaseItem {
 model StockLedger {
   ledger_id  String @id @default(cuid())
   product_id String
+  variant_id String?
 
   movement_type MovementType
   quantity      Int
@@ -539,17 +543,21 @@ model StockLedger {
 
   created_at DateTime @default(now())
 
-  product        Product    @relation(fields: [product_id], references: [product_id])
-  from_warehouse Warehouse? @relation("LedgerFromWarehouse", fields: [from_warehouse_id], references: [warehouse_id])
-  to_warehouse   Warehouse? @relation("LedgerToWarehouse", fields: [to_warehouse_id], references: [warehouse_id])
-  from_shop      Shop?      @relation("LedgerFromShop", fields: [from_shop_id], references: [shop_id])
-  to_shop        Shop?      @relation("LedgerToShop", fields: [to_shop_id], references: [shop_id])
-  createdByUser  User       @relation("StockLedgerCreatedBy", fields: [created_by], references: [user_id])
+  product        Product         @relation(fields: [product_id], references: [product_id])
+  variant        ProductVariant? @relation(fields: [variant_id], references: [variant_id], onDelete: SetNull)
+  from_warehouse Warehouse?      @relation("LedgerFromWarehouse", fields: [from_warehouse_id], references: [warehouse_id])
+  to_warehouse   Warehouse?      @relation("LedgerToWarehouse", fields: [to_warehouse_id], references: [warehouse_id])
+  from_shop      Shop?           @relation("LedgerFromShop", fields: [from_shop_id], references: [shop_id])
+  to_shop        Shop?           @relation("LedgerToShop", fields: [to_shop_id], references: [shop_id])
+  createdByUser  User            @relation("StockLedgerCreatedBy", fields: [created_by], references: [user_id])
 
   @@index([product_id, created_at])
+  @@index([variant_id, created_at])
   @@index([from_shop_id, created_at])
   @@index([to_shop_id, created_at])
+  @@index([from_warehouse_id, created_at])
   @@index([movement_type, created_at])
+  @@index([reference_id, reference_type])
   @@map("stock_ledger")
 }
 

@@ -1616,7 +1616,6 @@ const ProductService = {
         length: row.length ? Number(row.length) : null,
         width: row.width ? Number(row.width) : null,
         height: row.height ? Number(row.height) : null,
-        quantity: Number(row.quantity) || 0,
         low_stock_threshold: Number(row.low_stock_threshold) || 10,
         title: row.title || null,           // ⭐ ADD THIS
         description: row.description || null, // ⭐ ADD THIS
@@ -1790,22 +1789,6 @@ const ProductService = {
             });
           }
         }
-        
-        // Create stock entry if quantity > 0
-        if (variantData.quantity > 0) {
-          await prisma.productStock.create({
-            data: {
-              variant_id: newVariant.variant_id,
-              product_id: product.product_id,
-              warehouse_id: warehouseId,
-              quantity: variantData.quantity,
-              room_zone: 'DEFAULT',
-              rack_shelf: 'DEFAULT',
-              batch_number: '',
-              low_stock_threshold: variantData.low_stock_threshold,
-            }
-          });
-        }
       }
       results.created++;
     }
@@ -1908,6 +1891,59 @@ async bulkRestore(productIds, user) {
 
   return results;
 },
+
+// ========== GET ONLY INACTIVE PRODUCTS (with warehouse scope) ==========
+async listInactiveProducts(query = {}, user) {
+  const { page, limit, skip, take } = parsePagination(query, { page: 1, limit: 50, maxLimit: 100 });
+  
+  // Build where clause - only inactive products
+  const where = { is_active: false };
+  
+  // Apply warehouse scope (WH_MANAGER/WH_STOCK_LISTER will see only their warehouse)
+  applyWarehouseScope(where, user);
+  
+  // Optional filters
+  if (query.category_id) where.category_id = query.category_id;
+  if (query.sub_category_id) where.sub_category_id = query.sub_category_id;
+  if (query.primary_vendor_id) where.primary_vendor_id = query.primary_vendor_id;
+  
+  // Search filter
+  if (query.search) {
+    const search = String(query.search).trim();
+    where.OR = [
+      { name: { contains: search, mode: 'insensitive' } },
+      { product_code: { contains: search, mode: 'insensitive' } },
+      { title: { contains: search, mode: 'insensitive' } },
+      { brand_name: { contains: search, mode: 'insensitive' } },
+      {
+        variants: {
+          some: {
+            OR: [
+              { sku: { contains: search, mode: 'insensitive' } },
+              { product_code: { contains: search, mode: 'insensitive' } },
+              { system_barcode: { contains: search, mode: 'insensitive' } },
+            ],
+          },
+        },
+      },
+    ];
+  }
+  
+  // Execute queries
+  const [total, products] = await Promise.all([
+    prisma.product.count({ where }),
+    prisma.product.findMany({
+      where,
+      skip,
+      take,
+      orderBy: [{ updated_at: 'desc' }],
+      select: PRODUCT_LIST_SELECT,  // Reuse existing select
+    }),
+  ]);
+  
+  return { total, page, limit, products: products.map(attachListingMeta) };
+},
+
 
 
   // ⭐ Permanent delete with cascade (for testing)

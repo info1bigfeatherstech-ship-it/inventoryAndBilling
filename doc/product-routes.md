@@ -30,15 +30,15 @@ Product (warehouse-scoped)
 | **Prices** | Always on **variant**. With `variants[]`, every item must include `mrp`, `wholesale_price`, `retail_price`. |
 | **Shipping** | Always on **variant** (for ecomm sync). With `variants[]`, every item needs `weight`, `length`, `width`, `height`. |
 | **Images** | Always on **variant** (max 4). Not on product root. |
-| **Stock** | After label is printed: `POST /api/v1/product-stocks`. Sending `stock` on create → `STOCK_NOT_ALLOWED_ON_LISTING`. |
+| **Stock** | **Only from inward receipt (MAPPED)** or manual `POST /product-stocks`. Product create/CSV does **not** add stock. `stock` / `initial_stock` on create → `STOCK_NOT_ALLOWED_ON_LISTING`. |
 
 ### Recommended UI flow
 
 1. User fills product form + variant rows (prices, size/color, photos).
-2. **Create** → `POST /products` (JSON or multipart with images).
+2. **Create** → `POST /products` (JSON or multipart with images) — **no stock**.
 3. Print **system_barcode** from response.
 4. Affix label on physical unit.
-5. **Stock in** → `POST /product-stocks` with `variant_id`, location, quantity.
+5. **Stock in** → inward receipt: ARRIVED → map items → status **MAPPED** (stock auto-added), or manual `POST /product-stocks` for corrections.
 
 ---
 
@@ -412,8 +412,9 @@ hsn_code	String	6109	HSN code for GST
 gst_percent	Number	12	GST percentage
 gst_type	String	CGST_SGST	CGST_SGST / IGST
 unit_of_measure	String	PCS	Unit (PCS, KG, LTR, etc.)
-quantity	Number	50	Initial stock quantity
 Optional Columns
+
+> **Stock:** Do not use a `quantity` column — inventory is added only when an inward receipt is **MAPPED**. Use [inward-routes.md](./inward-routes.md) or `POST /product-stocks` for manual adjustments.
 Column	Type	Example	Description
 title	String	Premium Cotton T-Shirt - White	SEO title (variant-specific)
 description	String	100% combed cotton	Product description
@@ -457,12 +458,12 @@ Missing folders = product created without images (warning in response)
 
 📝 Sample CSV File
 csv
-name,title,product_code,vendor_name,category_name,mrp,wholesale_price,retail_price,quantity,hsn_code,gst_percent,gst_type,unit_of_measure,weight,length,width,height
-Premium Cotton T-Shirt,Premium Cotton T-Shirt - White,6767-1,Apple India,Electronics,1299,899,999,50,6109,12,CGST_SGST,PCS,200,35,25,3
-Premium Cotton T-Shirt,Premium Cotton T-Shirt - Black,6767-2,Apple India,Electronics,1299,899,999,40,6109,12,CGST_SGST,PCS,200,35,25,3
-Slim Fit Jeans,Slim Fit Jeans - Light Blue,8765-1,Samsung India,Apparel,2499,1799,1999,100,6204,18,CGST_SGST,PCS,600,45,35,12
-Slim Fit Jeans,Slim Fit Jeans - Dark Blue,8765-2,Samsung India,Apparel,2499,1799,1999,80,6204,18,CGST_SGST,PCS,600,45,35,12
-Wireless Mouse,Wireless Bluetooth Mouse,1112-1,Local Supplier,Electronics,1499,999,1199,75,8471,12,CGST_SGST,PCS,150,12,8,4
+name,title,product_code,vendor_name,category_name,mrp,wholesale_price,retail_price,hsn_code,gst_percent,gst_type,unit_of_measure,weight,length,width,height
+Premium Cotton T-Shirt,Premium Cotton T-Shirt - White,6767-1,Apple India,Electronics,1299,899,999,6109,12,CGST_SGST,PCS,200,35,25,3
+Premium Cotton T-Shirt,Premium Cotton T-Shirt - Black,6767-2,Apple India,Electronics,1299,899,999,6109,12,CGST_SGST,PCS,200,35,25,3
+Slim Fit Jeans,Slim Fit Jeans - Light Blue,8765-1,Samsung India,Apparel,2499,1799,1999,6204,18,CGST_SGST,PCS,600,45,35,12
+Slim Fit Jeans,Slim Fit Jeans - Dark Blue,8765-2,Samsung India,Apparel,2499,1799,1999,6204,18,CGST_SGST,PCS,600,45,35,12
+Wireless Mouse,Wireless Bluetooth Mouse,1112-1,Local Supplier,Electronics,1499,999,1199,8471,12,CGST_SGST,PCS,150,12,8,4
 📤 Response Format
 Success Response (Final Upload)
 json

@@ -4,6 +4,10 @@ const { AppError } = require('../../middlewares/error.middleware');
 const { parsePagination } = require('../../utils/pagination.utils');
 const { resolveWarehouseId, applyWarehouseScope } = require('../../utils/productAccess.utils');
 const { cacheDel, cacheDelByPattern, productDetailCacheKey, productListCachePattern } = require('../../utils/cache.utils');
+const { createStockLedgerEntry } = require('../stock/stockLedger.helpers');
+const logger = require('../../utils/logger.utils');
+
+const TX_OPTIONS = { isolationLevel: 'Serializable' };
 
 const STOCK_SELECT = {
   stock_id: true,
@@ -112,24 +116,41 @@ const ProductStockService = {
 
     const batchNumber = payload.batch_number !== undefined ? payload.batch_number : '';
 
-    const stock = await prisma.productStock.create({
-      data: {
-        variant_id: variantId,
-        product_id: variant.product_id,
-        warehouse_id: warehouseId,
+    const stock = await prisma.$transaction(async (tx) => {
+      const row = await tx.productStock.create({
+        data: {
+          variant_id: variantId,
+          product_id: variant.product_id,
+          warehouse_id: warehouseId,
+          quantity: payload.quantity,
+          room_zone: payload.room_zone,
+          rack_shelf: payload.rack_shelf,
+          position: payload.position ?? null,
+          batch_number: batchNumber,
+          expiry_date: payload.expiry_date ?? null,
+          low_stock_threshold: payload.low_stock_threshold ?? null,
+          remarks: payload.remarks ?? null,
+        },
+        select: STOCK_SELECT,
+      });
+
+      await createStockLedgerEntry(tx, {
+        productId: variant.product_id,
+        variantId,
+        movementType: 'ADJUSTMENT',
         quantity: payload.quantity,
-        room_zone: payload.room_zone,
-        rack_shelf: payload.rack_shelf,
-        position: payload.position ?? null,
-        batch_number: batchNumber,
-        expiry_date: payload.expiry_date ?? null,
-        low_stock_threshold: payload.low_stock_threshold ?? null,
-        remarks: payload.remarks ?? null,
-      },
-      select: STOCK_SELECT,
-    });
+        toWarehouseId: warehouseId,
+        referenceType: 'PRODUCT_STOCK_CREATE',
+        batchNumber: batchNumber || null,
+        createdBy: user.userId,
+        remarks: payload.remarks || 'Manual warehouse stock creation',
+      });
+
+      return row;
+    }, TX_OPTIONS);
 
     await invalidateProductCacheByStock(variant.product_id, warehouseId);
+    logger.info('Warehouse stock created', { stock_id: stock.stock_id, variant_id: variantId, quantity: payload.quantity });
     return stock;
   },
 
@@ -165,7 +186,14 @@ const ProductStockService = {
   async updateStock(stockId, data, user) {
     const existing = await prisma.productStock.findUnique({
       where: { stock_id: stockId },
-      select: { stock_id: true, warehouse_id: true, product_id: true, variant_id: true },
+      select: {
+        stock_id: true,
+        warehouse_id: true,
+        product_id: true,
+        variant_id: true,
+        quantity: true,
+        batch_number: true,
+      },
     });
     if (!existing) throw new AppError('Stock record not found', 404, 'STOCK_NOT_FOUND');
 
@@ -183,11 +211,34 @@ const ProductStockService = {
       throw new AppError('No updatable fields provided', 400, 'EMPTY_UPDATE');
     }
 
-    const stock = await prisma.productStock.update({
-      where: { stock_id: stockId },
-      data: cleaned,
-      select: STOCK_SELECT,
-    });
+    const stock = await prisma.$transaction(async (tx) => {
+      const beforeQty = existing.quantity;
+      const row = await tx.productStock.update({
+        where: { stock_id: stockId },
+        data: cleaned,
+        select: STOCK_SELECT,
+      });
+
+      if (payload.quantity !== undefined && payload.quantity !== beforeQty) {
+        const diff = Math.abs(payload.quantity - beforeQty);
+        await createStockLedgerEntry(tx, {
+          productId: existing.product_id,
+          variantId: existing.variant_id,
+          movementType: 'ADJUSTMENT',
+          quantity: diff,
+          ...(payload.quantity > beforeQty
+            ? { toWarehouseId: existing.warehouse_id }
+            : { fromWarehouseId: existing.warehouse_id }),
+          referenceId: stockId,
+          referenceType: 'PRODUCT_STOCK_UPDATE',
+          batchNumber: existing.batch_number || null,
+          createdBy: user.userId,
+          remarks: cleaned.remarks || `Stock adjusted ${beforeQty} → ${payload.quantity}`,
+        });
+      }
+
+      return row;
+    }, TX_OPTIONS);
 
     await invalidateProductCacheByStock(existing.product_id, existing.warehouse_id);
     return stock;
@@ -196,7 +247,13 @@ const ProductStockService = {
   async deleteStock(stockId, user) {
     const existing = await prisma.productStock.findUnique({
       where: { stock_id: stockId },
-      select: { stock_id: true, warehouse_id: true, product_id: true, quantity: true },
+      select: {
+        stock_id: true,
+        warehouse_id: true,
+        product_id: true,
+        variant_id: true,
+        quantity: true,
+      },
     });
     if (!existing) throw new AppError('Stock record not found', 404, 'STOCK_NOT_FOUND');
 
@@ -204,7 +261,24 @@ const ProductStockService = {
       throw new AppError('Stock record not found', 404, 'STOCK_NOT_FOUND');
     }
 
-    await prisma.productStock.delete({ where: { stock_id: stockId } });
+    await prisma.$transaction(async (tx) => {
+      if (existing.quantity > 0) {
+        await createStockLedgerEntry(tx, {
+          productId: existing.product_id,
+          variantId: existing.variant_id,
+          movementType: 'ADJUSTMENT',
+          quantity: existing.quantity,
+          fromWarehouseId: existing.warehouse_id,
+          referenceId: stockId,
+          referenceType: 'PRODUCT_STOCK_DELETE',
+          createdBy: user.userId,
+          remarks: 'Warehouse stock row deleted',
+        });
+      }
+
+      await tx.productStock.delete({ where: { stock_id: stockId } });
+    }, TX_OPTIONS);
+
     await invalidateProductCacheByStock(existing.product_id, existing.warehouse_id);
     return { stock_id: stockId };
   },

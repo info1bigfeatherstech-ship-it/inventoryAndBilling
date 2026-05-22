@@ -24,6 +24,10 @@ Source: `src/routes/index.routes.js`
 | `/categories` | `category/category.routes.js` | [category-routes.md](./category-routes.md) |
 | `/product-stocks` | `product/productStock.routes.js` | [product-stock-routes.md](./product-stock-routes.md) |
 | `/products` | `product/product.routes.js` | [product-routes.md](./product-routes.md) |
+| `/shops` | `shop/shop.routes.js` | [stock-movement-routes.md](./stock-movement-routes.md) |
+| `/shop-stocks` | `shop/shopStock.routes.js` | [stock-movement-routes.md](./stock-movement-routes.md) |
+| `/stock` | `stock/stockTransfer.routes.js` | [stock-movement-routes.md](./stock-movement-routes.md) |
+| `/stock/ledger` | `stock/stockLedger.routes.js` | [stock-movement-routes.md](./stock-movement-routes.md) |
 
 **Note:** Register `/product-stocks` before `/products` in the app router so paths do not collide.
 

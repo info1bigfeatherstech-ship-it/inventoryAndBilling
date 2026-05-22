@@ -87,6 +87,15 @@ Mapped product must belong to **same warehouse** as inward.
 
 All items must have `mapped_product_id` set.
 
+When status changes from **ARRIVED → MAPPED** (first time only), the API **adds warehouse stock**:
+
+- Upserts `product_stocks` by `variant_id` + `warehouse_id` + `batch_number`
+- **Increments** `quantity` by each line’s `quantity_received` (repeat inwards add more qty)
+- Variant resolved by: `variant_text` (matches `variant_code` / `sku` / `system_barcode`) → else default variant → else first active variant
+- Location from line: `room_zone`, `rack_shelf`, `batch_number`, `expiry_date` (defaults: `DEFAULT` zone/shelf, empty batch)
+
+**Stock is not created** on product CSV or single product create — only via inward MAPPED or manual `POST /product-stocks`.
+
 ## Errors
 
 | Code | HTTP |
@@ -95,3 +104,5 @@ All items must have `mapped_product_id` set.
 | `INWARD_ITEMS_UNMAPPED` | 409 |
 | `PRODUCT_WAREHOUSE_MISMATCH` | 409 |
 | `WAREHOUSE_FORBIDDEN` | 403 |
+| `MAPPED_PRODUCT_NO_VARIANT` | 409 |
+| `INWARD_ITEM_NOT_MAPPED` | 400 |

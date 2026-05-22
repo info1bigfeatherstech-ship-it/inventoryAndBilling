@@ -81,6 +81,14 @@ router.use(requireAuth);
 
 router.get('/', authorizeRoles(...READ_ROLES), listProductsValidator, validateRequest, ProductController.list);
 
+router.get(
+  '/inactive',
+  authorizeRoles(...READ_ROLES),  // SUPER_ADMIN, WH_MANAGER, WH_STOCK_LISTER, SHOP_OWNER, etc.
+  listProductsValidator,
+  validateRequest,
+  ProductController.listInactive
+);
+
 router.post(
   '/bulk/csv',
   authorizeRoles(...WRITE_ROLES),

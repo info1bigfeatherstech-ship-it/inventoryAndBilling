@@ -308,6 +308,18 @@ bulkRestore: asyncHandler(async (req, res) => {
     data: results,
   });
 }),
+
+// ========== GET ONLY INACTIVE PRODUCTS ==========
+listInactive: asyncHandler(async (req, res) => {
+  const { total, page, limit, products } = await ProductService.listInactiveProducts(req.query, withUserContext(req));
+  
+  return successResponse(res, req, {
+    statusCode: 200,
+    message: 'Inactive products fetched successfully',
+    data: products,
+    meta: paginatedMeta({ page, limit, total }),
+  });
+}),
 };
 
 module.exports = ProductController;

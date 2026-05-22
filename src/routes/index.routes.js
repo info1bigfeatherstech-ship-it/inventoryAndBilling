@@ -11,6 +11,10 @@ const inwardRoutes = require('./inward/inward.routes');
 const categoryRoutes = require('./category/category.routes');
 const productRoutes = require('./product/product.routes');
 const productStockRoutes = require('./product/productStock.routes');
+const shopRoutes = require('./shop/shop.routes');
+const shopStockRoutes = require('./shop/shopStock.routes');
+const stockTransferRoutes = require('./stock/stockTransfer.routes');
+const stockLedgerRoutes = require('./stock/stockLedger.routes');
 
 // API info route
 router.get('/', (req, res) => {
@@ -34,6 +38,10 @@ router.get('/', (req, res) => {
       warehouses: 'GET /api/v1/warehouses',
       users: 'GET /api/v1/users',
       inwards: 'GET /api/v1/inwards',
+      shops: 'GET /api/v1/shops',
+      shopStocks: 'GET /api/v1/shop-stocks',
+      stockTransfers: 'POST /api/v1/stock/transfer/wh-to-shop',
+      stockLedger: 'GET /api/v1/stock/ledger',
     },
     requestId: req.id,
   });
@@ -59,6 +67,10 @@ v1Router.use('/inwards', inwardRoutes);
 v1Router.use('/categories', categoryRoutes);
 v1Router.use('/product-stocks', productStockRoutes);
 v1Router.use('/products', productRoutes);
+v1Router.use('/shops', shopRoutes);
+v1Router.use('/shop-stocks', shopStockRoutes);
+v1Router.use('/stock', stockTransferRoutes);
+v1Router.use('/stock/ledger', stockLedgerRoutes);
 
 // Mount versioned routes
 router.use('/v1', v1Router);
