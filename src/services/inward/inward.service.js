@@ -650,8 +650,6 @@ const InwardService = {
       });
   
       if (shouldApplyStock) {
-        // ⭐⭐⭐ NEW CODE STARTS HERE ⭐⭐⭐
-        
         // Get all mapped items to calculate total
         const mappedItemsForPurchase = await tx.inwardReceiptItem.findMany({
           where: { inward_id: inwardId, mapped_product_id: { not: null } },
@@ -663,7 +661,7 @@ const InwardService = {
           subtotal += (item.purchase_cost || 0) * item.quantity_received;
         }
         
-        // Create Purchase Entry
+        // Create Purchase Entry (header)
         const purchaseEntry = await tx.purchaseEntry.create({
           data: {
             purchase_number: `PO-${inward.inward_number}`,
@@ -682,10 +680,41 @@ const InwardService = {
           select: { purchase_id: true }
         });
         
+        // ⭐⭐⭐ NEW CODE — Create Purchase Items (line items) ⭐⭐⭐
+        const mappedItemsForPurchaseItems = await tx.inwardReceiptItem.findMany({
+          where: { inward_id: inwardId, mapped_product_id: { not: null } },
+          select: {
+            mapped_product_id: true,
+            quantity_received: true,
+            purchase_cost: true,
+            batch_number: true,
+            expiry_date: true,
+            room_zone: true,
+            rack_shelf: true,
+            position: true,
+            remarks: true,
+          },
+        });
+        
+        for (const item of mappedItemsForPurchaseItems) {
+          await tx.purchaseItem.create({
+            data: {
+              purchase_id: purchaseEntry.purchase_id,
+              product_id: item.mapped_product_id,
+              quantity: item.quantity_received,
+              purchase_cost: item.purchase_cost || 0,
+              batch_number: item.batch_number || null,
+              expiry_date: item.expiry_date || null,
+              room_zone: item.room_zone || 'DEFAULT',
+              rack_shelf: item.rack_shelf || 'DEFAULT',
+              position: item.position || null,
+              remarks: item.remarks || null,
+            },
+          });
+        }
+        
         // Apply stock with purchase entry ID
         await applyStockFromMappedInward(tx, inwardId, inward.warehouse_id, actorUserId, purchaseEntry.purchase_id);
-        
-        // ⭐⭐⭐ NEW CODE ENDS HERE ⭐⭐⭐
       }
   
       return receipt;

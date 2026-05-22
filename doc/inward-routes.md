@@ -843,3 +843,240 @@ text
 | **MAPPED se pehle** | Saare items mapped hone chahiye |
 
 **Ye doc frontend dev ko bhej do — wo integration kar lega! 🚀**
+
+
+
+
+//==========================================
+//Purchase entry after inward status mapped
+//==========================================
+Purchase Entry API Documentation
+Base URL
+/api/v1/purchase-entries
+
+Headers
+Header	Value	Required
+Authorization	Bearer <access_token>	✅ Yes
+Content-Type	application/json	✅ Yes (for POST/PUT)
+1. List All Purchase Entries
+Endpoint: GET /api/v1/purchase-entries
+
+Roles Allowed: SUPER_ADMIN, WH_MANAGER, WH_STOCK_LISTER
+
+Query Parameters
+Parameter	Type	Description	Example
+page	number	Page number (default: 1)	page=2
+limit	number	Items per page (default: 50, max: 100)	limit=20
+vendor_id	string	Filter by vendor ID	vendor_id=vendor_123
+warehouse_id	string	Filter by warehouse ID	warehouse_id=wh_001
+status	string	Filter by status	status=RECEIVED
+from_date	date	Start date (ISO format)	from_date=2026-01-01
+to_date	date	End date (ISO format)	to_date=2026-12-31
+search	string	Search by PO number, invoice, vendor name	search=INV-001
+Example Request
+http
+GET /api/v1/purchase-entries?page=1&limit=20&from_date=2026-01-01&to_date=2026-12-31
+Authorization: Bearer <token>
+Response
+json
+{
+  "success": true,
+  "message": "Purchase entries fetched successfully",
+  "data": [
+    {
+      "purchase_id": "pur_abc123",
+      "purchase_number": "PO-INW-20260522-2801",
+      "vendor_id": "vendor_123",
+      "warehouse_id": "wh_001",
+      "vendor_invoice_no": "INV-001",
+      "purchase_date": "2026-05-22T10:00:00.000Z",
+      "status": "RECEIVED",
+      "subtotal": 45000,
+      "tax_amount": 0,
+      "total_amount": 45000,
+      "received_by": "user_001",
+      "received_at": "2026-05-22T10:00:00.000Z",
+      "remarks": "Created from inward: INW-20260522-2801",
+      "created_at": "2026-05-22T10:00:00.000Z",
+      "updated_at": "2026-05-22T10:00:00.000Z",
+      "vendor": {
+        "vendor_id": "vendor_123",
+        "company_name": "Apple India",
+        "phone": "9876543210"
+      },
+      "warehouse": {
+        "warehouse_id": "wh_001",
+        "warehouse_code": "WH_DEL_01",
+        "warehouse_name": "Delhi Central Warehouse",
+        "city": "Delhi"
+      }
+    }
+  ],
+  "meta": {
+    "page": 1,
+    "limit": 20,
+    "total": 5,
+    "totalPages": 1
+  },
+  "requestId": "req_abc123"
+}
+2. Get Single Purchase Entry (with Items)
+Endpoint: GET /api/v1/purchase-entries/:purchaseId
+
+Roles Allowed: SUPER_ADMIN, WH_MANAGER, WH_STOCK_LISTER
+
+URL Parameters
+Parameter	Type	Description
+purchaseId	string	Purchase entry ID
+Example Request
+http
+GET /api/v1/purchase-entries/pur_abc123
+Authorization: Bearer <token>
+Response
+json
+{
+  "success": true,
+  "message": "Purchase entry fetched successfully",
+  "data": {
+    "purchase_id": "pur_abc123",
+    "purchase_number": "PO-INW-20260522-2801",
+    "vendor_id": "vendor_123",
+    "warehouse_id": "wh_001",
+    "vendor_invoice_no": "INV-001",
+    "purchase_date": "2026-05-22T10:00:00.000Z",
+    "status": "RECEIVED",
+    "subtotal": 45000,
+    "tax_amount": 0,
+    "total_amount": 45000,
+    "received_by": "user_001",
+    "received_at": "2026-05-22T10:00:00.000Z",
+    "remarks": "Created from inward: INW-20260522-2801",
+    "created_at": "2026-05-22T10:00:00.000Z",
+    "vendor": {
+      "vendor_id": "vendor_123",
+      "company_name": "Apple India"
+    },
+    "warehouse": {
+      "warehouse_id": "wh_001",
+      "warehouse_code": "WH_DEL_01",
+      "warehouse_name": "Delhi Central Warehouse"
+    },
+    "items": [
+      {
+        "purchase_item_id": "pitem_001",
+        "product_id": "prod_iphone_123",
+        "quantity": 100,
+        "purchase_cost": 450,
+        "batch_number": "BATCH-001",
+        "expiry_date": null,
+        "room_zone": "Aisle-A",
+        "rack_shelf": "Rack-01",
+        "position": "Shelf-02",
+        "remarks": null,
+        "product": {
+          "product_id": "prod_iphone_123",
+          "product_code": "IPHONE-001",
+          "name": "iPhone 15 Pro Case",
+          "variants": [
+            {
+              "variant_id": "var_001",
+              "sku": "SKU-IPHONE-001"
+            }
+          ]
+        }
+      },
+      {
+        "purchase_item_id": "pitem_002",
+        "product_id": "prod_samsung_456",
+        "quantity": 50,
+        "purchase_cost": 350,
+        "batch_number": "BATCH-002",
+        "expiry_date": null,
+        "room_zone": "Aisle-A",
+        "rack_shelf": "Rack-02",
+        "position": null,
+        "remarks": null,
+        "product": {
+          "product_id": "prod_samsung_456",
+          "product_code": "SAMSUNG-001",
+          "name": "Samsung S24 Case"
+        }
+      }
+    ]
+  },
+  "requestId": "req_abc123"
+}
+3. Vendor-wise Purchase Summary (for Reports)
+Endpoint: GET /api/v1/purchase-entries/summary/vendor
+
+Roles Allowed: SUPER_ADMIN, WH_MANAGER
+
+Query Parameters
+Parameter	Type	Description
+from_date	date	Start date (ISO format)
+to_date	date	End date (ISO format)
+Example Request
+http
+GET /api/v1/purchase-entries/summary/vendor?from_date=2026-01-01&to_date=2026-12-31
+Authorization: Bearer <token>
+Response
+json
+{
+  "success": true,
+  "message": "Purchase summary fetched successfully",
+  "data": [
+    {
+      "vendor_id": "vendor_123",
+      "vendor_name": "Apple India",
+      "total_purchases": 5,
+      "total_subtotal": 250000,
+      "total_tax": 0,
+      "total_amount": 250000
+    },
+    {
+      "vendor_id": "vendor_456",
+      "vendor_name": "Samsung India",
+      "total_purchases": 3,
+      "total_subtotal": 150000,
+      "total_tax": 0,
+      "total_amount": 150000
+    }
+  ],
+  "requestId": "req_abc123"
+}
+📊 Relationship Between APIs
+text
+Inward Receipt (SCHEDULED → ARRIVED → MAPPED)
+        ↓ (automatically creates)
+Purchase Entry (header) + Purchase Items (line items)
+        ↓
+Stock added to ProductStock
+        ↓
+View via:
+├── GET /purchase-entries (list all purchases)
+├── GET /purchase-entries/:id (view details with items)
+└── GET /purchase-entries/summary/vendor (vendor reports)
+📋 Error Codes
+Code	Description	Solution
+PURCHASE_NOT_FOUND	Purchase entry not found	Check purchase ID
+UNAUTHORIZED	Invalid or missing token	Login again
+FORBIDDEN	Insufficient permissions	Check user role
+🚀 Quick Testing with Postman
+1. List Purchase Entries
+text
+GET http://localhost:3441/api/v1/purchase-entries
+Headers: Authorization: Bearer <token>
+2. Get Single Purchase Entry
+text
+GET http://localhost:3441/api/v1/purchase-entries/pur_abc123
+Headers: Authorization: Bearer <token>
+3. Vendor Summary
+text
+GET http://localhost:3441/api/v1/purchase-entries/summary/vendor?from_date=2026-01-01
+Headers: Authorization: Bearer <token>
+✅ Summary — Frontend Dev Ko Kya Batana Hai
+API	Purpose
+GET /purchase-entries	Show all purchase history (table/list)
+GET /purchase-entries/:id	Show purchase details with items
+GET /purchase-entries/summary/vendor	Vendor purchase report
+Ye APIs sirf READ-only hain. Purchase entries automatically create hoti hain jab inward MAPPED hota hai.
