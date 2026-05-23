@@ -1,5 +1,5 @@
 const prisma = require('../../utils/prisma.utils');
-const { AppError } = require('../../errors/AppError');
+const { AppError } = require('../../middlewares/error.middleware');
 const { parsePagination } = require('../../utils/pagination.utils');
 const { assertShopReadAccess, resolveShopIdForUser } = require('../../utils/shopAccess.utils');
 const { createStockLedgerEntry } = require('../stock/stockLedger.helpers');
@@ -19,7 +19,7 @@ const SHOP_STOCK_SELECT = {
     select: {
       variant_id: true,
       sku: true,
-      variant_code: true,
+      product_code: true, 
       system_barcode: true,
       product: { select: { product_id: true, product_code: true, name: true, warehouse_id: true } },
     },

@@ -1,6 +1,7 @@
 const asyncHandler = require('../../utils/asyncHandler.utils');
 const ShopService = require('../../services/shop/shop.service');
 const { successResponse, paginatedMeta } = require('../../utils/response.utils');
+const { AppError } = require('../../middlewares/error.middleware');
 
 const ShopController = {
   create: asyncHandler(async (req, res) => {
@@ -21,6 +22,20 @@ const ShopController = {
   getById: asyncHandler(async (req, res) => {
     const shop = await ShopService.getShopById(req.params.shopId, req.user);
     return successResponse(res, req, { statusCode: 200, message: 'Shop fetched successfully', data: shop });
+  }),
+  getMyShop: asyncHandler(async (req, res) => {
+    // Only SHOP_OWNER role can access this
+    if (req.user.role !== 'SHOP_OWNER') {
+      throw new AppError('Only shop owners can access this endpoint', 403, 'FORBIDDEN');
+    }
+    
+    const shop = await ShopService.getShopByOwnerId(req.user.userId);
+    
+    return successResponse(res, req, {
+      statusCode: 200,
+      message: 'Your shop fetched successfully',
+      data: shop,
+    });
   }),
 
   update: asyncHandler(async (req, res) => {

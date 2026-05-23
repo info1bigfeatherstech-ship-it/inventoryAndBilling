@@ -1,5 +1,5 @@
 const prisma = require('../../utils/prisma.utils');
-const { AppError } = require('../../errors/AppError');
+const { AppError } = require('../../middlewares/error.middleware');
 const { parsePagination } = require('../../utils/pagination.utils');
 const { assertShopReadAccess, applyShopListScope } = require('../../utils/shopAccess.utils');
 const logger = require('../../utils/logger.utils');
@@ -15,6 +15,7 @@ const SHOP_SELECT = {
   owner_user_id: true,
   is_active: true,
   remarks: true,
+  sales_channels: true,  
   created_at: true,
   updated_at: true,
 };
@@ -84,10 +85,35 @@ const ShopService = {
   async createShop(data) {
     const shopCode = normalizeShopCode(data.shop_code);
     if (!shopCode) throw new AppError('shop_code is required', 400, 'SHOP_CODE_REQUIRED');
-
+  
     const existing = await prisma.shop.findUnique({ where: { shop_code: shopCode } });
     if (existing) throw new AppError(`Shop code "${shopCode}" already exists`, 409, 'SHOP_CODE_EXISTS');
-
+  
+    // ⭐ NEW: Validate owner_user_id if provided
+    let ownerUserId = null;
+    if (data.owner_user_id) {
+      const owner = await prisma.user.findUnique({
+        where: { user_id: data.owner_user_id, role: 'SHOP_OWNER' },
+        select: { user_id: true, role: true },
+      });
+      
+      if (!owner) {
+        throw new AppError('Owner user not found or user is not a SHOP_OWNER', 400, 'INVALID_OWNER_USER');
+      }
+      
+      // Check if this user already owns a shop
+      const existingOwnerShop = await prisma.shop.findUnique({
+        where: { owner_user_id: data.owner_user_id },
+        select: { shop_id: true },
+      });
+      
+      if (existingOwnerShop) {
+        throw new AppError('User already owns a shop. A user can only own one shop.', 409, 'USER_ALREADY_OWNS_SHOP');
+      }
+      
+      ownerUserId = data.owner_user_id;
+    }
+  
     const shop = await prisma.shop.create({
       data: {
         shop_code: shopCode,
@@ -96,12 +122,14 @@ const ShopService = {
         city: String(data.city).trim(),
         phone: String(data.phone).trim(),
         email: data.email ? String(data.email).trim().toLowerCase() : null,
+        owner_user_id: ownerUserId,  // ⭐ ADD THIS
+        sales_channels: data.sales_channels || [],  // ⭐ ADD THIS
         remarks: data.remarks ?? null,
       },
       select: SHOP_SELECT,
     });
-
-    logger.info('Shop created', { shop_id: shop.shop_id, shop_code: shop.shop_code });
+  
+    logger.info('Shop created', { shop_id: shop.shop_id, shop_code: shop.shop_code, owner_id: ownerUserId });
     return shop;
   },
 
@@ -148,6 +176,32 @@ const ShopService = {
     if (!shop) throw new AppError('Shop not found', 404, 'SHOP_NOT_FOUND');
     return shop;
   },
+  async getShopByOwnerId(ownerUserId) {
+    const shop = await prisma.shop.findUnique({
+      where: { owner_user_id: ownerUserId },
+      select: {
+        ...SHOP_SELECT,
+        _count: { select: { shop_stocks: true, users: true } },
+        shop_stocks: {
+          take: 5,
+          orderBy: { updated_at: 'desc' },
+          select: {
+            shop_stock_id: true,
+            variant_id: true,
+            quantity_available: true,
+            quantity_reserved: true,
+            quantity_in_transit: true,
+          },
+        },
+      },
+    });
+  
+    if (!shop) {
+      throw new AppError('No shop found for this owner', 404, 'SHOP_NOT_FOUND');
+    }
+  
+    return shop;
+  },
 
   async updateShop(shopId, data) {
     const existing = await prisma.shop.findUnique({
@@ -155,30 +209,66 @@ const ShopService = {
       select: { shop_id: true, shop_code: true },
     });
     if (!existing) throw new AppError('Shop not found', 404, 'SHOP_NOT_FOUND');
-
+  
     const payload = {};
-    const allowed = ['shop_name', 'address', 'city', 'phone', 'email', 'is_active', 'remarks'];
-
+    // ⭐ ADD 'owner_user_id' and 'sales_channels' to allowed fields
+    const allowed = ['shop_name', 'address', 'city', 'phone', 'email', 'is_active', 'remarks', 'owner_user_id', 'sales_channels'];
+  
     for (const key of allowed) {
       if (Object.prototype.hasOwnProperty.call(data, key)) payload[key] = data[key];
     }
-
+  
     if (payload.shop_code !== undefined) {
       throw new AppError('shop_code cannot be changed after creation', 400, 'SHOP_CODE_IMMUTABLE');
     }
-
+  
+    // ⭐ NEW: Validate owner_user_id if being updated
+    if (payload.owner_user_id !== undefined) {
+      if (payload.owner_user_id === null) {
+        // Allow removing owner
+        payload.owner_user_id = null;
+      } else {
+        const owner = await prisma.user.findUnique({
+          where: { user_id: payload.owner_user_id, role: 'SHOP_OWNER' },
+          select: { user_id: true },
+        });
+        
+        if (!owner) {
+          throw new AppError('Owner user not found or user is not a SHOP_OWNER', 400, 'INVALID_OWNER_USER');
+        }
+        
+        // Check if this user already owns a different shop
+        const existingOwnerShop = await prisma.shop.findFirst({
+          where: { 
+            owner_user_id: payload.owner_user_id,
+            shop_id: { not: shopId }
+          },
+          select: { shop_id: true },
+        });
+        
+        if (existingOwnerShop) {
+          throw new AppError('User already owns another shop', 409, 'USER_ALREADY_OWNS_SHOP');
+        }
+      }
+    }
+  
     if (payload.is_active === false) {
       await assertDeactivationAllowed(shopId);
     }
-
+  
     if (!Object.keys(payload).length) {
       throw new AppError('No updatable fields provided', 400, 'EMPTY_UPDATE');
     }
-
+  
     if (payload.email !== undefined && payload.email !== null) {
       payload.email = String(payload.email).trim().toLowerCase();
     }
-
+  
+    // ⭐ NEW: Normalize sales_channels
+    if (payload.sales_channels !== undefined && !Array.isArray(payload.sales_channels)) {
+      throw new AppError('sales_channels must be an array', 400, 'INVALID_SALES_CHANNELS');
+    }
+  
     return prisma.shop.update({
       where: { shop_id: shopId },
       data: payload,

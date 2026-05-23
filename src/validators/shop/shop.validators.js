@@ -20,7 +20,21 @@ const createShopValidator = [
   body('city').isString().trim().isLength({ min: 2, max: 50 }),
   body('phone').isString().trim().matches(/^[0-9]{10}$/).withMessage('phone must be a 10-digit number'),
   body('email').optional({ nullable: true }).isEmail(),
+  body('owner_user_id')
+    .optional({ nullable: true })
+    .isString()
+    .trim()
+    .notEmpty()
+    .withMessage('owner_user_id must be a valid user ID if provided'),
   body('remarks').optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
+  body('sales_channels')
+  .optional()
+  .isArray()
+  .withMessage('sales_channels must be an array'),
+body('sales_channels.*')
+  .optional()
+  .isIn(['WALK_IN', 'ONLINE', 'WHOLESALE', 'MHM', 'OWB', 'OTHER'])
+  .withMessage('Invalid sales channel'),
 ];
 
 const updateShopValidator = [
@@ -32,6 +46,23 @@ const updateShopValidator = [
   body('email').optional({ nullable: true }).isEmail(),
   body('is_active').optional().isBoolean().toBoolean(),
   body('remarks').optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
+  
+  // ⭐ ADD THESE
+  body('owner_user_id')
+    .optional({ nullable: true })
+    .isString()
+    .trim()
+    .notEmpty()
+    .withMessage('owner_user_id must be a valid user ID if provided'),
+  
+  body('sales_channels')
+    .optional()
+    .isArray()
+    .withMessage('sales_channels must be an array'),
+  body('sales_channels.*')
+    .optional()
+    .isIn(['WALK_IN', 'ONLINE', 'WHOLESALE', 'MHM', 'OWB', 'OTHER'])
+    .withMessage('Invalid sales channel'),
 ];
 
 const listShopsValidator = [

@@ -14,6 +14,7 @@ const SHOP_ROLES = ['SHOP_OWNER', 'BILLING_STAFF', 'SHOP_STOCK_LISTER'];
 
 const normalizePhone = (value) => String(value || '').replace(/[^\d]/g, '');
 
+
 const validateRoleAssignments = (value, { req }) => {
   const role = req.body.role;
   const hasWarehouse = Object.prototype.hasOwnProperty.call(req.body, 'warehouse_id')
@@ -29,8 +30,12 @@ const validateRoleAssignments = (value, { req }) => {
   }
 
   if (SHOP_ROLES.includes(role)) {
-    if (!hasShop) throw new Error(`${role} requires shop_id`);
-    if (hasWarehouse) throw new Error(`${role} cannot be assigned to warehouse_id`);
+    // ✅ FIXED: Allow SHOP_OWNER to be created without shop_id
+    // Only validate that if shop_id is provided, it's not also assigned to warehouse
+    if (hasWarehouse) {
+      throw new Error(`${role} cannot be assigned to warehouse_id`);
+    }
+    // ⭐ Removed the mandatory shop_id check
   }
 
   if (role === 'SUPER_ADMIN' && (hasWarehouse || hasShop)) {
@@ -39,6 +44,9 @@ const validateRoleAssignments = (value, { req }) => {
 
   return true;
 };
+
+
+
 
 const userIdParam = [
   param('userId').isString().trim().notEmpty().withMessage('userId is required'),

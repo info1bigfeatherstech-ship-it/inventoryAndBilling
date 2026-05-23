@@ -16,9 +16,9 @@ const SHOP_READ_ROLES = ['SUPER_ADMIN', 'SHOP_OWNER', 'SHOP_STOCK_LISTER', 'BILL
 
 router.use(requireAuth);
 
+router.get('/me', authorizeRoles('SHOP_OWNER'), ShopController.getMyShop);
 router.get('/', authorizeRoles(...SHOP_READ_ROLES), listShopsValidator, validateRequest, ShopController.list);
 router.get('/:shopId', authorizeRoles(...SHOP_READ_ROLES), shopIdParam, validateRequest, ShopController.getById);
-
 router.post('/', authorizeRoles(...ADMIN_ONLY), createShopValidator, validateRequest, ShopController.create);
 router.put('/:shopId', authorizeRoles(...ADMIN_ONLY), updateShopValidator, validateRequest, ShopController.update);
 router.delete('/:shopId', authorizeRoles(...ADMIN_ONLY), shopIdParam, validateRequest, ShopController.remove);

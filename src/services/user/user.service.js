@@ -97,12 +97,12 @@ const validateRolePolicy = (role, warehouseId, shopId) => {
   }
 
   if (SHOP_ROLES.includes(role)) {
-    if (!shopId) {
-      throw new AppError(`${role} requires shop_id`, 400, 'INVALID_ROLE_ASSIGNMENT');
-    }
+    // ✅ FIXED: Remove the mandatory shop_id check
+    // Allow SHOP_OWNER to be created without shop_id (assign later)
     if (warehouseId) {
       throw new AppError(`${role} cannot be assigned to warehouse_id`, 400, 'INVALID_ROLE_ASSIGNMENT');
     }
+    // ⭐ Removed: if (!shopId) throw error
   }
 };
 
