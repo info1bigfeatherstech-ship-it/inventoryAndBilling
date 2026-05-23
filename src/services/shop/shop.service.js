@@ -129,6 +129,14 @@ const ShopService = {
       select: SHOP_SELECT,
     });
   
+    // ⭐ NEW: Automatically update user's shop_id if owner assigned
+  if (ownerUserId) {
+    await prisma.user.update({
+      where: { user_id: ownerUserId },
+      data: { shop_id: shop.shop_id },
+    });
+    logger.info('User shop_id updated', { user_id: ownerUserId, shop_id: shop.shop_id });
+  }
     logger.info('Shop created', { shop_id: shop.shop_id, shop_code: shop.shop_code, owner_id: ownerUserId });
     return shop;
   },
