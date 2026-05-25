@@ -73,6 +73,47 @@ const getInTransitRemaining = (request) => {
 };
 
 /**
+ * Hard guard: who may initiate a transfer request by type.
+ * WH→Shop and Shop→Shop: destination SHOP_OWNER only.
+ * WH→WH: destination WH_MANAGER only.
+ * @param {string} requestType
+ * @param {object} user
+ */
+const assertCreateRequestAllowed = (requestType, user) => {
+  if (user.role === 'SUPER_ADMIN') return;
+
+  if (user.role === 'WH_MANAGER' || user.role === 'WH_STOCK_LISTER') {
+    if (requestType === 'WH_TO_SHOP') {
+      throw new AppError(
+        'Warehouse staff cannot create shop transfer requests. The destination shop owner must request stock from the warehouse.',
+        403,
+        'FORBIDDEN'
+      );
+    }
+    if (requestType === 'SHOP_TO_SHOP') {
+      throw new AppError('Warehouse staff cannot create shop-to-shop transfer requests', 403, 'FORBIDDEN');
+    }
+    if (requestType !== 'WH_TO_WH') {
+      throw new AppError(
+        'Warehouse staff can only initiate warehouse-to-warehouse transfer requests',
+        403,
+        'FORBIDDEN'
+      );
+    }
+    return;
+  }
+
+  if (user.role === 'SHOP_OWNER') {
+    if (requestType === 'WH_TO_WH') {
+      throw new AppError('Shop owners cannot create warehouse-to-warehouse transfer requests', 403, 'FORBIDDEN');
+    }
+    return;
+  }
+
+  throw new AppError('Insufficient permissions to create a transfer request', 403, 'FORBIDDEN');
+};
+
+/**
  * Validate user may perform action on a transfer request.
  * @param {'create_dest'|'approve'|'reject'|'dispatch'|'receive'|'cancel'} action
  * @param {object} request - Loaded transfer request row
@@ -100,17 +141,21 @@ const validateRolePermissions = async (action, request, user, context = {}) => {
         return;
       }
       if (type === 'WH_TO_SHOP') {
+        if (user.role === 'WH_MANAGER' || user.role === 'WH_STOCK_LISTER') {
+          throw new AppError(
+            'Warehouse staff cannot create shop transfer requests. The destination shop owner must request stock from the warehouse.',
+            403,
+            'FORBIDDEN'
+          );
+        }
         if (user.role === 'SHOP_OWNER') {
           const shopId = await resolveOwnerShopId(user);
           if (!shopId || shopId !== toShop) {
-            throw new AppError('You can only create requests for your shop as destination', 403, 'SHOP_FORBIDDEN');
+            throw new AppError('You can only create stock requests for your own shop', 403, 'SHOP_FORBIDDEN');
           }
           return;
         }
-        if (user.role === 'WH_MANAGER') {
-          return;
-        }
-        throw new AppError('Insufficient permissions to create this request', 403, 'FORBIDDEN');
+        throw new AppError('Only shop owners can request stock from a warehouse', 403, 'FORBIDDEN');
       }
       if (type === 'SHOP_TO_SHOP') {
         if (user.role !== 'SHOP_OWNER') {
@@ -128,10 +173,14 @@ const validateRolePermissions = async (action, request, user, context = {}) => {
     case 'approve':
     case 'reject': {
       if (type === 'WH_TO_WH' || type === 'WH_TO_SHOP') {
-        if (user.role !== 'WH_MANAGER') {
-          throw new AppError('Only warehouse managers can approve or reject', 403, 'FORBIDDEN');
+        if (!['WH_MANAGER', 'SUPER_ADMIN'].includes(user.role)) {
+          throw new AppError(
+            'Only the source warehouse manager can approve or reject this request',
+            403,
+            'FORBIDDEN'
+          );
         }
-        if (!user.warehouseId || user.warehouseId !== fromWh) {
+        if (user.role === 'WH_MANAGER' && (!user.warehouseId || user.warehouseId !== fromWh)) {
           throw new AppError('Only source warehouse manager can approve or reject', 403, 'WAREHOUSE_FORBIDDEN');
         }
         return;
@@ -339,6 +388,7 @@ module.exports = {
   resolveOwnerShopId,
   normalizeBatch,
   assertPositiveIntQuantity,
+  assertCreateRequestAllowed,
   getTotalReceived,
   getInTransitRemaining,
   validateRolePermissions,

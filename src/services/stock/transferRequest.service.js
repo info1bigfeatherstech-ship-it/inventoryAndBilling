@@ -13,6 +13,7 @@ const {
   generateRequestNumber,
   normalizeBatch,
   assertPositiveIntQuantity,
+  assertCreateRequestAllowed,
   validateRolePermissions,
   applyTransferListScope,
   applyShopOwnerListScope,
@@ -418,9 +419,6 @@ const performCancelReversal = async (tx, request, variant, reverseQty) => {
 
 const TransferRequestService = {
   /**
-   * Create a transfer request (destination initiates).
-   */
-  /**
    * Emergency transfer request (HIGH priority, same workflow as standard create).
    */
   async createEmergencyRequest(data, user) {
@@ -436,8 +434,13 @@ const TransferRequestService = {
     );
   },
 
+  /**
+   * Create a transfer request (destination initiates — shop owner for WH→Shop).
+   */
   async createRequest(data, user) {
     try {
+      assertCreateRequestAllowed(data.request_type, user);
+
       const { variant, quantity, batchNumber } = await validateCreatePayload(data);
 
       await validateRolePermissions('create_dest', null, user, {
