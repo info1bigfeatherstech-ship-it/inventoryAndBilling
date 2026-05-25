@@ -14,8 +14,11 @@ const productStockRoutes = require('./product/productStock.routes');
 const shopRoutes = require('./shop/shop.routes');
 const shopStockRoutes = require('./shop/shopStock.routes');
 const stockTransferRoutes = require('./stock/stockTransfer.routes');
+const transferRequestRoutes = require('./stock/transferRequest.routes');
 const stockLedgerRoutes = require('./stock/stockLedger.routes');
 const purchaseEntryRoutes = require('./purchase/purchaseEntry.routes');
+const customerRoutes = require('./customer/customer.routes');
+const billingRoutes = require('./billing/billing.routes');
 
 // API info route
 router.get('/', (req, res) => {
@@ -42,7 +45,10 @@ router.get('/', (req, res) => {
       shops: 'GET /api/v1/shops',
       shopStocks: 'GET /api/v1/shop-stocks',
       stockTransfers: 'POST /api/v1/stock/transfer/wh-to-shop',
+      transferRequests: 'GET /api/v1/transfer-requests',
       stockLedger: 'GET /api/v1/stock/ledger',
+      customers: 'GET /api/v1/customers',
+      bills: 'POST /api/v1/bills',
     },
     requestId: req.id,
   });
@@ -71,8 +77,11 @@ v1Router.use('/products', productRoutes);
 v1Router.use('/shops', shopRoutes);
 v1Router.use('/shop-stocks', shopStockRoutes);
 v1Router.use('/stock', stockTransferRoutes);
+v1Router.use('/transfer-requests', transferRequestRoutes);
 v1Router.use('/stock/ledger', stockLedgerRoutes);
 v1Router.use('/purchase-entries', purchaseEntryRoutes);
+v1Router.use('/customers', customerRoutes);
+v1Router.use('/bills', billingRoutes);
 // Mount versioned routes
 router.use('/v1', v1Router);
 

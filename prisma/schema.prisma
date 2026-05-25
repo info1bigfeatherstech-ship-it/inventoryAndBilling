@@ -67,6 +67,14 @@ enum PaymentMethod {
   CREDIT_NOTE_REDEMPTION
 }
 
+enum PaymentStatus {
+  PENDING
+  PAID
+  PARTIALLY_PAID
+  REFUNDED
+  CANCELLED
+}
+
 /// Which master price was applied at sale time (BizPro bill line).
 enum PriceType {
   MRP
@@ -95,6 +103,24 @@ enum InwardStatus {
   CANCELLED
 }
 
+enum TransferRequestStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  DISPATCHED
+  IN_TRANSIT
+  PARTIALLY_RECEIVED
+  RECEIVED
+  COMPLETED
+  CANCELLED
+}
+
+enum TransferRequestType {
+  WH_TO_WH
+  WH_TO_SHOP
+  SHOP_TO_SHOP
+}
+
 enum MediaStorageProvider {
   CLOUDINARY
   CLOUDFLARE_R2
@@ -115,10 +141,12 @@ model Vendor {
   supply_city   String
   business_type BusinessType
 
-  city      String
-  address   String?
-  is_active Boolean @default(true)
-  remarks   String?
+  city       String
+  /// 2-digit GST state code (e.g. "27" for Maharashtra) for POS / tax rules.
+  state_code String?
+  address    String?
+  is_active  Boolean @default(true)
+  remarks    String?
 
   products         Product[]
   purchase_entries PurchaseEntry[]
@@ -149,6 +177,8 @@ model Warehouse {
   inward_receipts InwardReceipt[]
   stock_ledger_out StockLedger[] @relation("LedgerFromWarehouse")
   stock_ledger_in  StockLedger[] @relation("LedgerToWarehouse")
+  transfers_from   TransferRequest[] @relation("TransferFromWarehouse")
+  transfers_to       TransferRequest[] @relation("TransferToWarehouse")
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
@@ -165,6 +195,8 @@ model Shop {
   shop_name  String
   address    String
   city       String
+  /// 2-digit GST state code for intra/inter-state tax determination.
+  state_code String?
   phone      String
   email      String?
 
@@ -190,6 +222,8 @@ model Shop {
 
   stock_ledger_from StockLedger[] @relation("LedgerFromShop")
   stock_ledger_to   StockLedger[] @relation("LedgerToShop")
+  transfers_from    TransferRequest[] @relation("TransferFromShop")
+  transfers_to      TransferRequest[] @relation("TransferToShop")
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
@@ -366,9 +400,11 @@ model ProductVariant {
   
   product        Product @relation(fields: [product_id], references: [product_id], onDelete: Cascade)
   images         ProductVariantImage[]
-  stocks         ProductStock[]
-  shop_stocks    ShopStock[]
-  stock_ledgers  StockLedger[]
+  stocks            ProductStock[]
+  shop_stocks       ShopStock[]
+  stock_ledgers     StockLedger[]
+  transfer_requests TransferRequest[]
+  bill_lines        BillLineItem[] @relation("BillLineVariant")
 
   @@unique([product_id, sku])
   @@unique([product_id, product_code])  // ← FIXED
@@ -561,6 +597,42 @@ model StockLedger {
   @@map("stock_ledger")
 }
 
+// ==================== CUSTOMER MASTER ====================
+
+model Customer {
+  customer_id String  @id @default(cuid())
+  mobile      String  @unique
+  name        String
+  email       String?
+  gst_number  String?
+  address     String?
+  city        String?
+  state_code  String?
+
+  total_spent   Float     @default(0)
+  total_orders  Int       @default(0)
+  last_purchase DateTime?
+  loyalty_tier  String    @default("BRONZE")
+
+  credit_limit   Float?
+  credit_balance Float    @default(0)
+  credit_used    Float    @default(0)
+
+  is_active Boolean @default(true)
+  remarks   String?
+
+  bills        Bill[]
+  credit_notes CreditNote[]
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([mobile])
+  @@index([loyalty_tier])
+  @@index([state_code])
+  @@map("customers")
+}
+
 // ==================== BILLING ====================
 /// Bills are immutable after posting except controlled cancellation flags (audit).
 
@@ -568,72 +640,106 @@ model Bill {
   bill_id     String @id @default(cuid())
   bill_number String @unique
   shop_id     String
+  customer_id String?
 
-  bill_type BillType
+  bill_type BillType @default(GST_INVOICE)
 
   customer_mobile String?
   customer_name   String?
   customer_gstin  String?
-  /// 2-digit state code for POS / tax determination snapshots.
   place_of_supply_state_code String?
 
-  subtotal     Float
-  gst_amount   Float
-  total_amount Float
+  subtotal       Float @default(0)
+  discount       Float @default(0)
+  taxable_amount Float @default(0)
+  gst_amount     Float @default(0)
+  total_amount   Float @default(0)
 
-  payment_method PaymentMethod
+  payment_status PaymentStatus  @default(PENDING)
+  payment_method PaymentMethod?
+  paid_amount    Float          @default(0)
+  balance_amount Float          @default(0)
 
   gst_config_id   String?
   bank_account_id String?
 
-  sales_channel SalesChannel?
+  sales_channel SalesChannel? @default(WALK_IN)
 
   pdf_storage_key String?
 
   is_cancelled         Boolean   @default(false)
   cancelled_at         DateTime?
   cancelled_by_user_id String?
+  cancel_reason        String?
 
   created_by_user_id String
 
   shop         Shop                 @relation(fields: [shop_id], references: [shop_id], onDelete: Restrict)
+  customer     Customer?            @relation(fields: [customer_id], references: [customer_id], onDelete: SetNull)
   gst_config   ShopGstRegistration? @relation(fields: [gst_config_id], references: [gst_config_id], onDelete: SetNull)
   bank_account ShopBankAccount?     @relation(fields: [bank_account_id], references: [bank_account_id], onDelete: SetNull)
   created_by   User                 @relation("BillCreatedBy", fields: [created_by_user_id], references: [user_id])
 
-  items              BillLineItem[]
-  credit_notes_from  CreditNote[]   @relation("CreditNoteOriginalBill")
+  items        BillLineItem[]
+  payments     BillPayment[]
+  credit_notes_from          CreditNote[] @relation("CreditNoteOriginalBill")
   credit_notes_redeemed_here CreditNote[] @relation("CreditNoteRedeemedOnBill")
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
   @@index([shop_id, created_at])
+  @@index([customer_id])
   @@index([customer_mobile])
+  @@index([bill_number])
+  @@index([is_cancelled])
+  @@index([payment_status])
   @@map("bills")
 }
 
 model BillLineItem {
   line_id    String @id @default(cuid())
   bill_id    String
+  variant_id String
   product_id String
 
   quantity   Int
-  price_type PriceType
+  price_type PriceType @default(RETAIL)
   unit_price Float
 
-  /// Snapshots at sale time — product master may change later; bill stays historically correct.
-  gst_percent  Float
-  hsn_code     String
-  line_subtotal Float
-  tax_amount    Float
-  line_total    Float
+  gst_percent    Float
+  hsn_code       String
+  line_subtotal  Float
+  discount       Float @default(0)
+  taxable_amount Float
+  tax_amount     Float
+  line_total     Float
 
-  bill    Bill    @relation(fields: [bill_id], references: [bill_id], onDelete: Restrict)
-  product Product @relation(fields: [product_id], references: [product_id])
+  bill    Bill           @relation(fields: [bill_id], references: [bill_id], onDelete: Cascade)
+  variant ProductVariant @relation("BillLineVariant", fields: [variant_id], references: [variant_id])
+  product Product        @relation(fields: [product_id], references: [product_id])
+
+  created_at DateTime @default(now())
 
   @@index([bill_id])
+  @@index([variant_id])
   @@map("bill_line_items")
+}
+
+model BillPayment {
+  payment_id     String        @id @default(cuid())
+  bill_id        String
+  amount         Float
+  payment_method PaymentMethod
+  reference_no   String?
+  paid_at        DateTime      @default(now())
+  collected_by   String
+
+  bill      Bill @relation(fields: [bill_id], references: [bill_id], onDelete: Cascade)
+  collector User @relation("BillPaymentCollector", fields: [collected_by], references: [user_id])
+
+  @@index([bill_id])
+  @@map("bill_payments")
 }
 
 // ==================== CREDIT NOTES ====================
@@ -644,6 +750,7 @@ model CreditNote {
 
   original_bill_id String
   shop_id          String
+  customer_id      String?
 
   customer_mobile String
   customer_name   String?
@@ -663,8 +770,9 @@ model CreditNote {
   created_by_user_id String
   remarks            String?
 
-  shop           Shop    @relation("CreditNoteReturnShop", fields: [shop_id], references: [shop_id], onDelete: Restrict)
-  original_bill  Bill    @relation("CreditNoteOriginalBill", fields: [original_bill_id], references: [bill_id], onDelete: Restrict)
+  shop           Shop      @relation("CreditNoteReturnShop", fields: [shop_id], references: [shop_id], onDelete: Restrict)
+  customer       Customer? @relation(fields: [customer_id], references: [customer_id], onDelete: SetNull)
+  original_bill  Bill      @relation("CreditNoteOriginalBill", fields: [original_bill_id], references: [bill_id], onDelete: Restrict)
   redeemed_at_shop Shop? @relation("CreditNoteRedeemedAtShop", fields: [redeemed_at_shop_id], references: [shop_id], onDelete: SetNull)
   redeemed_against_bill Bill? @relation("CreditNoteRedeemedOnBill", fields: [redeemed_against_bill_id], references: [bill_id], onDelete: SetNull)
   created_by     User    @relation("CreditNoteCreatedBy", fields: [created_by_user_id], references: [user_id])
@@ -719,11 +827,17 @@ model User {
   purchase_entries_received PurchaseEntry[] @relation("PurchaseReceivedBy")
   stock_ledgers_created     StockLedger[]   @relation("StockLedgerCreatedBy")
   bills_created             Bill[]          @relation("BillCreatedBy")
+  bill_payments_collected   BillPayment[]   @relation("BillPaymentCollector")
   credit_notes_created      CreditNote[]    @relation("CreditNoteCreatedBy")
   refresh_tokens            RefreshToken[]
   inward_receipts_created   InwardReceipt[] @relation("InwardCreatedBy")
   inward_receipts_received  InwardReceipt[] @relation("InwardReceivedBy")
-  
+  transfer_requests_created TransferRequest[] @relation("TransferRequester")
+  transfer_requests_approved TransferRequest[] @relation("TransferApprover")
+  transfer_requests_dispatched TransferRequest[] @relation("TransferDispatcher")
+  transfer_requests_received TransferRequest[] @relation("TransferReceiver")
+  transfer_requests_cancelled TransferRequest[] @relation("TransferCanceller")
+
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
@@ -731,6 +845,69 @@ model User {
   @@index([warehouse_id])
   @@index([role, is_active])
   @@map("users")
+}
+
+// ==================== STOCK TRANSFER REQUESTS (workflow) ====================
+
+model TransferRequest {
+  request_id     String @id @default(cuid())
+  request_number String @unique
+  request_type   TransferRequestType
+
+  from_warehouse_id String?
+  to_warehouse_id   String?
+  from_shop_id      String?
+  to_shop_id        String?
+
+  variant_id   String
+  quantity     Int
+  batch_number String?
+
+  status TransferRequestStatus @default(REQUESTED)
+
+  requested_by    String
+  requested_at    DateTime @default(now())
+  request_remarks String?
+
+  approved_by      String?
+  approved_at      DateTime?
+  rejection_reason String?
+
+  dispatched_by     String?
+  dispatched_at     DateTime?
+  tracking_number   String?
+  expected_delivery DateTime?
+
+  received_by       String?
+  received_at       DateTime?
+  received_quantity Int?
+  receive_remarks   String?
+
+  cancelled_by  String?
+  cancelled_at  DateTime?
+  cancel_reason String?
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  from_warehouse Warehouse?     @relation("TransferFromWarehouse", fields: [from_warehouse_id], references: [warehouse_id])
+  to_warehouse   Warehouse?     @relation("TransferToWarehouse", fields: [to_warehouse_id], references: [warehouse_id])
+  from_shop      Shop?          @relation("TransferFromShop", fields: [from_shop_id], references: [shop_id])
+  to_shop        Shop?          @relation("TransferToShop", fields: [to_shop_id], references: [shop_id])
+  variant        ProductVariant @relation(fields: [variant_id], references: [variant_id])
+  requester      User           @relation("TransferRequester", fields: [requested_by], references: [user_id])
+  approver       User?          @relation("TransferApprover", fields: [approved_by], references: [user_id])
+  dispatcher     User?          @relation("TransferDispatcher", fields: [dispatched_by], references: [user_id])
+  receiver       User?          @relation("TransferReceiver", fields: [received_by], references: [user_id])
+  canceller      User?          @relation("TransferCanceller", fields: [cancelled_by], references: [user_id])
+
+  @@index([status])
+  @@index([request_type])
+  @@index([from_warehouse_id, status])
+  @@index([to_shop_id, status])
+  @@index([requested_by])
+  @@index([created_at])
+  @@map("transfer_requests")
 }
 
 model RefreshToken {

@@ -226,6 +226,73 @@ const ShopStockService = {
     return results;
   },
 
+  /**
+   * Deduct available stock for a sale inside an open transaction.
+   * @param {import('@prisma/client').Prisma.TransactionClient} tx
+   * @param {string} shopId
+   * @param {string} variantId
+   * @param {number} quantity
+   */
+  async deductStockForSale(tx, shopId, variantId, quantity) {
+    const qty = Number(quantity);
+    if (!Number.isInteger(qty) || qty <= 0) {
+      throw new AppError('quantity must be a positive integer', 400, 'TRANSFER_QUANTITY_INVALID');
+    }
+
+    const row = await tx.shopStock.findUnique({
+      where: { shop_id_variant_id: { shop_id: shopId, variant_id: variantId } },
+    });
+
+    const available = row?.quantity_available ?? 0;
+    if (available < qty) {
+      throw new AppError(
+        `Insufficient shop stock. Available: ${available}, requested: ${qty}`,
+        409,
+        'INSUFFICIENT_STOCK',
+        { available, requested: qty, variant_id: variantId, shop_id: shopId }
+      );
+    }
+
+    if (row) {
+      await tx.shopStock.update({
+        where: { shop_stock_id: row.shop_stock_id },
+        data: { quantity_available: { decrement: qty } },
+      });
+    } else {
+      throw new AppError('Shop stock record not found', 404, 'SHOP_STOCK_NOT_FOUND');
+    }
+
+    return { before: available, after: available - qty };
+  },
+
+  /**
+   * Restore available stock after bill cancellation inside a transaction.
+   * @param {import('@prisma/client').Prisma.TransactionClient} tx
+   * @param {string} shopId
+   * @param {string} variantId
+   * @param {number} quantity
+   * @param {number} [lowStockThreshold]
+   */
+  async restoreStockForSale(tx, shopId, variantId, quantity, lowStockThreshold = 5) {
+    const qty = Number(quantity);
+    if (!Number.isInteger(qty) || qty <= 0) {
+      throw new AppError('quantity must be a positive integer', 400, 'TRANSFER_QUANTITY_INVALID');
+    }
+
+    const row = await tx.shopStock.upsert({
+      where: { shop_id_variant_id: { shop_id: shopId, variant_id: variantId } },
+      update: { quantity_available: { increment: qty } },
+      create: {
+        shop_id: shopId,
+        variant_id: variantId,
+        quantity_available: qty,
+        low_stock_threshold: lowStockThreshold,
+      },
+    });
+
+    return row;
+  },
+
   async getLowStockAlerts(shopId, user) {
     const resolvedShopId = resolveShopIdForUser(user, shopId);
     assertShopReadAccess(resolvedShopId, user);
