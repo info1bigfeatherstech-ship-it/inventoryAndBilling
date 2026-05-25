@@ -12,6 +12,15 @@ const TransferRequestController = {
     });
   }),
 
+  createEmergency: asyncHandler(async (req, res) => {
+    const data = await TransferRequestService.createEmergencyRequest(req.body, req.user);
+    return successResponse(res, req, {
+      statusCode: 201,
+      message: 'Emergency transfer request created successfully',
+      data,
+    });
+  }),
+
   list: asyncHandler(async (req, res) => {
     const { total, page, limit, requests } = await TransferRequestService.listRequests(req.query, req.user);
     return successResponse(res, req, {

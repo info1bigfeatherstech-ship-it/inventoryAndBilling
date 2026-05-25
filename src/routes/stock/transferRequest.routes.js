@@ -8,6 +8,7 @@ const { idempotency } = require('../../middlewares/idempotency.middleware');
 const {
   requestIdParam,
   createRequestValidator,
+  emergencyRequestValidator,
   listRequestsValidator,
   approveRejectValidator,
   rejectValidator,
@@ -50,6 +51,15 @@ router.get(
   listRequestsValidator,
   validateRequest,
   TransferRequestController.getMyRequests
+);
+
+router.post(
+  '/emergency',
+  authorizeRoles(...CREATE_ROLES),
+  idem24h,
+  emergencyRequestValidator,
+  validateRequest,
+  TransferRequestController.createEmergency
 );
 
 router.get(

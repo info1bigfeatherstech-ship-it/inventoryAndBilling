@@ -41,6 +41,7 @@ const REQUEST_SELECT = {
   quantity: true,
   batch_number: true,
   status: true,
+  priority: true,
   requested_by: true,
   requested_at: true,
   request_remarks: true,
@@ -419,6 +420,22 @@ const TransferRequestService = {
   /**
    * Create a transfer request (destination initiates).
    */
+  /**
+   * Emergency transfer request (HIGH priority, same workflow as standard create).
+   */
+  async createEmergencyRequest(data, user) {
+    return this.createRequest(
+      {
+        ...data,
+        priority: 'HIGH',
+        request_remarks: data.request_remarks
+          ? `[EMERGENCY] ${data.request_remarks}`
+          : '[EMERGENCY] Urgent stock refill',
+      },
+      user
+    );
+  },
+
   async createRequest(data, user) {
     try {
       const { variant, quantity, batchNumber } = await validateCreatePayload(data);
@@ -448,6 +465,8 @@ const TransferRequestService = {
             status: 'REQUESTED',
             requested_by: user.userId,
             request_remarks: data.request_remarks ?? null,
+            priority: data.priority === 'HIGH' ? 'HIGH' : 'NORMAL',
+            expected_delivery: data.expected_delivery ? new Date(data.expected_delivery) : null,
           },
           select: REQUEST_SELECT,
         });

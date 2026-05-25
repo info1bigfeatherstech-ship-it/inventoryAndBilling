@@ -121,6 +121,11 @@ enum TransferRequestType {
   SHOP_TO_SHOP
 }
 
+enum TransferPriority {
+  NORMAL
+  HIGH
+}
+
 enum MediaStorageProvider {
   CLOUDINARY
   CLOUDFLARE_R2
@@ -177,8 +182,9 @@ model Warehouse {
   inward_receipts InwardReceipt[]
   stock_ledger_out StockLedger[] @relation("LedgerFromWarehouse")
   stock_ledger_in  StockLedger[] @relation("LedgerToWarehouse")
-  transfers_from   TransferRequest[] @relation("TransferFromWarehouse")
-  transfers_to       TransferRequest[] @relation("TransferToWarehouse")
+  transfers_from       TransferRequest[] @relation("TransferFromWarehouse")
+  transfers_to         TransferRequest[] @relation("TransferToWarehouse")
+  bulk_transfers_from  BulkTransferRequest[] @relation("BulkTransferFromWarehouse")
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
@@ -222,8 +228,11 @@ model Shop {
 
   stock_ledger_from StockLedger[] @relation("LedgerFromShop")
   stock_ledger_to   StockLedger[] @relation("LedgerToShop")
-  transfers_from    TransferRequest[] @relation("TransferFromShop")
-  transfers_to      TransferRequest[] @relation("TransferToShop")
+  transfers_from       TransferRequest[] @relation("TransferFromShop")
+  transfers_to         TransferRequest[] @relation("TransferToShop")
+  bulk_transfers_from  BulkTransferRequest[] @relation("BulkTransferFromShop")
+  bulk_transfers_to    BulkTransferRequest[] @relation("BulkTransferToShop")
+  product_levels       ShopProductLevel[]
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
@@ -403,8 +412,10 @@ model ProductVariant {
   stocks            ProductStock[]
   shop_stocks       ShopStock[]
   stock_ledgers     StockLedger[]
-  transfer_requests TransferRequest[]
-  bill_lines        BillLineItem[] @relation("BillLineVariant")
+  transfer_requests   TransferRequest[]
+  bulk_transfer_items BulkTransferRequestItem[]
+  shop_product_levels ShopProductLevel[]
+  bill_lines          BillLineItem[] @relation("BillLineVariant")
 
   @@unique([product_id, sku])
   @@unique([product_id, product_code])  // ← FIXED
@@ -837,6 +848,11 @@ model User {
   transfer_requests_dispatched TransferRequest[] @relation("TransferDispatcher")
   transfer_requests_received TransferRequest[] @relation("TransferReceiver")
   transfer_requests_cancelled TransferRequest[] @relation("TransferCanceller")
+  bulk_requests_created       BulkTransferRequest[] @relation("BulkTransferRequester")
+  bulk_requests_approved      BulkTransferRequest[] @relation("BulkTransferApprover")
+  bulk_requests_dispatched    BulkTransferRequest[] @relation("BulkTransferDispatcher")
+  bulk_requests_received      BulkTransferRequest[] @relation("BulkTransferReceiver")
+  bulk_requests_cancelled     BulkTransferRequest[] @relation("BulkTransferCanceller")
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
@@ -845,6 +861,106 @@ model User {
   @@index([warehouse_id])
   @@index([role, is_active])
   @@map("users")
+}
+
+// ==================== SHOP MIN-MAX LEVELS ====================
+
+model ShopProductLevel {
+  level_id    String @id @default(cuid())
+  shop_id     String
+  variant_id  String
+
+  min_level   Int
+  max_level   Int
+  reorder_qty Int?
+
+  is_active Boolean @default(true)
+
+  shop    Shop           @relation(fields: [shop_id], references: [shop_id], onDelete: Cascade)
+  variant ProductVariant @relation(fields: [variant_id], references: [variant_id], onDelete: Cascade)
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@unique([shop_id, variant_id])
+  @@index([shop_id, is_active])
+  @@map("shop_product_levels")
+}
+
+// ==================== BULK TRANSFER REQUESTS ====================
+
+model BulkTransferRequest {
+  bulk_request_id     String @id @default(cuid())
+  bulk_request_number String @unique
+
+  request_type      TransferRequestType @default(WH_TO_SHOP)
+  from_warehouse_id String?
+  from_shop_id      String?
+  to_shop_id        String
+
+  status TransferRequestStatus @default(REQUESTED)
+
+  requested_by    String
+  requested_at    DateTime @default(now())
+  request_remarks String?
+
+  approved_by      String?
+  approved_at      DateTime?
+  rejection_reason String?
+
+  dispatched_by     String?
+  dispatched_at     DateTime?
+  tracking_number   String?
+  expected_delivery DateTime?
+
+  received_by     String?
+  received_at     DateTime?
+  receive_remarks String?
+
+  cancelled_by  String?
+  cancelled_at  DateTime?
+  cancel_reason String?
+
+  items BulkTransferRequestItem[]
+
+  from_warehouse Warehouse? @relation("BulkTransferFromWarehouse", fields: [from_warehouse_id], references: [warehouse_id])
+  from_shop      Shop?      @relation("BulkTransferFromShop", fields: [from_shop_id], references: [shop_id])
+  to_shop        Shop       @relation("BulkTransferToShop", fields: [to_shop_id], references: [shop_id], onDelete: Restrict)
+  requester      User       @relation("BulkTransferRequester", fields: [requested_by], references: [user_id])
+  approver       User?      @relation("BulkTransferApprover", fields: [approved_by], references: [user_id])
+  dispatcher     User?      @relation("BulkTransferDispatcher", fields: [dispatched_by], references: [user_id])
+  receiver       User?      @relation("BulkTransferReceiver", fields: [received_by], references: [user_id])
+  canceller      User?      @relation("BulkTransferCanceller", fields: [cancelled_by], references: [user_id])
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([status])
+  @@index([request_type])
+  @@index([to_shop_id, status])
+  @@index([requested_by])
+  @@map("bulk_transfer_requests")
+}
+
+model BulkTransferRequestItem {
+  bulk_item_id    String @id @default(cuid())
+  bulk_request_id String
+  variant_id      String
+  quantity        Int
+  batch_number    String?
+
+  is_approved       Boolean @default(true)
+  approved_quantity Int?
+  rejection_reason  String?
+
+  received_quantity Int @default(0)
+
+  bulk_request BulkTransferRequest @relation(fields: [bulk_request_id], references: [bulk_request_id], onDelete: Cascade)
+  variant      ProductVariant      @relation(fields: [variant_id], references: [variant_id])
+
+  @@index([bulk_request_id])
+  @@index([variant_id])
+  @@map("bulk_transfer_request_items")
 }
 
 // ==================== STOCK TRANSFER REQUESTS (workflow) ====================
@@ -862,6 +978,8 @@ model TransferRequest {
   variant_id   String
   quantity     Int
   batch_number String?
+
+  priority TransferPriority @default(NORMAL)
 
   status TransferRequestStatus @default(REQUESTED)
 

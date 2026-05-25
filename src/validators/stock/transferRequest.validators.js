@@ -25,6 +25,21 @@ const createRequestValidator = [
   body('quantity').isInt({ min: 1 }),
   body('batch_number').optional().isString().trim(),
   body('request_remarks').optional().isString().trim().isLength({ max: 500 }),
+  body('expected_delivery').optional().isISO8601().toDate(),
+];
+
+const emergencyRequestValidator = [
+  body('request_type').isIn(REQUEST_TYPES),
+  body('from_warehouse_id').optional().isString().trim().notEmpty(),
+  body('to_warehouse_id').optional().isString().trim().notEmpty(),
+  body('from_shop_id').optional().isString().trim().notEmpty(),
+  body('to_shop_id').optional().isString().trim().notEmpty(),
+  body('variant_id').isString().trim().notEmpty(),
+  body('quantity').isInt({ min: 1 }),
+  body('batch_number').optional().isString().trim(),
+  body('priority').optional().isIn(['HIGH', 'NORMAL']),
+  body('request_remarks').optional().isString().trim().isLength({ max: 500 }),
+  body('expected_delivery').optional().isISO8601().toDate(),
 ];
 
 const listRequestsValidator = [
@@ -64,6 +79,7 @@ const rejectValidator = [
 module.exports = {
   requestIdParam,
   createRequestValidator,
+  emergencyRequestValidator,
   listRequestsValidator,
   approveRejectValidator,
   rejectValidator,
