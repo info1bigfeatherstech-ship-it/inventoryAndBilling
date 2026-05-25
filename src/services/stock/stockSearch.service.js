@@ -145,6 +145,7 @@ const StockSearchService = {
           variant_id: variant.variant_id,
           quantity_available: { gt: 0 },
           shop: { is_active: true },
+          ...(user.shopId ? { shop_id: { not: user.shopId } } : {}),
         },
         include: {
           shop: {
