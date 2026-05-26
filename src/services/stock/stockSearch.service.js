@@ -196,8 +196,8 @@ const StockSearchService = {
           attributes: variant.attributes,
           system_barcode: variant.system_barcode,
         },
-        warehouses,
         shops,
+        warehouses
       };
     } catch (err) {
       logger.error('searchStock failed', { error: err.message, stack: err.stack });
