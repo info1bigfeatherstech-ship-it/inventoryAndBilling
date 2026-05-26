@@ -106,6 +106,8 @@ router.patch('/bulk/restore', authorizeRoles(...WRITE_ROLES), ProductController.
 
 router.delete('/hard-delete-by-date', authorizeRoles('SUPER_ADMIN'), ProductController.hardDeleteByDate);
 
+router.get('/by-barcode/:barcode',authorizeRoles(...READ_ROLES), ProductController.getByBarcode);
+
 router.get('/:productId', authorizeRoles(...READ_ROLES), productIdParam, validateRequest, ProductController.getById);
 
 // Restore single product

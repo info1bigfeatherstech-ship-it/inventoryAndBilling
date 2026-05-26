@@ -1028,6 +1028,74 @@ const ProductService = {
     await cacheSet(cacheKey, enriched);
     return enriched;
   },
+  
+  async getProductByBarcode(barcode, shopId = null) {
+    const variant = await prisma.productVariant.findFirst({
+      where: {
+        system_barcode: barcode,
+        is_active: true,
+        product: { is_active: true }
+      },
+      include: {
+        product: {
+          select: {
+            product_id: true,
+            product_code: true,
+            name: true,
+            description: true,
+            hsn_code: true,
+            gst_percent: true,
+            gst_type: true,
+            unit_of_measure: true,
+            brand_name: true,
+            mrp: true,
+            wholesale_price: true,
+            retail_price: true,
+            online_price: true,
+          }
+        }
+      }
+    });
+    
+    if (!variant) {
+      throw new AppError('Product not found for this barcode', 404, 'PRODUCT_NOT_FOUND');
+    }
+    
+    let stockAvailable = null;
+    if (shopId) {
+      const shopStock = await prisma.shopStock.findUnique({
+        where: {
+          shop_id_variant_id: {
+            shop_id: shopId,
+            variant_id: variant.variant_id
+          }
+        },
+        select: { quantity_available: true }
+      });
+      stockAvailable = shopStock?.quantity_available || 0;
+    }
+    
+    return {
+      variant_id: variant.variant_id,
+      product_id: variant.product_id,
+      product_code: variant.product_code,
+      sku: variant.sku,
+      system_barcode: variant.system_barcode,
+      attributes: variant.attributes,
+      name: variant.product.name,
+      description: variant.product.description,
+      brand_name: variant.product.brand_name,
+      hsn_code: variant.product.hsn_code,
+      gst_percent: variant.product.gst_percent,
+      gst_type: variant.product.gst_type,
+      unit_of_measure: variant.product.unit_of_measure,
+      mrp: variant.product.mrp,
+      wholesale_price: variant.product.wholesale_price,
+      retail_price: variant.product.retail_price,
+      online_price: variant.product.online_price,
+      stock_available: stockAvailable
+    };
+  },
 
   async updateProduct(productId, data, user) {
     return this.updateProductLevel(productId, data, user);

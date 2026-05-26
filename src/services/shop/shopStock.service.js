@@ -21,12 +21,16 @@ const SHOP_STOCK_SELECT = {
       sku: true,
       product_code: true, 
       system_barcode: true,
+      mrp: true,                    // ⭐ ADD THIS
+      wholesale_price: true,        // ⭐ ADD THIS
+      retail_price: true,           // ⭐ ADD THIS
+      online_price: true,           // ⭐ ADD THIS
+      purchase_cost: true,          // ⭐ ADD THIS (for warehouse staff)
       product: { select: { product_id: true, product_code: true, name: true, warehouse_id: true } },
     },
   },
   shop: { select: { shop_id: true, shop_code: true, shop_name: true, is_active: true } },
 };
-
 const assertShopActive = async (shopId) => {
   const shop = await prisma.shop.findUnique({
     where: { shop_id: shopId },

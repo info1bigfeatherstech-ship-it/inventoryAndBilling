@@ -97,7 +97,18 @@ const ProductController = {
       data: product,
     });
   }),
-
+  getByBarcode: asyncHandler(async (req, res) => {
+    const { barcode } = req.params;
+    const shopId = req.query.shop_id;
+    
+    const product = await ProductService.getProductByBarcode(barcode, shopId);
+    
+    return successResponse(res, req, {
+      statusCode: 200,
+      message: 'Product fetched successfully',
+      data: product,
+    });
+  }),
   update: asyncHandler(async (req, res) => {
     const product = await ProductService.updateProductLevel(req.params.productId, req.body, req.user);
     return successResponse(res, req, {
