@@ -130,7 +130,7 @@ const uploadBillPdf = async (buffer, billNumber) => {
 };
 
 /**
- * Generate PDF for bill, optionally persist to Cloudinary.
+ * Generate PDF for bill, and  do not store in the cloudinary  anymore remove the cloudinary upload part.
  */
 const generateBillPdf = async (bill, { persist = true } = {}) => {
   const buffer = await buildBillPdfBuffer(bill);
@@ -138,14 +138,14 @@ const generateBillPdf = async (bill, { persist = true } = {}) => {
     return { buffer, contentType: 'application/pdf' };
   }
 
-  try {
-    const uploaded = await uploadBillPdf(buffer, bill.bill_number);
-    logger.info('Bill PDF uploaded', { bill_id: bill.bill_id, storage_key: uploaded.pdf_storage_key });
-    return { buffer, ...uploaded, contentType: 'application/pdf' };
-  } catch (err) {
-    logger.warn('Bill PDF upload failed, returning buffer only', { bill_id: bill.bill_id, error: err.message });
-    return { buffer, contentType: 'application/pdf', upload_failed: true };
-  }
+  // try {
+  //   const uploaded = await uploadBillPdf(buffer, bill.bill_number);
+  //   logger.info('Bill PDF uploaded', { bill_id: bill.bill_id, storage_key: uploaded.pdf_storage_key });
+  //   return { buffer, ...uploaded, contentType: 'application/pdf' };
+  // } catch (err) {
+  //   logger.warn('Bill PDF upload failed, returning buffer only', { bill_id: bill.bill_id, error: err.message });
+  //   return { buffer, contentType: 'application/pdf', upload_failed: true };
+  // }
 };
 
 module.exports = {

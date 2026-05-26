@@ -71,6 +71,24 @@ const CustomerController = {
       data,
     });
   }),
+  updateLoyaltyTier: asyncHandler(async (req, res) => {
+    const { loyalty_tier } = req.body;
+    
+    const customer = await CustomerService.updateLoyaltyTierManual(
+      req.params.customerId,
+      loyalty_tier
+    );
+    
+    return successResponse(res, req, {
+      statusCode: 200,
+      message: 'Customer loyalty tier updated successfully',
+      data: {
+        customer_id: customer.customer_id,
+        name: customer.name,
+        loyalty_tier: customer.loyalty_tier,
+      },
+    });
+  }),
 };
 
 module.exports = CustomerController;

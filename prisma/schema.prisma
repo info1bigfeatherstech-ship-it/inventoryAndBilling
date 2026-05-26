@@ -623,7 +623,7 @@ model Customer {
   total_spent   Float     @default(0)
   total_orders  Int       @default(0)
   last_purchase DateTime?
-  loyalty_tier  String    @default("BRONZE")
+  loyalty_tier  String?
 
   credit_limit   Float?
   credit_balance Float    @default(0)

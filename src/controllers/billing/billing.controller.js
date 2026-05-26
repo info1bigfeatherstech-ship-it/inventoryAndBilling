@@ -78,7 +78,7 @@ const BillingController = {
 
   downloadPDF: asyncHandler(async (req, res) => {
     const { bill, pdf } = await BillingService.generatePDF(req.params.billId, req.user, {
-      persist: req.query.persist !== 'false',
+      persist:false,
     });
 
     if (req.query.format === 'json') {

@@ -53,6 +53,13 @@ const searchCustomersValidator = [
   query('mobile').optional().isString().trim(),
   query('name').optional().isString().trim(),
 ];
+const updateLoyaltyTier = [
+  ...customerIdParam,
+  body('loyalty_tier')
+    .optional({ nullable: true })
+    .isIn(['BRONZE', 'SILVER', 'GOLD', 'PLATINUM'])
+    .withMessage('loyalty_tier must be BRONZE, SILVER, GOLD, PLATINUM, or null'),
+];
 
 module.exports = {
   customerIdParam,
@@ -60,4 +67,5 @@ module.exports = {
   updateCustomerValidator,
   listCustomersValidator,
   searchCustomersValidator,
+  updateLoyaltyTier,
 };

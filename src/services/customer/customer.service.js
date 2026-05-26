@@ -69,6 +69,7 @@ const CustomerService = {
           credit_limit: creditLimit,
           credit_balance: creditLimit ?? 0,
           remarks: data.remarks?.trim() || null,
+          loyalty_tier: null,
         },
         select: CUSTOMER_SELECT,
       });
@@ -237,26 +238,58 @@ const CustomerService = {
     return customer;
   },
 
-  /**
-   * Recalculate loyalty tier from total_spent.
-   */
-  async updateLoyaltyTier(customerId, tx = prisma) {
-    const customer = await tx.customer.findUnique({
-      where: { customer_id: customerId },
-      select: { customer_id: true, total_spent: true, loyalty_tier: true },
-    });
-    if (!customer) return null;
+ /**
+ * @deprecated - Use manual update via API instead
+ * Only for backward compatibility
+ */
+// async updateLoyaltyTier(customerId, tx = prisma) {
+//   // Keep but don't call automatically
+//   const customer = await tx.customer.findUnique({
+//     where: { customer_id: customerId },
+//     select: { customer_id: true, total_spent: true, loyalty_tier: true },
+//   });
+//   if (!customer) return null;
 
-    const tier = calculateLoyaltyTier(customer.total_spent);
-    if (tier === customer.loyalty_tier) return customer;
+//   const tier = calculateLoyaltyTier(customer.total_spent);
+//   if (tier === customer.loyalty_tier) return customer;
 
-    return tx.customer.update({
-      where: { customer_id: customerId },
-      data: { loyalty_tier: tier },
-      select: CUSTOMER_SELECT,
-    });
-  },
+//   return tx.customer.update({
+//     where: { customer_id: customerId },
+//     data: { loyalty_tier: tier },
+//     select: CUSTOMER_SELECT,
+//   });
+// },
 
+
+/**
+ * Manually update customer loyalty tier (Super Admin only)
+ */
+async updateLoyaltyTierManual(customerId, loyaltyTier) {
+  const customer = await prisma.customer.findUnique({
+    where: { customer_id: customerId },
+    select: { customer_id: true, is_active: true },
+  });
+  if (!customer) throw new AppError('Customer not found', 404, 'CUSTOMER_NOT_FOUND');
+  if (!customer.is_active) throw new AppError('Customer is inactive', 409, 'CUSTOMER_INACTIVE');
+
+  const validTiers = ['BRONZE', 'SILVER', 'GOLD', 'PLATINUM', null];
+  if (loyaltyTier !== undefined && !validTiers.includes(loyaltyTier)) {
+    throw new AppError('Invalid loyalty tier', 400, 'INVALID_TIER');
+  }
+
+  const updated = await prisma.customer.update({
+    where: { customer_id: customerId },
+    data: { loyalty_tier: loyaltyTier },
+    select: CUSTOMER_SELECT,
+  });
+
+  logger.info('Customer loyalty tier manually updated', {
+    customer_id: customerId,
+    loyalty_tier: loyaltyTier,
+  });
+
+  return updated;
+},
   /**
    * Update spend stats after a bill (call inside transaction).
    * @param {string} customerId
@@ -270,19 +303,19 @@ const CustomerService = {
       select: { customer_id: true, total_spent: true, total_orders: true },
     });
     if (!customer) return null;
-
+  
     const newSpent = roundMoney(Math.max(0, (customer.total_spent || 0) + delta));
     const orderDelta = delta > 0 ? 1 : delta < 0 ? -1 : 0;
     const newOrders = Math.max(0, (customer.total_orders || 0) + orderDelta);
-    const tier = calculateLoyaltyTier(newSpent);
-
+  
+    // ✅ REMOVE loyalty_tier from update
     return tx.customer.update({
       where: { customer_id: customerId },
       data: {
         total_spent: newSpent,
         total_orders: newOrders,
-        loyalty_tier: tier,
         ...(delta > 0 ? { last_purchase: new Date() } : {}),
+        // ✅ loyalty_tier NOT updated here
       },
       select: CUSTOMER_SELECT,
     });
