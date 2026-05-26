@@ -4,23 +4,52 @@ const { createStockLedgerEntry } = require('./stockLedger.helpers');
 const normalizeBatch = (value) => (value != null ? String(value).trim() : '');
 
 const deductWarehouseStock = async (tx, variantId, warehouseId, quantity, batchNumber) => {
-  const row = await tx.productStock.findUnique({
-    where: {
-      variant_id_warehouse_id_batch_number: {
+  let row = null;
+  let usedBatch = batchNumber;
+
+  // If no batch number specified, find any stock with sufficient quantity
+  if (!batchNumber || batchNumber === '') {
+    row = await tx.productStock.findFirst({
+      where: {
         variant_id: variantId,
         warehouse_id: warehouseId,
-        batch_number: batchNumber,
+        quantity: { gte: quantity },
       },
-    },
-  });
+      orderBy: { expiry_date: 'asc' }, // FIFO - oldest expiry first
+    });
+    
+    if (row) {
+      usedBatch = row.batch_number;
+    }
+  } else {
+    // Exact batch match
+    row = await tx.productStock.findUnique({
+      where: {
+        variant_id_warehouse_id_batch_number: {
+          variant_id: variantId,
+          warehouse_id: warehouseId,
+          batch_number: batchNumber,
+        },
+      },
+    });
+  }
 
-  const available = row?.quantity ?? 0;
+  if (!row) {
+    throw new AppError(
+      `Insufficient warehouse stock. Requested: ${quantity}`,
+      409,
+      'INSUFFICIENT_STOCK',
+      { requested: quantity, batch_number: batchNumber || 'any batch' }
+    );
+  }
+
+  const available = row.quantity;
   if (available < quantity) {
     throw new AppError(
       `Insufficient warehouse stock. Available: ${available}, requested: ${quantity}`,
       409,
       'INSUFFICIENT_STOCK',
-      { available, requested: quantity, batch_number: batchNumber }
+      { available, requested: quantity, batch_number: row.batch_number || 'default' }
     );
   }
 
@@ -28,6 +57,8 @@ const deductWarehouseStock = async (tx, variantId, warehouseId, quantity, batchN
     where: { stock_id: row.stock_id },
     data: { quantity: { decrement: quantity } },
   });
+  
+  return row;
 };
 
 const addWarehouseStock = async (tx, variant, warehouseId, quantity, batchNumber) => {
