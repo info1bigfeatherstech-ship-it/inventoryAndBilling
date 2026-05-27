@@ -238,6 +238,25 @@ const CustomerService = {
     return customer;
   },
 
+  async restoreCustomer(customerId) {
+    const existing = await prisma.customer.findUnique({ 
+      where: { customer_id: customerId } 
+    });
+    if (!existing) throw new AppError('Customer not found', 404, 'CUSTOMER_NOT_FOUND');
+    if (existing.is_active) throw new AppError('Customer is already active', 409, 'ALREADY_ACTIVE');
+  
+    const customer = await prisma.customer.update({
+      where: { customer_id: customerId },
+      data: { is_active: true },
+      select: CUSTOMER_SELECT,
+    });
+  
+    logger.info('Customer restored', { customer_id: customerId });
+    return customer;
+  },
+
+
+
  /**
  * @deprecated - Use manual update via API instead
  * Only for backward compatibility

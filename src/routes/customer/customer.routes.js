@@ -29,6 +29,14 @@ router.patch(
   validateRequest,
   CustomerController.updateLoyaltyTier
 );
+// customer.routes.js mein add karo
+router.patch(
+  '/:customerId/restore',
+  authorizeRoles('SUPER_ADMIN'),  // Sirf Super Admin restore kar sakta hai
+  customerIdParam,
+  validateRequest,
+  CustomerController.restore
+);
 router.get('/:customerId', customerIdParam, validateRequest, CustomerController.getById);
 router.put('/:customerId', authorizeRoles(...WRITE_ROLES), updateCustomerValidator, validateRequest, CustomerController.update);
 router.delete('/:customerId', authorizeRoles(...WRITE_ROLES), customerIdParam, validateRequest, CustomerController.remove);

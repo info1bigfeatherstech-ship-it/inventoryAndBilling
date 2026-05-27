@@ -71,6 +71,14 @@ const CustomerController = {
       data,
     });
   }),
+  restore: asyncHandler(async (req, res) => {
+    const data = await CustomerService.restoreCustomer(req.params.customerId);
+    return successResponse(res, req, {
+      statusCode: 200,
+      message: 'Customer restored successfully',
+      data,
+    });
+  }),
   updateLoyaltyTier: asyncHandler(async (req, res) => {
     const { loyalty_tier } = req.body;
     

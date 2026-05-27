@@ -832,7 +832,6 @@ model CreditNoteLineItem {
 }
 
 // ==================== USER ====================
-
 model User {
   user_id       String   @id @default(cuid())
   name          String
