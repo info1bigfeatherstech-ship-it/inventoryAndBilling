@@ -87,6 +87,7 @@ enum CreditNoteStatus {
   ACTIVE
   REDEEMED
   PARTIALLY_REDEEMED
+  REFUNDED
   CANCELLED
 }
 
@@ -416,6 +417,7 @@ model ProductVariant {
   bulk_transfer_items BulkTransferRequestItem[]
   shop_product_levels ShopProductLevel[]
   bill_lines          BillLineItem[] @relation("BillLineVariant")
+  credit_note_lines   CreditNoteLineItem[]
 
   @@unique([product_id, sku])
   @@unique([product_id, product_code])  // ← FIXED
@@ -770,11 +772,19 @@ model CreditNote {
   gst_amount   Float
   credit_amount Float
 
+  amount_redeemed Float @default(0)
+  amount_refunded Float @default(0)
+
   status CreditNoteStatus @default(ACTIVE)
 
   redeemed_at               DateTime?
   redeemed_at_shop_id       String?
   redeemed_against_bill_id  String?
+
+  refunded_at           DateTime?
+  refund_method         PaymentMethod?
+  refund_reference_no   String?
+  refunded_by_user_id   String?
 
   photo_storage_key String?
 
@@ -787,6 +797,7 @@ model CreditNote {
   redeemed_at_shop Shop? @relation("CreditNoteRedeemedAtShop", fields: [redeemed_at_shop_id], references: [shop_id], onDelete: SetNull)
   redeemed_against_bill Bill? @relation("CreditNoteRedeemedOnBill", fields: [redeemed_against_bill_id], references: [bill_id], onDelete: SetNull)
   created_by     User    @relation("CreditNoteCreatedBy", fields: [created_by_user_id], references: [user_id])
+  refunded_by    User?   @relation("CreditNoteRefundedBy", fields: [refunded_by_user_id], references: [user_id], onDelete: SetNull)
 
   lines CreditNoteLineItem[]
 
@@ -799,19 +810,24 @@ model CreditNote {
 }
 
 model CreditNoteLineItem {
-  line_id         String @id @default(cuid())
-  credit_note_id  String
-  product_id      String
+  line_id        String @id @default(cuid())
+  credit_note_id String
+  variant_id     String
+  product_id     String
 
-  quantity   Int
-  unit_price Float
+  quantity    Int
+  unit_price  Float
   gst_percent Float
-  line_total  Float
+  line_subtotal Float
+  tax_amount    Float
+  line_total    Float
 
-  credit_note CreditNote @relation(fields: [credit_note_id], references: [credit_note_id], onDelete: Restrict)
-  product     Product    @relation(fields: [product_id], references: [product_id])
+  credit_note CreditNote     @relation(fields: [credit_note_id], references: [credit_note_id], onDelete: Cascade)
+  variant     ProductVariant @relation(fields: [variant_id], references: [variant_id])
+  product     Product        @relation(fields: [product_id], references: [product_id])
 
   @@index([credit_note_id])
+  @@index([variant_id])
   @@map("credit_note_line_items")
 }
 
@@ -840,6 +856,7 @@ model User {
   bills_created             Bill[]          @relation("BillCreatedBy")
   bill_payments_collected   BillPayment[]   @relation("BillPaymentCollector")
   credit_notes_created      CreditNote[]    @relation("CreditNoteCreatedBy")
+  credit_notes_refunded     CreditNote[]    @relation("CreditNoteRefundedBy")
   refresh_tokens            RefreshToken[]
   inward_receipts_created   InwardReceipt[] @relation("InwardCreatedBy")
   inward_receipts_received  InwardReceipt[] @relation("InwardReceivedBy")

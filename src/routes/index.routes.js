@@ -23,6 +23,7 @@ const stockLedgerRoutes = require('./stock/stockLedger.routes');
 const purchaseEntryRoutes = require('./purchase/purchaseEntry.routes');
 const customerRoutes = require('./customer/customer.routes');
 const billingRoutes = require('./billing/billing.routes');
+const creditNoteRoutes = require('./creditNote/creditNote.routes');
 
 // API info route
 router.get('/', (req, res) => {
@@ -56,6 +57,7 @@ router.get('/', (req, res) => {
       stockLedger: 'GET /api/v1/stock/ledger',
       customers: 'GET /api/v1/customers',
       bills: 'POST /api/v1/bills',
+      creditNotes: 'POST /api/v1/credit-notes',
     },
     requestId: req.id,
   });
@@ -93,6 +95,7 @@ v1Router.use('/stock/ledger', stockLedgerRoutes);
 v1Router.use('/purchase-entries', purchaseEntryRoutes);
 v1Router.use('/customers', customerRoutes);
 v1Router.use('/bills', billingRoutes);
+v1Router.use('/credit-notes', creditNoteRoutes);
 // Mount versioned routes
 router.use('/v1', v1Router);
 

@@ -4,6 +4,7 @@ const { parsePagination } = require('../../utils/pagination.utils');
 const { createStockLedgerEntry } = require('../stock/stockLedger.helpers');
 const ShopStockService = require('../shop/shopStock.service');
 const CustomerService = require('../customer/customer.service');
+const CreditNoteService = require('../creditNote/creditNote.service');
 const { generateBillPdf } = require('./billPdf.service');
 const {
   resolveBillingShopId,
@@ -260,14 +261,14 @@ const BillingService = {
       });
 
       const totals = aggregateBillTotals(computedLines, extraDiscountPercent, loyaltyDiscountPercent);
+      const creditNoteIds = Array.isArray(data.credit_note_ids)
+        ? [...new Set(data.credit_note_ids)]
+        : [];
 
       const paymentAmount = data.payment_amount != null ? roundMoney(data.payment_amount) : 0;
       if (paymentAmount > 0 && !data.payment_method) {
         throw new AppError('payment_method is required when payment_amount is provided', 400, 'PAYMENT_METHOD_REQUIRED');
       }
-      const paidAmount = paymentAmount > 0 ? Math.min(paymentAmount, totals.total_amount) : 0;
-      const balanceAmount = roundMoney(totals.total_amount - paidAmount);
-      const paymentStatus = derivePaymentStatus(totals.total_amount, paidAmount);
 
       const result = await prisma.$transaction(async (tx) => {
         for (const line of computedLines) {
@@ -291,10 +292,10 @@ const BillingService = {
             taxable_amount: totals.taxable_amount,
             gst_amount: totals.gst_amount,
             total_amount: totals.total_amount,
-            payment_status: paymentStatus,
-            payment_method: paidAmount > 0 ? data.payment_method || null : null,
-            paid_amount: paidAmount,
-            balance_amount: balanceAmount,
+            payment_status: 'PENDING',
+            payment_method: null,
+            paid_amount: 0,
+            balance_amount: totals.total_amount,
             gst_config_id: data.gst_config_id ?? null,
             bank_account_id: data.bank_account_id ?? null,
             sales_channel: data.sales_channel || 'WALK_IN',
@@ -319,6 +320,51 @@ const BillingService = {
           select: BILL_SELECT,
         });
 
+        let creditApplied = 0;
+        if (creditNoteIds.length) {
+          const redemption = await CreditNoteService.applyCreditNotesOnBill(tx, {
+            creditNoteIds,
+            shopId,
+            billId: bill.bill_id,
+            billTotal: totals.total_amount,
+            customerId: customer?.customer_id ?? null,
+            userId: user.userId,
+          });
+          creditApplied = redemption.creditApplied;
+        }
+
+        const finalTotal = roundMoney(Math.max(0, totals.total_amount - creditApplied));
+        const paidAmount =
+          paymentAmount > 0 ? Math.min(paymentAmount, finalTotal) : 0;
+        const balanceAmount = roundMoney(finalTotal - paidAmount);
+        const paymentStatus =
+          finalTotal <= 0 ? 'PAID' : derivePaymentStatus(finalTotal, paidAmount);
+
+        const billAfterCredit =
+          creditApplied > 0
+            ? await tx.bill.update({
+                where: { bill_id: bill.bill_id },
+                data: {
+                  total_amount: finalTotal,
+                  balance_amount: balanceAmount,
+                  paid_amount: paidAmount,
+                  payment_status: paymentStatus,
+                  payment_method: paidAmount > 0 ? data.payment_method || null : null,
+                  discount: roundMoney(totals.discount + creditApplied),
+                },
+                select: BILL_SELECT,
+              })
+            : await tx.bill.update({
+                where: { bill_id: bill.bill_id },
+                data: {
+                  paid_amount: paidAmount,
+                  balance_amount: balanceAmount,
+                  payment_status: paymentStatus,
+                  payment_method: paidAmount > 0 ? data.payment_method || null : null,
+                },
+                select: BILL_SELECT,
+              });
+
         for (const line of computedLines) {
           await createStockLedgerEntry(tx, {
             productId: line.product_id,
@@ -326,21 +372,21 @@ const BillingService = {
             movementType: 'SALES',
             quantity: line.quantity,
             fromShopId: shopId,
-            referenceId: bill.bill_id,
+            referenceId: billAfterCredit.bill_id,
             referenceType: 'BILL',
             createdBy: user.userId,
             remarks: `Sale of ${line.quantity} units of ${line.product_name}`,
           });
         }
 
-        if (customer?.customer_id && totals.total_amount > 0) {
-          await CustomerService.updateCustomerSpend(customer.customer_id, totals.total_amount, tx);
+        if (customer?.customer_id && finalTotal > 0) {
+          await CustomerService.updateCustomerSpend(customer.customer_id, finalTotal, tx);
         }
 
         if (paidAmount > 0 && data.payment_method) {
           await tx.billPayment.create({
             data: {
-              bill_id: bill.bill_id,
+              bill_id: billAfterCredit.bill_id,
               amount: paidAmount,
               payment_method: data.payment_method,
               reference_no: data.reference_no?.trim() || null,
@@ -349,7 +395,10 @@ const BillingService = {
           });
         }
 
-        return bill;
+        return {
+          ...billAfterCredit,
+          credit_applied: creditApplied,
+        };
       }, TX_OPTIONS);
 
       logger.info('Bill created', {
@@ -357,6 +406,7 @@ const BillingService = {
         bill_number: result.bill_number,
         shop_id: shopId,
         total: result.total_amount,
+        credit_applied: result.credit_applied ?? 0,
         user_id: user.userId,
       });
 
