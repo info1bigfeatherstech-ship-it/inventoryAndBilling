@@ -1,5 +1,6 @@
 const prisma = require('../../utils/prisma.utils');
 const { AppError } = require('../../errors/AppError');
+const { resolveVariantByScanCode } = require('../../utils/variantScan.utils');
 const { formatDistanceLabel, prioritizeWarehouses, prioritizeShops } = require('../../utils/stock.utils');
 const logger = require('../../utils/logger.utils');
 
@@ -67,18 +68,7 @@ const resolveVariant = async (query) => {
   }
 
   if (barcode) {
-    const code = String(barcode).trim();
-    const purchaseCodeInt = /^\d+$/.test(code) ? parseInt(code, 10) : null;
-    const variant = await prisma.productVariant.findFirst({
-      where: {
-        OR: [
-          { system_barcode: code },
-          { vendor_barcode: code },
-          ...(purchaseCodeInt != null ? [{ purchase_code: purchaseCodeInt }] : []),
-        ],
-        is_active: true,
-        product: { is_active: true },
-      },
+    const variant = await resolveVariantByScanCode(prisma, barcode, {
       include: {
         product: {
           select: { product_id: true, product_code: true, name: true, is_active: true },
@@ -94,12 +84,7 @@ const resolveVariant = async (query) => {
     if (!Number.isFinite(purchaseCodeInt)) {
       throw new AppError('purchase_code must be a number', 400, 'INVALID_PURCHASE_CODE');
     }
-    const variant = await prisma.productVariant.findFirst({
-      where: {
-        purchase_code: purchaseCodeInt,
-        is_active: true,
-        product: { is_active: true },
-      },
+    const variant = await resolveVariantByScanCode(prisma, String(purchaseCodeInt), {
       include: {
         product: {
           select: { product_id: true, product_code: true, name: true, is_active: true },

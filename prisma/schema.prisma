@@ -421,7 +421,7 @@ model ProductVariant {
 
   @@unique([product_id, sku])
   @@unique([product_id, product_code])
-  @@unique([purchase_code])
+  @@index([purchase_code])
 }
 
 model ProductVariantImage {

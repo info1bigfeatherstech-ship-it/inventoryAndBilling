@@ -27,7 +27,8 @@ Product (warehouse-scoped)
 |---------|------|
 | **Product vs variant** | Product = catalog header. Variant = what you scan, price, ship, and stock. |
 | **Codes** | Never mix two bases on one product (no `8878` + `9978`). Add `8878-3` via add-variant. |
-| **Prices** | Always on **variant**. With `variants[]`, every item must include `mrp`, `special_price`, `purchase_price`, `expenses`. Server computes `purchase_code = purchase_price + expenses + 1986`. |
+| **Prices** | Always on **variant**. With `variants[]`, every item must include `mrp`, `special_price`, `purchase_price`, `expenses`. Server computes `purchase_code = round(purchase_price + expenses + offset)` (default offset **1986** via `PURCHASE_CODE_OFFSET`). |
+| **purchase_code** | Label obfuscation only — **not** a unique product ID. Same `purchase_price` + `expenses` → same code (across variants or products). POS scan should use **`system_barcode`**. |
 | **Shipping** | Always on **variant** (for ecomm sync). With `variants[]`, every item needs `weight`, `length`, `width`, `height`. |
 | **Images** | Always on **variant** (max 4). Not on product root. |
 | **Stock** | **Only from inward receipt (MAPPED)** or manual `POST /product-stocks`. Product create/CSV does **not** add stock. `stock` / `initial_stock` on create → `STOCK_NOT_ALLOWED_ON_LISTING`. |
@@ -101,7 +102,7 @@ Prices and shipping on the **root body** → stored on auto-created variant `887
 | `gst_percent` | Yes | 0–100 |
 | `gst_type` | Yes | `CGST_SGST` \| `IGST` \| `EXEMPT` |
 | `unit_of_measure` | Yes | e.g. `PCS` |
-| `mrp`, `special_price`, `purchase_price`, `expenses` | Yes | `purchase_code` is server-computed (do not send) |
+| `mrp`, `special_price`, `purchase_price`, `expenses` | Yes | `purchase_code` is server-computed (do not send). Show a live preview in the UI: `Math.round(Number(purchase_price) + Number(expenses) + 1986)` (use the same offset as backend env). |
 | `purchase_cost` | No | Legacy alias for `purchase_price` |
 | `weight`, `length`, `width`, `height` | No* | Recommended for ecomm; required if you use `variants[]` |
 | `warehouse_id` | No | WH staff: ignored (uses their warehouse). Admin: optional |
@@ -337,7 +338,13 @@ Full variant list with all `images[]`, optional `stocks[]` summary.
 
 **`GET /api/v1/products/by-barcode/:code?shop_id=<optional>`**
 
-Accepts **`system_barcode`** or numeric **`purchase_code`**. Returns **variant-level** prices:
+Lookup order:
+
+1. **`system_barcode`** or **`vendor_barcode`** — exact match (preferred for scanning).
+2. Numeric **`purchase_code`** — only when **exactly one** active variant has that code.
+3. If multiple variants share the same `purchase_code` → **`409`** `AMBIGUOUS_PURCHASE_CODE` with a `variants[]` list (scan `system_barcode` or pick by `product_code` instead).
+
+Returns **variant-level** prices:
 
 ```json
 {
@@ -374,6 +381,9 @@ Configure the purchase code offset via env: `PURCHASE_CODE_OFFSET=1986` (default
 | 10 | Upload 5 images to one variant | `400` `MAX_VARIANT_IMAGES_EXCEEDED` |
 | 11 | WH_MANAGER tries `POST /categories` | `403` forbidden (admin only) |
 | 12 | Product create with `category_id` from `GET /categories` | `201` |
+| 13 | Add second variant with same `purchase_price` + `expenses` as variant 1 | `201`; both variants share same `purchase_code` |
+| 14 | `GET /by-barcode/:purchase_code` when two variants share that code | `409` `AMBIGUOUS_PURCHASE_CODE` |
+| 15 | `GET /by-barcode/:system_barcode` | `200` single variant |
 
 ---
 
@@ -394,7 +404,7 @@ Configure the purchase code offset via env: `PURCHASE_CODE_OFFSET=1986` (default
 | `INVALID_PRODUCT_DATA_JSON` | 400 | Invalid `data` field in multipart |
 | `IMAGE_REQUIRED` | 400 | Append images with empty files |
 | `DUPLICATE_BARCODE` | 409 | Same `system_barcode` twice in request |
-| `PURCHASE_CODE_COLLISION` | 409 | Another variant already has this purchase code |
+| `AMBIGUOUS_PURCHASE_CODE` | 409 | Scanned purchase code matches multiple variants; use `system_barcode` or disambiguate |
 | `CLOUDINARY_AUTH_FAILED` | 502 | Wrong Cloudinary secret/key — fix `.env` |
 | `CLOUDINARY_UPLOAD_FAILED` | 502 | Other Cloudinary upload error |
 | `CLOUDINARY_MISCONFIGURED` | 503 | Missing Cloudinary env vars |
@@ -457,6 +467,11 @@ vendor_name	String	Apple India	Vendor name (instead of vendor_id)
 category_name	String	Electronics	Category name (instead of category_id)
 sub_category_name	String	Mobile Accessories	Sub-category name
 remarks	String	Summer collection	Internal notes
+
+> **purchase_code** is not a CSV column — server computes `Math.round(purchase_price + expenses + 1986)` per variant. Same pricing → same code; use `system_barcode` for POS scan.
+
+> Full sample CSV: [samples/bulk-products-sample.csv](./samples/bulk-products-sample.csv)
+
 📁 ZIP File Structure
 text
 images.zip
@@ -486,13 +501,16 @@ Max 10 images per variant
 Missing folders = product created without images (warning in response)
 
 📝 Sample CSV File
-csv
-name,title,product_code,vendor_name,category_name,mrp,special_price,purchase_price,expenses,hsn_code,gst_percent,gst_type,unit_of_measure,weight,length,width,height
-Premium Cotton T-Shirt,Premium Cotton T-Shirt - White,6767-1,Apple India,Electronics,1299,999,100,20,6109,12,CGST_SGST,PCS,200,35,25,3
-Premium Cotton T-Shirt,Premium Cotton T-Shirt - Black,6767-2,Apple India,Electronics,1299,999,100,20,6109,12,CGST_SGST,PCS,200,35,25,3
-Slim Fit Jeans,Slim Fit Jeans - Light Blue,8765-1,Samsung India,Apparel,2499,1999,500,50,6204,18,CGST_SGST,PCS,600,45,35,12
-Slim Fit Jeans,Slim Fit Jeans - Dark Blue,8765-2,Samsung India,Apparel,2499,1999,500,50,6204,18,CGST_SGST,PCS,600,45,35,12
-Wireless Mouse,Wireless Bluetooth Mouse,1112-1,Local Supplier,Electronics,1499,1199,400,30,8471,12,CGST_SGST,PCS,150,12,8,4
+
+See [samples/bulk-products-sample.csv](./samples/bulk-products-sample.csv) for a complete example with every supported column:
+
+```csv
+name,title,description,brand_name,product_code,vendor_name,category_name,sub_category_name,mrp,special_price,purchase_price,expenses,hsn_code,gst_percent,gst_type,unit_of_measure,weight,length,width,height,low_stock_threshold,remarks
+Premium Cotton T-Shirt,Premium Cotton T-Shirt - White,100% combed cotton tee,Generic,6767-1,Apple India,Electronics,,1299,999,100,20,6109,12,CGST_SGST,PCS,200,35,25,3,10,Summer collection white
+Premium Cotton T-Shirt,Premium Cotton T-Shirt - Black,100% combed cotton tee,Generic,6767-2,Apple India,Electronics,,1299,999,100,20,6109,12,CGST_SGST,PCS,200,35,25,3,10,Summer collection black
+```
+
+Preview response includes computed `purchase_code` per variant when using `?preview=true`.
 📤 Response Format
 Success Response (Final Upload)
 json
@@ -524,7 +542,17 @@ json
       "rows": [
         {
           "name": "Premium Cotton T-Shirt",
-          "variants_count": 3,
+          "variants_count": 2,
+          "variants": [
+            {
+              "product_code": "6767-1",
+              "purchase_code": 2106,
+              "mrp": 1299,
+              "special_price": 999,
+              "purchase_price": 100,
+              "expenses": 20
+            }
+          ],
           "has_images": true,
           "vendor_id": "vendor_123",
           "category_id": "cat_456",

@@ -1,0 +1,6 @@
+name,title,description,brand_name,product_code,vendor_name,category_name,sub_category_name,mrp,special_price,purchase_price,expenses,hsn_code,gst_percent,gst_type,unit_of_measure,weight,length,width,height,low_stock_threshold,remarks
+Premium Cotton T-Shirt,Premium Cotton T-Shirt - White,100% combed cotton tee,Generic,6767-1,Apple India,Electronics,,1299,999,100,20,6109,12,CGST_SGST,PCS,200,35,25,3,10,Summer collection white
+Premium Cotton T-Shirt,Premium Cotton T-Shirt - Black,100% combed cotton tee,Generic,6767-2,Apple India,Electronics,,1299,999,100,20,6109,12,CGST_SGST,PCS,200,35,25,3,10,Summer collection black
+Slim Fit Jeans,Slim Fit Jeans - Light Blue,Stretch denim jeans,Generic,8765-1,Samsung India,Apparel,,2499,1999,500,50,6204,18,CGST_SGST,PCS,600,45,35,12,5,Light wash
+Slim Fit Jeans,Slim Fit Jeans - Dark Blue,Stretch denim jeans,Generic,8765-2,Samsung India,Apparel,,2499,1999,500,50,6204,18,CGST_SGST,PCS,600,45,35,12,5,Dark wash
+Wireless Mouse,Wireless Bluetooth Mouse,Ergonomic wireless mouse,Generic,1112-1,Local Supplier,Electronics,,1499,1199,400,30,8471,12,CGST_SGST,PCS,150,12,8,4,8,Bluetooth 5.0

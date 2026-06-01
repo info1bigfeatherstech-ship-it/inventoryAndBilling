@@ -3,9 +3,9 @@ const { AppError } = require('../../middlewares/error.middleware');
 const { successResponse, paginatedMeta } = require('../../utils/response.utils');
 const ProductService = require('../../services/product/product.service');
 const { groupVariantImageFiles } = require('../../utils/productMultipart.utils');
-const AdmZip = require('adm-zip');  // ⭐ NEW
-const fs = require('fs');           // ⭐ NEW
-const path = require('path');       // ⭐ NEW
+const AdmZip = require('adm-zip');
+const fs = require('fs');
+const path = require('path');
 
 // ========== HELPER FUNCTIONS FOR ZIP EXTRACTION (Copy from ecomm) ==========
 
@@ -183,7 +183,7 @@ const ProductController = {
     });
   }),
 
-  // ========== UPDATED: Bulk Create CSV with Images Support ==========
+  // Bulk Create CSV with Images Support
   bulkCreateCsv: asyncHandler(async (req, res) => {
     const csvFile = req.files?.file?.[0];
     const zipFile = req.files?.imagesZip?.[0];
@@ -204,15 +204,12 @@ const ProductController = {
       const zip = new AdmZip(zipFile.buffer);
       zip.extractAllTo(tempExtractPath, true);
       imagesRootFolder = resolveZipContentRoot(tempExtractPath);
-      
-      console.log(`📦 ZIP extracted to: ${imagesRootFolder}`);
     }
-  
+
     const user = { ...req.user };
     const warehouseId = req.body?.warehouse_id || req.query?.warehouse_id;
     if (warehouseId) user.forcedWarehouseId = warehouseId;
-  
-    // ⭐ FIXED: Use csvFile.buffer instead of req.file.buffer
+
     const results = await ProductService.bulkCreateFromCsv(
       csvFile.buffer, 
       user, 
@@ -230,34 +227,6 @@ const ProductController = {
     return successResponse(res, req, {
       statusCode: isPreview ? 200 : 201,
       message: isPreview ? 'Preview generated successfully' : 'Bulk product import completed',
-      data: results,
-    });
-  }), 
-
-  // ========== NEW: Preview Bulk Upload (Alternative endpoint) ==========
-  previewBulkCsv: asyncHandler(async (req, res) => {
-    if (!req.file?.buffer) {
-      throw new AppError('CSV file is required (field name: file)', 400, 'CSV_FILE_REQUIRED');
-    }
-
-    const user = { ...req.user };
-    const warehouseId = req.body?.warehouse_id || req.query?.warehouse_id;
-    if (warehouseId) user.forcedWarehouseId = warehouseId;
-
-    // Preview mode: validate only, no DB writes
-    const results = await ProductService.bulkCreateFromCsv(
-      req.file.buffer, 
-      user, 
-      { 
-        warehouseId,
-        preview: true,
-        imagesRootFolder: null 
-      }
-    );
-
-    return successResponse(res, req, {
-      statusCode: 200,
-      message: 'Preview generated — no data saved',
       data: results,
     });
   }),

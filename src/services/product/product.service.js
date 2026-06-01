@@ -1,5 +1,5 @@
-const fs = require('fs');           // ⭐ ADD THIS
-const path = require('path');       // ⭐ ADD THIS
+const fs = require('fs');
+const path = require('path');
 const { parse } = require('csv-parse/sync');
 const prisma = require('../../utils/prisma.utils');
 const { AppError } = require('../../middlewares/error.middleware');
@@ -20,6 +20,7 @@ const {
 const MediaService = require('../storage/media.service');
 const { generateSystemBarcode } = require('../../utils/barcode.utils');
 const { withComputedPurchaseCode } = require('../../utils/purchaseCode.utils');
+const { resolveVariantByScanCode } = require('../../utils/variantScan.utils');
 const { assertVariantImageUploads } = require('../../utils/productMultipart.utils');
 
 
@@ -130,21 +131,35 @@ const resolveCategorySmart = async (categoryInput, subCategoryInput, rowNumber) 
       throw new Error(`Row ${rowNumber}: Category not found with ID: "${categoryInput}"`);
     }
     
-    // If sub-category ID provided
-    if (subCategoryInput && looksLikeId(subCategoryInput)) {
-      const subCategory = await prisma.category.findUnique({
-        where: { category_id: subCategoryInput, is_active: true },
-        select: { category_id: true, parent_id: true }
+    if (subCategoryInput) {
+      if (looksLikeId(subCategoryInput)) {
+        const subCategory = await prisma.category.findUnique({
+          where: { category_id: subCategoryInput, is_active: true },
+          select: { category_id: true, parent_id: true },
+        });
+        if (!subCategory) {
+          throw new Error(`Row ${rowNumber}: Sub-category not found with ID: "${subCategoryInput}"`);
+        }
+        if (subCategory.parent_id !== category.category_id) {
+          throw new Error(`Row ${rowNumber}: Sub-category does not belong to parent category`);
+        }
+        return { category_id: category.category_id, sub_category_id: subCategory.category_id };
+      }
+
+      const subCategory = await prisma.category.findFirst({
+        where: {
+          name: { equals: subCategoryInput, mode: 'insensitive' },
+          parent_id: category.category_id,
+          is_active: true,
+        },
+        select: { category_id: true },
       });
       if (!subCategory) {
-        throw new Error(`Row ${rowNumber}: Sub-category not found with ID: "${subCategoryInput}"`);
-      }
-      if (subCategory.parent_id !== category.category_id) {
-        throw new Error(`Row ${rowNumber}: Sub-category does not belong to parent category`);
+        throw new Error(`Row ${rowNumber}: Sub-category not found: "${subCategoryInput}"`);
       }
       return { category_id: category.category_id, sub_category_id: subCategory.category_id };
     }
-    
+
     return { category_id: category.category_id, sub_category_id: null };
   }
   
@@ -162,7 +177,7 @@ const VARIANT_INCLUDE = {
     variant_id: true,
     product_id: true,
     sku: true,
-    product_code: true,  // ⭐ FIXED: variant_code → product_code
+    product_code: true,
     system_barcode: true,
     vendor_barcode: true,
     attributes: true,
@@ -236,7 +251,7 @@ const PRODUCT_LIST_SELECT = {
     orderBy: { sort_order: 'asc' },
     select: {
       variant_id: true,
-      product_code: true,  // ⭐ FIXED: variant_code → product_code
+      product_code: true,
       sku: true,
       system_barcode: true,
       attributes: true,
@@ -353,6 +368,18 @@ const extractVariantPrices = (variant, indexLabel, { required = false } = {}) =>
   );
 
   return prices;
+};
+
+const buildCsvVariantPrices = (row, rowNumber) => {
+  const indexLabel = `Row ${rowNumber}`;
+  const prices = {
+    mrp: priceFieldPresent(row, 'mrp') ? Number(row.mrp) : 0,
+    special_price: priceFieldPresent(row, 'special_price') ? Number(row.special_price) : 0,
+    purchase_price: resolvePurchasePriceInput(row) ?? 0,
+    expenses: priceFieldPresent(row, 'expenses') ? Number(row.expenses) : 0,
+  };
+  validateVariantPricing(prices, indexLabel);
+  return withComputedPurchaseCode(prices);
 };
 
 const SHIPPING_KEYS = ['weight', 'length', 'width', 'height'];
@@ -606,7 +633,7 @@ const mapIncomingPriceFields = (data, target = {}) => {
   return target;
 };
 
-const buildPriceUpdatePayload = async (tx, current, incoming, { excludeVariantId } = {}) => {
+const buildPriceUpdatePayload = (current, incoming) => {
   const merged = {
     mrp: incoming.mrp ?? current.mrp,
     special_price: incoming.special_price ?? current.special_price,
@@ -614,7 +641,7 @@ const buildPriceUpdatePayload = async (tx, current, incoming, { excludeVariantId
     expenses: incoming.expenses ?? current.expenses,
   };
   validateVariantPricing(merged);
-  return withComputedPurchaseCode(tx, merged, { excludeVariantId });
+  return withComputedPurchaseCode(merged);
 };
 
 const syncVariantsFromProductPrices = async (tx, productId, pricePayload) => {
@@ -630,9 +657,7 @@ const syncVariantsFromProductPrices = async (tx, productId, pricePayload) => {
   });
 
   for (const variant of variants) {
-    const priced = await buildPriceUpdatePayload(tx, variant, pricePayload, {
-      excludeVariantId: variant.variant_id,
-    });
+    const priced = buildPriceUpdatePayload(variant, pricePayload);
     await tx.productVariant.update({
       where: { variant_id: variant.variant_id },
       data: priced,
@@ -718,7 +743,7 @@ const buildVariantInput = async (tx, variant, {
   }
 
   validateVariantPricing(prices, indexLabel);
-  const priced = await withComputedPurchaseCode(tx, prices);
+  const priced = withComputedPurchaseCode(prices);
 
   const payload = {
     sku: normalizeSku(variant.sku || variantCode),
@@ -940,7 +965,6 @@ const applyVariantImagesOnCreate = async (productId, warehouseId, data, variantI
   }
 };
 
-// ⭐ ADD THIS FUNCTION
 const normalizeProductCode = (value) => {
   const s = String(value ?? '').trim().toUpperCase();
   if (!s) return '';
@@ -952,6 +976,68 @@ const normalizeProductCode = (value) => {
     return `${baseToken}-${seq}`;
   }
   return s;
+};
+
+const uploadBulkVariantImages = async ({ warehouseId, productId, variantId, productName, imageFolderPath }) => {
+  if (!imageFolderPath) return;
+
+  const files = fs.readdirSync(imageFolderPath).filter((f) => /\.(jpg|jpeg|png|gif|webp)$/i.test(f));
+  for (let i = 0; i < Math.min(files.length, 10); i += 1) {
+    const filePath = path.join(imageFolderPath, files[i]);
+    const fileBuffer = fs.readFileSync(filePath);
+    const ext = path.extname(files[i]).toLowerCase();
+    const mimetype =
+      ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : ext === '.gif' ? 'image/gif' : 'image/jpeg';
+    const uploadResult = await MediaService.uploadVariantImage({
+      warehouseId,
+      productId,
+      variantId,
+      file: { buffer: fileBuffer, mimetype, originalname: files[i] },
+    });
+
+    await prisma.productVariantImage.create({
+      data: {
+        variant_id: variantId,
+        url: uploadResult.url,
+        storage_key: uploadResult.storage_key,
+        storage_provider: uploadResult.storage_provider,
+        alt_text: productName,
+        sort_order: i,
+      },
+    });
+  }
+};
+
+const createBulkVariant = async ({ productId, variantData, warehouseId, productName }) => {
+  const newVariant = await prisma.productVariant.create({
+    data: {
+      product_id: productId,
+      product_code: variantData.product_code,
+      system_barcode: variantData.product_code,
+      sku: `SKU-${variantData.product_code}`,
+      mrp: variantData.mrp,
+      special_price: variantData.special_price,
+      purchase_price: variantData.purchase_price,
+      expenses: variantData.expenses,
+      purchase_code: variantData.purchase_code,
+      weight: variantData.weight,
+      length: variantData.length,
+      width: variantData.width,
+      height: variantData.height,
+      low_stock_threshold: variantData.low_stock_threshold,
+      remarks: variantData.remarks ?? null,
+    },
+  });
+
+  await uploadBulkVariantImages({
+    warehouseId,
+    productId,
+    variantId: newVariant.variant_id,
+    productName,
+    imageFolderPath: variantData.imageFolderPath,
+  });
+
+  return newVariant;
 };
 
 const ProductService = {
@@ -1007,7 +1093,7 @@ const ProductService = {
       ...productPrices,
     };
     
-    // ⭐ Only add sub_category if provided (not null)
+    // Only add sub_category if provided (not null)
     if (data.sub_category_id) {
       productPayload.sub_category = { connect: { category_id: data.sub_category_id } };
     }
@@ -1080,18 +1166,7 @@ const ProductService = {
   },
   
   async getProductByBarcode(barcode, shopId = null) {
-    const code = String(barcode).trim();
-    const purchaseCodeInt = /^\d+$/.test(code) ? parseInt(code, 10) : null;
-
-    const variant = await prisma.productVariant.findFirst({
-      where: {
-        OR: [
-          { system_barcode: code },
-          ...(purchaseCodeInt != null ? [{ purchase_code: purchaseCodeInt }] : []),
-        ],
-        is_active: true,
-        product: { is_active: true },
-      },
+    const variant = await resolveVariantByScanCode(prisma, barcode, {
       include: {
         product: {
           select: {
@@ -1320,9 +1395,7 @@ const ProductService = {
 
     const hasPriceField = PRICE_FIELD_KEYS.some((k) => Object.prototype.hasOwnProperty.call(variantPayload, k));
     if (hasPriceField) {
-      const priced = await prisma.$transaction(async (tx) =>
-        buildPriceUpdatePayload(tx, current, variantPayload, { excludeVariantId: variantId })
-      );
+      const priced = buildPriceUpdatePayload(current, variantPayload);
       for (const key of [...PRICE_FIELD_KEYS, 'purchase_code']) {
         variantPayload[key] = priced[key];
       }
@@ -1586,7 +1659,7 @@ const ProductService = {
     return synced;
   },
 
-  // product.service.js - Updated bulkCreateFromCsv
+  // product.service.js - bulkCreateFromCsv
 
   async bulkCreateFromCsv(fileBuffer, user, options = {}) {
     const {
@@ -1631,19 +1704,13 @@ const ProductService = {
     }
 
     const productGroups = Array.from(productMap.values());
-    
-    // ⭐ BATCH PROCESSING (50 products per batch)
+
     const BATCH_SIZE = 50;
     const BATCH_DELAY_MS = 1000;
-    
+
     for (let i = 0; i < productGroups.length; i += BATCH_SIZE) {
       const batch = productGroups.slice(i, i + BATCH_SIZE);
-      const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
-      const totalBatches = Math.ceil(productGroups.length / BATCH_SIZE);
-      
-      console.log(`📦 Processing batch ${batchNumber}/${totalBatches} (${batch.length} products)`);
-      
-      // Process batch sequentially (not parallel) to avoid DB overload
+
       for (const productData of batch) {
         try {
           await this.processSingleProductGroup(productData, {
@@ -1661,58 +1728,29 @@ const ProductService = {
           });
         }
       }
-      
-      // ⭐ Wait between batches to let DB breathe
+
       if (i + BATCH_SIZE < productGroups.length) {
-        console.log(`⏳ Waiting ${BATCH_DELAY_MS}ms before next batch...`);
-        await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS));
+        await new Promise((resolve) => setTimeout(resolve, BATCH_DELAY_MS));
       }
     }
 
     return results;
   },
 
-  // ⭐ NEW HELPER METHOD — Extract single product processing logic
   async processSingleProductGroup(productData, { warehouseId, preview, imagesRootFolder, results }) {
     const { name: productName, rows: productRows } = productData;
-    
-    // Resolve vendor and category (same as before)
     const firstRow = productRows[0];
-    let primary_vendor_id;
-    if (firstRow.primary_vendor_id) {
-      primary_vendor_id = firstRow.primary_vendor_id;
-    } else if (firstRow.vendor_name) {
-      const vendor = await prisma.vendor.findFirst({
-        where: { company_name: { equals: firstRow.vendor_name, mode: 'insensitive' }, is_active: true }
-      });
-      if (!vendor) throw new Error(`Vendor not found: ${firstRow.vendor_name}`);
-      primary_vendor_id = vendor.vendor_id;
-    } else {
-      throw new Error('Either primary_vendor_id or vendor_name is required');
-    }
 
-    let category_id, sub_category_id;
-    if (firstRow.category_id) {
-      category_id = firstRow.category_id;
-    } else if (firstRow.category_name) {
-      const category = await prisma.category.findFirst({
-        where: { name: { equals: firstRow.category_name, mode: 'insensitive' }, parent_id: null }
-      });
-      if (!category) throw new Error(`Category not found: ${firstRow.category_name}`);
-      category_id = category.category_id;
-      
-      if (firstRow.sub_category_name) {
-        const subCategory = await prisma.category.findFirst({
-          where: { name: { equals: firstRow.sub_category_name, mode: 'insensitive' }, parent_id: category_id }
-        });
-        if (!subCategory) throw new Error(`Sub-category not found: ${firstRow.sub_category_name}`);
-        sub_category_id = subCategory.category_id;
-      }
-    } else {
-      throw new Error('Either category_id or category_name is required');
-    }
+    const primary_vendor_id = await resolveVendorSmart(
+      firstRow.primary_vendor_id || firstRow.vendor_name,
+      firstRow.rowNumber
+    );
+    const { category_id, sub_category_id } = await resolveCategorySmart(
+      firstRow.category_id || firstRow.category_name,
+      firstRow.sub_category_name || null,
+      firstRow.rowNumber
+    );
 
-    // ========== FIRST: Build variants data (without images) ==========
     const variantsData = [];
     const missingImageVariants = [];
 
@@ -1720,45 +1758,38 @@ const ProductService = {
       const productCode = normalizeProductCode(row.product_code);
       if (!productCode) throw new Error(`product_code required for variant at row ${row.rowNumber}`);
 
-      // Check if images folder exists (store path for later)
       let imageFolderPath = null;
       let imagesMissing = false;
 
       if (!preview && imagesRootFolder) {
         const folderPath = path.join(imagesRootFolder, productCode);
         if (fs.existsSync(folderPath) && fs.statSync(folderPath).isDirectory()) {
-          const files = fs.readdirSync(folderPath).filter(f => /\.(jpg|jpeg|png|gif|webp)$/i.test(f));
+          const files = fs.readdirSync(folderPath).filter((f) => /\.(jpg|jpeg|png|gif|webp)$/i.test(f));
           if (files.length > 0) {
             imageFolderPath = folderPath;
           } else {
             imagesMissing = true;
           }
         } else {
-          console.log(`   ❌ Folder NOT found for ${productCode}`);
           imagesMissing = true;
         }
       }
 
+      const priced = buildCsvVariantPrices(row, row.rowNumber);
+
       variantsData.push({
         product_code: productCode,
-        mrp: Number(row.mrp) || 0,
-        special_price: Number(row.special_price) || 0,
-        purchase_price: row.purchase_price
-          ? Number(row.purchase_price)
-          : row.purchase_cost
-            ? Number(row.purchase_cost)
-            : 0,
-        expenses: row.expenses != null && row.expenses !== '' ? Number(row.expenses) : 0,
+        ...priced,
         weight: row.weight ? Number(row.weight) : null,
         length: row.length ? Number(row.length) : null,
         width: row.width ? Number(row.width) : null,
         height: row.height ? Number(row.height) : null,
         low_stock_threshold: Number(row.low_stock_threshold) || 10,
-        title: row.title || null,           // ⭐ ADD THIS
-        description: row.description || null, // ⭐ ADD THIS
-        brand_name: row.brand_name || "Generic", // ⭐ ADD THIS
-        remarks: row.remarks || null, // ⭐ ADD THIS
-        imageFolderPath,  // Store folder path for later
+        title: row.title || null,
+        description: row.description || null,
+        brand_name: row.brand_name || 'Generic',
+        remarks: row.remarks || null,
+        imageFolderPath,
       });
 
       if (imagesMissing) {
@@ -1766,13 +1797,12 @@ const ProductService = {
       }
     }
 
-    // Add warning for missing images
     if (missingImageVariants.length > 0 && !preview) {
       if (!results.warnings) results.warnings = [];
       results.warnings.push({
         product: productName,
         variants: missingImageVariants,
-        message: `Image folder(s) not found or empty for variants: ${missingImageVariants.join(', ')}. Product created without images.`
+        message: `Image folder(s) not found or empty for variants: ${missingImageVariants.join(', ')}. Product created without images.`,
       });
     }
 
@@ -1781,88 +1811,50 @@ const ProductService = {
       results.preview.rows.push({
         name: productName,
         variants_count: variantsData.length,
-        has_images: variantsData.some(v => v.imageFolderPath !== null),
+        variants: variantsData.map((v) => ({
+          product_code: v.product_code,
+          purchase_code: v.purchase_code,
+          mrp: v.mrp,
+          special_price: v.special_price,
+          purchase_price: v.purchase_price,
+          expenses: v.expenses,
+        })),
+        has_images: variantsData.some((v) => v.imageFolderPath !== null),
         vendor_id: primary_vendor_id,
-        category_id: category_id,
-        sub_category_id: sub_category_id,
-        errors: []
+        category_id,
+        sub_category_id,
+        errors: [],
       });
       return;
     }
 
-    // ========== SECOND: Create Product ==========
     let existingProduct = await prisma.product.findFirst({
       where: {
         warehouse_id: warehouseId,
-        name: { equals: productName, mode: 'insensitive' }
-      }
+        name: { equals: productName, mode: 'insensitive' },
+      },
     });
 
     if (existingProduct) {
-      // Add variants to existing product
       for (const variantData of variantsData) {
         const existingVariant = await prisma.productVariant.findFirst({
           where: {
             product_id: existingProduct.product_id,
-            product_code: variantData.product_code
-          }
+            product_code: variantData.product_code,
+          },
         });
-        
-        if (!existingVariant) {
-          const csvPrices = {
-            mrp: variantData.mrp,
-            special_price: variantData.special_price,
-            purchase_price: variantData.purchase_price,
-            expenses: variantData.expenses,
-          };
-          validateVariantPricing(csvPrices);
-          const priced = await withComputedPurchaseCode(prisma, csvPrices);
 
-          const newVariant = await prisma.productVariant.create({
-            data: {
-              product_id: existingProduct.product_id,
-              product_code: variantData.product_code,
-              system_barcode: variantData.product_code,
-              sku: `SKU-${variantData.product_code}`,
-              ...priced,
-              weight: variantData.weight,
-              length: variantData.length,
-              width: variantData.width,
-              height: variantData.height,
-              low_stock_threshold: variantData.low_stock_threshold,
-            }
+        if (!existingVariant) {
+          await createBulkVariant({
+            productId: existingProduct.product_id,
+            variantData,
+            warehouseId,
+            productName,
           });
-          
-          // ========== THIRD: Upload images using REAL IDs ==========
-          if (variantData.imageFolderPath) {
-            const files = fs.readdirSync(variantData.imageFolderPath).filter(f => /\.(jpg|jpeg|png|gif|webp)$/i.test(f));
-            for (let i = 0; i < Math.min(files.length, 10); i++) {
-              const filePath = path.join(variantData.imageFolderPath, files[i]);
-              const fileBuffer = fs.readFileSync(filePath);
-              const uploadResult = await MediaService.uploadVariantImage({
-                warehouseId,
-                productId: existingProduct.product_id,
-                variantId: newVariant.variant_id,
-                file: { buffer: fileBuffer, mimetype: 'image/jpeg', originalname: files[i] }
-              });
-              
-              await prisma.productVariantImage.create({
-                data: {
-                  variant_id: newVariant.variant_id,
-                  url: uploadResult.url,
-                  storage_key: uploadResult.storage_key,
-                  storage_provider: uploadResult.storage_provider,
-                  alt_text: productName,
-                  sort_order: i
-                }
-              });
-            }
-          }
         }
       }
       results.created++;
     } else {
-      // Create new product
       const firstVariantPrices = {
         mrp: variantsData[0].mrp,
         special_price: variantsData[0].special_price,
@@ -1875,7 +1867,7 @@ const ProductService = {
         data: {
           warehouse: { connect: { warehouse_id: warehouseId } },
           primary_vendor: { connect: { vendor_id: primary_vendor_id } },
-          category: { connect: { category_id: category_id } },
+          category: { connect: { category_id } },
           ...(sub_category_id && { sub_category: { connect: { category_id: sub_category_id } } }),
           product_code: variantsData[0].product_code.split('-')[0],
           name: productName,
@@ -1888,59 +1880,16 @@ const ProductService = {
           description: variantsData[0].description,
           brand_name: variantsData[0].brand_name,
           remarks: variantsData[0].remarks,
-        }
+        },
       });
 
       for (const variantData of variantsData) {
-        const csvPrices = {
-          mrp: variantData.mrp,
-          special_price: variantData.special_price,
-          purchase_price: variantData.purchase_price,
-          expenses: variantData.expenses,
-        };
-        validateVariantPricing(csvPrices);
-        const priced = await withComputedPurchaseCode(prisma, csvPrices);
-
-        const newVariant = await prisma.productVariant.create({
-          data: {
-            product_id: product.product_id,
-            product_code: variantData.product_code,
-            system_barcode: variantData.product_code,
-            sku: `SKU-${variantData.product_code}`,
-            ...priced,
-            weight: variantData.weight,
-            length: variantData.length,
-            width: variantData.width,
-            height: variantData.height,
-            low_stock_threshold: variantData.low_stock_threshold,
-          }
+        await createBulkVariant({
+          productId: product.product_id,
+          variantData,
+          warehouseId,
+          productName,
         });
-        
-        // ========== THIRD: Upload images using REAL IDs ==========
-        if (variantData.imageFolderPath) {
-          const files = fs.readdirSync(variantData.imageFolderPath).filter(f => /\.(jpg|jpeg|png|gif|webp)$/i.test(f));
-          for (let i = 0; i < Math.min(files.length, 10); i++) {
-            const filePath = path.join(variantData.imageFolderPath, files[i]);
-            const fileBuffer = fs.readFileSync(filePath);
-            const uploadResult = await MediaService.uploadVariantImage({
-              warehouseId,
-              productId: product.product_id,
-              variantId: newVariant.variant_id,
-              file: { buffer: fileBuffer, mimetype: 'image/jpeg', originalname: files[i] }
-            });
-            
-            await prisma.productVariantImage.create({
-              data: {
-                variant_id: newVariant.variant_id,
-                url: uploadResult.url,
-                storage_key: uploadResult.storage_key,
-                storage_provider: uploadResult.storage_provider,
-                alt_text: productName,
-                sort_order: i
-              }
-            });
-          }
-        }
       }
       results.created++;
     }
@@ -2098,7 +2047,7 @@ async listInactiveProducts(query = {}, user) {
 
 
 
-  // ⭐ Permanent delete with cascade (for testing)
+  // Permanent delete with cascade (for testing)
   async hardDeleteProductsByDate(dateThreshold, user) {
     // Only SUPER_ADMIN can do this
     if (user.role !== 'SUPER_ADMIN') {
