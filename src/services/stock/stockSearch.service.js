@@ -7,7 +7,7 @@ const logger = require('../../utils/logger.utils');
  * Resolve variant by search criteria.
  */
 const resolveVariant = async (query) => {
-  const { variant_id, product_code, sku, barcode } = query;
+  const { variant_id, product_code, sku, barcode, purchase_code } = query;
 
   if (variant_id) {
     const variant = await prisma.productVariant.findUnique({
@@ -68,9 +68,14 @@ const resolveVariant = async (query) => {
 
   if (barcode) {
     const code = String(barcode).trim();
+    const purchaseCodeInt = /^\d+$/.test(code) ? parseInt(code, 10) : null;
     const variant = await prisma.productVariant.findFirst({
       where: {
-        OR: [{ system_barcode: code }, { vendor_barcode: code }],
+        OR: [
+          { system_barcode: code },
+          { vendor_barcode: code },
+          ...(purchaseCodeInt != null ? [{ purchase_code: purchaseCodeInt }] : []),
+        ],
         is_active: true,
         product: { is_active: true },
       },
@@ -84,7 +89,28 @@ const resolveVariant = async (query) => {
     return variant;
   }
 
-  throw new AppError('Provide variant_id, product_code, sku, or barcode', 400, 'SEARCH_PARAM_REQUIRED');
+  if (purchase_code) {
+    const purchaseCodeInt = parseInt(String(purchase_code).trim(), 10);
+    if (!Number.isFinite(purchaseCodeInt)) {
+      throw new AppError('purchase_code must be a number', 400, 'INVALID_PURCHASE_CODE');
+    }
+    const variant = await prisma.productVariant.findFirst({
+      where: {
+        purchase_code: purchaseCodeInt,
+        is_active: true,
+        product: { is_active: true },
+      },
+      include: {
+        product: {
+          select: { product_id: true, product_code: true, name: true, is_active: true },
+        },
+      },
+    });
+    if (!variant) throw new AppError('Variant not found for purchase code', 404, 'VARIANT_NOT_FOUND');
+    return variant;
+  }
+
+  throw new AppError('Provide variant_id, product_code, sku, barcode, or purchase_code', 400, 'SEARCH_PARAM_REQUIRED');
 };
 
 const StockSearchService = {
@@ -195,6 +221,7 @@ const StockSearchService = {
           product_code: variant.product_code,
           attributes: variant.attributes,
           system_barcode: variant.system_barcode,
+          purchase_code: variant.purchase_code,
         },
         shops,
         warehouses

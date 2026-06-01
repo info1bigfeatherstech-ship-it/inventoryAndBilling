@@ -32,8 +32,13 @@ const run = async () => {
           sku: `${code}-RED`,
           system_barcode: `BC-${code}-RED`,
           mrp: 999,
-          wholesale_price: 700,
-          retail_price: 899,
+          special_price: 899,
+          purchase_price: 100,
+          expenses: 20,
+          weight: 0.2,
+          length: 10,
+          width: 10,
+          height: 2,
           attributes: [{ key: 'Color', value: 'Red' }],
           is_default: true,
         },
@@ -41,8 +46,13 @@ const run = async () => {
           sku: `${code}-BLUE`,
           system_barcode: `BC-${code}-BLUE`,
           mrp: 999,
-          wholesale_price: 700,
-          retail_price: 899,
+          special_price: 899,
+          purchase_price: 110,
+          expenses: 20,
+          weight: 0.2,
+          length: 10,
+          width: 10,
+          height: 2,
           attributes: [{ key: 'Color', value: 'Blue' }],
         },
       ],
@@ -53,14 +63,17 @@ const run = async () => {
 
   const listed = await ProductService.listProducts({ search: code }, user);
   const fetched = await ProductService.getProductById(created.product_id, user, { bypassCache: true });
+  const byPurchaseCode = await ProductService.getProductByBarcode(String(created.variants[0].purchase_code));
 
   await ProductService.softDeleteProduct(created.product_id, user);
 
   console.log('PASS product module smoke test', {
     product_id: created.product_id,
     variants: created.variants?.length,
+    purchase_code: created.variants?.[0]?.purchase_code,
     list_total: listed.total,
     fetched_name: fetched.name,
+    barcode_lookup: byPurchaseCode.product_code,
   });
 };
 

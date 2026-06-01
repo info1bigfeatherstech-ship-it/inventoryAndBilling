@@ -251,7 +251,7 @@ const BillingService = {
           product_id: variant.product_id,
           quantity: qty,
           unit_price: unitPrice,
-          price_type: item.price_type || 'RETAIL',
+          price_type: item.price_type || 'SPECIAL',
           gst_percent: variant.product.gst_percent,
           hsn_code: variant.product.hsn_code,
           product_name: variant.product.name,

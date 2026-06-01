@@ -78,6 +78,7 @@ enum PaymentStatus {
 /// Which master price was applied at sale time (BizPro bill line).
 enum PriceType {
   MRP
+  SPECIAL
   WHOLESALE
   RETAIL
   ONLINE
@@ -344,12 +345,11 @@ model Product {
   category_id     String
   sub_category_id String?
 
-  /// Default prices shared by variants; each variant may override its own four prices.
-  mrp             Float
-  wholesale_price Float
-  retail_price    Float
-  online_price    Float?
-  purchase_cost   Float?
+  /// Default prices shared by variants; each variant may override its own prices.
+  mrp            Float
+  special_price  Float
+  purchase_price Float
+  expenses       Float @default(0)
 
   is_active Boolean @default(true)
   remarks   String?
@@ -388,12 +388,12 @@ model ProductVariant {
   vendor_barcode String?
   attributes     Json?
   
-  mrp            Float
-  wholesale_price Float
-  retail_price   Float
-  online_price   Float?
-  purchase_cost  Float?
-  
+  mrp             Float
+  special_price   Float
+  purchase_price  Float
+  expenses        Float @default(0)
+  purchase_code   Int
+
   weight         Float?
   length         Float?
   width          Float?
@@ -420,7 +420,8 @@ model ProductVariant {
   credit_note_lines   CreditNoteLineItem[]
 
   @@unique([product_id, sku])
-  @@unique([product_id, product_code])  // ← FIXED
+  @@unique([product_id, product_code])
+  @@unique([purchase_code])
 }
 
 model ProductVariantImage {

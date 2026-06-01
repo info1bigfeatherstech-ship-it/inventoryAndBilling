@@ -19,6 +19,7 @@ const {
 } = require('../../utils/cache.utils');
 const MediaService = require('../storage/media.service');
 const { generateSystemBarcode } = require('../../utils/barcode.utils');
+const { withComputedPurchaseCode } = require('../../utils/purchaseCode.utils');
 const { assertVariantImageUploads } = require('../../utils/productMultipart.utils');
 
 
@@ -166,10 +167,10 @@ const VARIANT_INCLUDE = {
     vendor_barcode: true,
     attributes: true,
     mrp: true,
-    wholesale_price: true,
-    retail_price: true,
-    online_price: true,
-    purchase_cost: true,
+    special_price: true,
+    purchase_price: true,
+    expenses: true,
+    purchase_code: true,
     weight: true,
     length: true,
     width: true,
@@ -210,10 +211,9 @@ const VARIANT_INCLUDE = {
 
 const PRODUCT_PRICE_SELECT = {
   mrp: true,
-  wholesale_price: true,
-  retail_price: true,
-  online_price: true,
-  purchase_cost: true,
+  special_price: true,
+  purchase_price: true,
+  expenses: true,
 };
 
 const PRODUCT_LIST_SELECT = {
@@ -299,20 +299,25 @@ const parseVariantSerial = (variantCode, baseProductCode) => {
   return Number.isFinite(n) && n > 0 ? n : null;
 };
 
+const resolvePurchasePriceInput = (obj) => {
+  if (priceFieldPresent(obj, 'purchase_price')) return Number(obj.purchase_price);
+  if (priceFieldPresent(obj, 'purchase_cost')) return Number(obj.purchase_cost);
+  return null;
+};
+
 const sanitizeProductPrices = (data) => {
   const prices = {
-    mrp: data.mrp ? Number(data.mrp) : 0,
-    wholesale_price: data.wholesale_price ? Number(data.wholesale_price) : 0,
-    retail_price: data.retail_price ? Number(data.retail_price) : 0,
-    online_price: data.online_price ? Number(data.online_price) : null,
-    purchase_cost: data.purchase_cost ? Number(data.purchase_cost) : null,
+    mrp: data.mrp != null && data.mrp !== '' ? Number(data.mrp) : 0,
+    special_price: data.special_price != null && data.special_price !== '' ? Number(data.special_price) : 0,
+    purchase_price: resolvePurchasePriceInput(data) ?? 0,
+    expenses: data.expenses != null && data.expenses !== '' ? Number(data.expenses) : 0,
   };
 
   validateVariantPricing(prices, 'Product');
   return prices;
 };
 
-const VARIANT_PRICE_KEYS = ['mrp', 'wholesale_price', 'retail_price'];
+const VARIANT_PRICE_KEYS = ['mrp', 'special_price', 'purchase_price', 'expenses'];
 
 const priceFieldPresent = (obj, key) =>
   obj[key] !== null && obj[key] !== undefined && obj[key] !== '';
@@ -320,17 +325,16 @@ const priceFieldPresent = (obj, key) =>
 const extractVariantPrices = (variant, indexLabel, { required = false } = {}) => {
   const prices = {
     mrp: priceFieldPresent(variant, 'mrp') ? Number(variant.mrp) : null,
-    wholesale_price: priceFieldPresent(variant, 'wholesale_price') ? Number(variant.wholesale_price) : null,
-    retail_price: priceFieldPresent(variant, 'retail_price') ? Number(variant.retail_price) : null,
-    online_price: priceFieldPresent(variant, 'online_price') ? Number(variant.online_price) : null,
-    purchase_cost: priceFieldPresent(variant, 'purchase_cost') ? Number(variant.purchase_cost) : null,
+    special_price: priceFieldPresent(variant, 'special_price') ? Number(variant.special_price) : null,
+    purchase_price: resolvePurchasePriceInput(variant),
+    expenses: priceFieldPresent(variant, 'expenses') ? Number(variant.expenses) : null,
   };
 
   if (required) {
     for (const key of VARIANT_PRICE_KEYS) {
       if (prices[key] == null) {
         throw new AppError(
-          `${indexLabel}: ${key} is required — each variant must have its own MRP, wholesale, retail (and optional online) price.`,
+          `${indexLabel}: ${key} is required — each variant must have its own MRP, special price, purchase price, and expenses.`,
           400,
           'VARIANT_PRICES_REQUIRED'
         );
@@ -341,9 +345,9 @@ const extractVariantPrices = (variant, indexLabel, { required = false } = {}) =>
   validateVariantPricing(
     {
       mrp: prices.mrp ?? 0,
-      wholesale_price: prices.wholesale_price ?? 0,
-      retail_price: prices.retail_price ?? 0,
-      online_price: prices.online_price,
+      special_price: prices.special_price ?? 0,
+      purchase_price: prices.purchase_price ?? 0,
+      expenses: prices.expenses ?? 0,
     },
     indexLabel
   );
@@ -455,10 +459,9 @@ const resolveCreatePricingContext = (data) => {
 
     const productPrices = sanitizeProductPrices({
       mrp: variantOnlyPrices[0].mrp,
-      wholesale_price: variantOnlyPrices[0].wholesale_price,
-      retail_price: variantOnlyPrices[0].retail_price,
-      online_price: variantOnlyPrices[0].online_price,
-      purchase_cost: variantOnlyPrices[0].purchase_cost ?? data.purchase_cost,
+      special_price: variantOnlyPrices[0].special_price,
+      purchase_price: variantOnlyPrices[0].purchase_price,
+      expenses: variantOnlyPrices[0].expenses,
     });
 
     return { productPrices, eachVariantOwnPrices: true, variantOnlyPrices };
@@ -473,10 +476,9 @@ const mergeVariantPrices = (productPrices, variantInput = {}) => {
 
   return {
     mrp: has('mrp') ? Number(variantInput.mrp) : productPrices.mrp,
-    wholesale_price: has('wholesale_price') ? Number(variantInput.wholesale_price) : productPrices.wholesale_price,
-    retail_price: has('retail_price') ? Number(variantInput.retail_price) : productPrices.retail_price,
-    online_price: has('online_price') ? Number(variantInput.online_price) : productPrices.online_price,
-    purchase_cost: has('purchase_cost') ? Number(variantInput.purchase_cost) : productPrices.purchase_cost,
+    special_price: has('special_price') ? Number(variantInput.special_price) : productPrices.special_price,
+    purchase_price: resolvePurchasePriceInput(variantInput) ?? productPrices.purchase_price,
+    expenses: has('expenses') ? Number(variantInput.expenses) : productPrices.expenses,
   };
 };
 
@@ -545,14 +547,11 @@ const parseAttributes = (raw) => {
 
 const validateVariantPricing = (variant, indexLabel = '') => {
   const prefix = indexLabel ? `${indexLabel}: ` : '';
-  if (variant.mrp < 0 || variant.wholesale_price < 0 || variant.retail_price < 0) {
+  if (variant.mrp < 0 || variant.special_price < 0 || variant.purchase_price < 0 || variant.expenses < 0) {
     throw new AppError(`${prefix}Prices cannot be negative`, 400, 'INVALID_VARIANT_PRICE');
   }
-  if (variant.online_price != null && variant.online_price < 0) {
-    throw new AppError(`${prefix}Online price cannot be negative`, 400, 'INVALID_VARIANT_PRICE');
-  }
-  if (variant.online_price != null && variant.online_price > variant.mrp) {
-    throw new AppError(`${prefix}Online price cannot exceed MRP`, 400, 'INVALID_VARIANT_PRICE');
+  if (variant.special_price > variant.mrp) {
+    throw new AppError(`${prefix}Special price cannot exceed MRP`, 400, 'INVALID_VARIANT_PRICE');
   }
 };
 
@@ -593,6 +592,52 @@ const assertWarehouseActive = async (warehouseId) => {
   });
   if (!warehouse) throw new AppError('Warehouse not found', 404, 'WAREHOUSE_NOT_FOUND');
   if (!warehouse.is_active) throw new AppError('Warehouse is inactive', 409, 'WAREHOUSE_INACTIVE');
+};
+
+const PRICE_FIELD_KEYS = ['mrp', 'special_price', 'purchase_price', 'expenses'];
+
+const mapIncomingPriceFields = (data, target = {}) => {
+  for (const key of PRICE_FIELD_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(data, key)) target[key] = data[key];
+  }
+  if (Object.prototype.hasOwnProperty.call(data, 'purchase_cost')) {
+    target.purchase_price = data.purchase_cost;
+  }
+  return target;
+};
+
+const buildPriceUpdatePayload = async (tx, current, incoming, { excludeVariantId } = {}) => {
+  const merged = {
+    mrp: incoming.mrp ?? current.mrp,
+    special_price: incoming.special_price ?? current.special_price,
+    purchase_price: incoming.purchase_price ?? current.purchase_price,
+    expenses: incoming.expenses ?? current.expenses,
+  };
+  validateVariantPricing(merged);
+  return withComputedPurchaseCode(tx, merged, { excludeVariantId });
+};
+
+const syncVariantsFromProductPrices = async (tx, productId, pricePayload) => {
+  const variants = await tx.productVariant.findMany({
+    where: { product_id: productId },
+    select: {
+      variant_id: true,
+      mrp: true,
+      special_price: true,
+      purchase_price: true,
+      expenses: true,
+    },
+  });
+
+  for (const variant of variants) {
+    const priced = await buildPriceUpdatePayload(tx, variant, pricePayload, {
+      excludeVariantId: variant.variant_id,
+    });
+    await tx.productVariant.update({
+      where: { variant_id: variant.variant_id },
+      data: priced,
+    });
+  }
 };
 
 const assertNoStockOnListing = (data) => {
@@ -672,13 +717,16 @@ const buildVariantInput = async (tx, variant, {
     systemBarcode = await generateSystemBarcode(tx);
   }
 
+  validateVariantPricing(prices, indexLabel);
+  const priced = await withComputedPurchaseCode(tx, prices);
+
   const payload = {
     sku: normalizeSku(variant.sku || variantCode),
     product_code: variantCode,
     system_barcode: systemBarcode,
     vendor_barcode: variant.vendor_barcode ? normalizeCode(variant.vendor_barcode) : null,
     attributes: parseAttributes(variant.attributes),
-    ...prices,
+    ...priced,
     ...shipping,
     low_stock_threshold: variant.low_stock_threshold != null ? Number(variant.low_stock_threshold) : 10,
     sort_order: serial - 1,
@@ -687,7 +735,6 @@ const buildVariantInput = async (tx, variant, {
     remarks: variant.remarks ?? null,
   };
 
-  validateVariantPricing(payload, indexLabel);
   return payload;
 };
 
@@ -782,6 +829,9 @@ const buildProductWhere = (query = {}, user) => {
               { product_code: { contains: search, mode: 'insensitive' } },
               { system_barcode: { contains: search, mode: 'insensitive' } },
               { vendor_barcode: { contains: search, mode: 'insensitive' } },
+              ...(Number.isFinite(Number(search)) && String(search).trim() !== ''
+                ? [{ purchase_code: Number(search) }]
+                : []),
             ],
           },
         },
@@ -1030,11 +1080,17 @@ const ProductService = {
   },
   
   async getProductByBarcode(barcode, shopId = null) {
+    const code = String(barcode).trim();
+    const purchaseCodeInt = /^\d+$/.test(code) ? parseInt(code, 10) : null;
+
     const variant = await prisma.productVariant.findFirst({
       where: {
-        system_barcode: barcode,
+        OR: [
+          { system_barcode: code },
+          ...(purchaseCodeInt != null ? [{ purchase_code: purchaseCodeInt }] : []),
+        ],
         is_active: true,
-        product: { is_active: true }
+        product: { is_active: true },
       },
       include: {
         product: {
@@ -1048,33 +1104,29 @@ const ProductService = {
             gst_type: true,
             unit_of_measure: true,
             brand_name: true,
-            mrp: true,
-            wholesale_price: true,
-            retail_price: true,
-            online_price: true,
-          }
-        }
-      }
+          },
+        },
+      },
     });
-    
+
     if (!variant) {
       throw new AppError('Product not found for this barcode', 404, 'PRODUCT_NOT_FOUND');
     }
-    
+
     let stockAvailable = null;
     if (shopId) {
       const shopStock = await prisma.shopStock.findUnique({
         where: {
           shop_id_variant_id: {
             shop_id: shopId,
-            variant_id: variant.variant_id
-          }
+            variant_id: variant.variant_id,
+          },
         },
-        select: { quantity_available: true }
+        select: { quantity_available: true },
       });
       stockAvailable = shopStock?.quantity_available || 0;
     }
-    
+
     return {
       variant_id: variant.variant_id,
       product_id: variant.product_id,
@@ -1089,11 +1141,12 @@ const ProductService = {
       gst_percent: variant.product.gst_percent,
       gst_type: variant.product.gst_type,
       unit_of_measure: variant.product.unit_of_measure,
-      mrp: variant.product.mrp,
-      wholesale_price: variant.product.wholesale_price,
-      retail_price: variant.product.retail_price,
-      online_price: variant.product.online_price,
-      stock_available: stockAvailable
+      mrp: variant.mrp,
+      special_price: variant.special_price,
+      purchase_price: variant.purchase_price,
+      expenses: variant.expenses,
+      purchase_code: variant.purchase_code,
+      stock_available: stockAvailable,
     };
   },
 
@@ -1123,9 +1176,9 @@ const ProductService = {
       'category_id',
       'sub_category_id',
       'mrp',
-      'wholesale_price',
-      'retail_price',
-      'online_price',
+      'special_price',
+      'purchase_price',
+      'expenses',
       'purchase_cost',
       'is_active',
       'remarks',
@@ -1134,18 +1187,18 @@ const ProductService = {
     for (const key of allowedProductFields) {
       if (Object.prototype.hasOwnProperty.call(data, key)) productFields[key] = data[key];
     }
+    mapIncomingPriceFields(data, productFields);
+    delete productFields.purchase_cost;
 
     if (productFields.hsn_code) productFields.hsn_code = normalizeCode(productFields.hsn_code);
     if (productFields.name) productFields.name = String(productFields.name).trim();
     if (productFields.primary_vendor_id) await assertVendorActive(productFields.primary_vendor_id);
 
-    const hasPriceField = ['mrp', 'wholesale_price', 'retail_price', 'online_price', 'purchase_cost'].some((k) =>
-      Object.prototype.hasOwnProperty.call(productFields, k)
-    );
+    const hasPriceField = PRICE_FIELD_KEYS.some((k) => Object.prototype.hasOwnProperty.call(productFields, k));
     if (hasPriceField) {
       const current = await prisma.product.findUnique({
         where: { product_id: productId },
-        select: { mrp: true, wholesale_price: true, retail_price: true, online_price: true, purchase_cost: true },
+        select: { mrp: true, special_price: true, purchase_price: true, expenses: true },
       });
       validateVariantPricing({ ...current, ...productFields }, 'Product');
     }
@@ -1171,11 +1224,13 @@ const ProductService = {
 
     if (data.apply_prices_to_variants === true && hasPriceField) {
       const pricePayload = {};
-      for (const key of ['mrp', 'wholesale_price', 'retail_price', 'online_price', 'purchase_cost']) {
+      for (const key of PRICE_FIELD_KEYS) {
         if (Object.prototype.hasOwnProperty.call(productFields, key)) pricePayload[key] = productFields[key];
       }
       if (Object.keys(pricePayload).length) {
-        await prisma.productVariant.updateMany({ where: { product_id: productId }, data: pricePayload });
+        await prisma.$transaction(async (tx) => {
+          await syncVariantsFromProductPrices(tx, productId, pricePayload);
+        });
       }
     }
 
@@ -1191,10 +1246,9 @@ const ProductService = {
         warehouse_id: true,
         product_code: true,
         mrp: true,
-        wholesale_price: true,
-        retail_price: true,
-        online_price: true,
-        purchase_cost: true,
+        special_price: true,
+        purchase_price: true,
+        expenses: true,
       },
     });
     if (!existing) throw new AppError('Product not found', 404, 'PRODUCT_NOT_FOUND');
@@ -1216,9 +1270,9 @@ const ProductService = {
       'vendor_barcode',
       'attributes',
       'mrp',
-      'wholesale_price',
-      'retail_price',
-      'online_price',
+      'special_price',
+      'purchase_price',
+      'expenses',
       'purchase_cost',
       'weight',
       'length',
@@ -1234,6 +1288,8 @@ const ProductService = {
     for (const key of allowedVariantFields) {
       if (Object.prototype.hasOwnProperty.call(data, key)) variantPayload[key] = data[key];
     }
+    mapIncomingPriceFields(data, variantPayload);
+    delete variantPayload.purchase_cost;
 
     if (variantPayload.sku) {
       variantPayload.sku = normalizeSku(variantPayload.sku);
@@ -1262,7 +1318,17 @@ const ProductService = {
       throw new AppError('No updatable variant fields provided', 400, 'EMPTY_UPDATE');
     }
 
-    validateVariantPricing({ ...current, ...variantPayload });
+    const hasPriceField = PRICE_FIELD_KEYS.some((k) => Object.prototype.hasOwnProperty.call(variantPayload, k));
+    if (hasPriceField) {
+      const priced = await prisma.$transaction(async (tx) =>
+        buildPriceUpdatePayload(tx, current, variantPayload, { excludeVariantId: variantId })
+      );
+      for (const key of [...PRICE_FIELD_KEYS, 'purchase_code']) {
+        variantPayload[key] = priced[key];
+      }
+    } else {
+      validateVariantPricing({ ...current, ...variantPayload });
+    }
 
     if (variantPayload.is_default === true) {
       await prisma.productVariant.updateMany({
@@ -1285,10 +1351,9 @@ const ProductService = {
         product_code: true,
         is_active: true,
         mrp: true,
-        wholesale_price: true,
-        retail_price: true,
-        online_price: true,
-        purchase_cost: true,
+        special_price: true,
+        purchase_price: true,
+        expenses: true,
       },
     });
     if (!existing) throw new AppError('Product not found', 404, 'PRODUCT_NOT_FOUND');
@@ -1677,9 +1742,13 @@ const ProductService = {
       variantsData.push({
         product_code: productCode,
         mrp: Number(row.mrp) || 0,
-        wholesale_price: Number(row.wholesale_price) || 0,
-        retail_price: Number(row.retail_price) || 0,
-        online_price: row.online_price ? Number(row.online_price) : null,
+        special_price: Number(row.special_price) || 0,
+        purchase_price: row.purchase_price
+          ? Number(row.purchase_price)
+          : row.purchase_cost
+            ? Number(row.purchase_cost)
+            : 0,
+        expenses: row.expenses != null && row.expenses !== '' ? Number(row.expenses) : 0,
         weight: row.weight ? Number(row.weight) : null,
         length: row.length ? Number(row.length) : null,
         width: row.width ? Number(row.width) : null,
@@ -1689,7 +1758,6 @@ const ProductService = {
         description: row.description || null, // ⭐ ADD THIS
         brand_name: row.brand_name || "Generic", // ⭐ ADD THIS
         remarks: row.remarks || null, // ⭐ ADD THIS
-        purchase_cost: row.purchase_cost ? Number(row.purchase_cost) : null,
         imageFolderPath,  // Store folder path for later
       });
 
@@ -1741,16 +1809,22 @@ const ProductService = {
         });
         
         if (!existingVariant) {
+          const csvPrices = {
+            mrp: variantData.mrp,
+            special_price: variantData.special_price,
+            purchase_price: variantData.purchase_price,
+            expenses: variantData.expenses,
+          };
+          validateVariantPricing(csvPrices);
+          const priced = await withComputedPurchaseCode(prisma, csvPrices);
+
           const newVariant = await prisma.productVariant.create({
             data: {
               product_id: existingProduct.product_id,
               product_code: variantData.product_code,
               system_barcode: variantData.product_code,
               sku: `SKU-${variantData.product_code}`,
-              mrp: variantData.mrp,
-              wholesale_price: variantData.wholesale_price,
-              retail_price: variantData.retail_price,
-              online_price: variantData.online_price,
+              ...priced,
               weight: variantData.weight,
               length: variantData.length,
               width: variantData.width,
@@ -1789,6 +1863,14 @@ const ProductService = {
       results.created++;
     } else {
       // Create new product
+      const firstVariantPrices = {
+        mrp: variantsData[0].mrp,
+        special_price: variantsData[0].special_price,
+        purchase_price: variantsData[0].purchase_price,
+        expenses: variantsData[0].expenses,
+      };
+      validateVariantPricing(firstVariantPrices);
+
       const product = await prisma.product.create({
         data: {
           warehouse: { connect: { warehouse_id: warehouseId } },
@@ -1801,11 +1883,7 @@ const ProductService = {
           gst_percent: Number(firstRow.gst_percent) || 18,
           gst_type: firstRow.gst_type || 'CGST_SGST',
           unit_of_measure: firstRow.unit_of_measure || 'PCS',
-          mrp: variantsData[0].mrp,
-          wholesale_price: variantsData[0].wholesale_price,
-          retail_price: variantsData[0].retail_price,
-          online_price: variantsData[0].online_price,
-          purchase_cost: variantsData[0].purchase_cost,
+          ...firstVariantPrices,
           title: variantsData[0].title,
           description: variantsData[0].description,
           brand_name: variantsData[0].brand_name,
@@ -1814,16 +1892,22 @@ const ProductService = {
       });
 
       for (const variantData of variantsData) {
+        const csvPrices = {
+          mrp: variantData.mrp,
+          special_price: variantData.special_price,
+          purchase_price: variantData.purchase_price,
+          expenses: variantData.expenses,
+        };
+        validateVariantPricing(csvPrices);
+        const priced = await withComputedPurchaseCode(prisma, csvPrices);
+
         const newVariant = await prisma.productVariant.create({
           data: {
             product_id: product.product_id,
             product_code: variantData.product_code,
             system_barcode: variantData.product_code,
             sku: `SKU-${variantData.product_code}`,
-            mrp: variantData.mrp,
-            wholesale_price: variantData.wholesale_price,
-            retail_price: variantData.retail_price,
-            online_price: variantData.online_price,
+            ...priced,
             weight: variantData.weight,
             length: variantData.length,
             width: variantData.width,

@@ -142,7 +142,7 @@ Content-Type: application/json
       "variant_id": "{{VARIANT_ID}}",
       "quantity": 2,
       "unit_price": 599,
-      "price_type": "RETAIL"
+      "price_type": "SPECIAL"
     }
   ],
   "payment_method": "UPI",

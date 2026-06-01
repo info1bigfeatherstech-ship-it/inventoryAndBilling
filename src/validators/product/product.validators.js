@@ -12,10 +12,10 @@ const variantIdParam = [
 
 const productPriceRules = (prefix = '') => [
   body(`${prefix}mrp`).optional().isFloat({ min: 0 }),
-  body(`${prefix}wholesale_price`).optional().isFloat({ min: 0 }),
-  body(`${prefix}retail_price`).optional().isFloat({ min: 0 }),
-  body(`${prefix}online_price`).optional({ nullable: true }).isFloat({ min: 0 }),
+  body(`${prefix}special_price`).optional().isFloat({ min: 0 }),
+  body(`${prefix}purchase_price`).optional().isFloat({ min: 0 }),
   body(`${prefix}purchase_cost`).optional({ nullable: true }).isFloat({ min: 0 }),
+  body(`${prefix}expenses`).optional().isFloat({ min: 0 }),
 ];
 
 const variantShippingRules = (prefix = '') => [
@@ -44,6 +44,21 @@ const variantBodyRules = (prefix = 'variants.*.') => [
   body(`${prefix}is_active`).optional().isBoolean().toBoolean(),
 ];
 
+const requirePriceWhenNoVariants = (field, label) =>
+  body(field)
+    .optional({ nullable: true })
+    .custom((value, { req }) => {
+      const hasVariants = Array.isArray(req.body.variants) && req.body.variants.length > 0;
+      if (!hasVariants && (value === undefined || value === null || value === '')) {
+        throw new Error(`${label} is required when variants array is not provided`);
+      }
+      if (value !== undefined && value !== null && value !== '') {
+        const n = Number(value);
+        if (Number.isNaN(n) || n < 0) throw new Error(`${label} must be a non-negative number`);
+      }
+      return true;
+    });
+
 const createProductValidator = [
   body('warehouse_id').optional().isString().trim().notEmpty(),
   body('product_code').isString().trim().isLength({ min: 1, max: 80 }),
@@ -60,38 +75,20 @@ const createProductValidator = [
   body('category_id').isString().trim().notEmpty(),
   body('sub_category_id').optional({ nullable: true }).isString().trim().notEmpty(),
   body('remarks').optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
-  body('mrp')
-    .optional({ nullable: true })
-    .custom((value, { req }) => {
-      const hasVariants = Array.isArray(req.body.variants) && req.body.variants.length > 0;
-      if (!hasVariants && (value === undefined || value === null || value === '')) {
-        throw new Error('mrp is required when variants array is not provided');
-      }
-      if (value !== undefined && value !== null && value !== '') {
-        const n = Number(value);
-        if (Number.isNaN(n) || n < 0) throw new Error('mrp must be a non-negative number');
-      }
-      return true;
-    }),
-  body('wholesale_price')
-    .optional({ nullable: true })
-    .custom((value, { req }) => {
-      const hasVariants = Array.isArray(req.body.variants) && req.body.variants.length > 0;
-      if (!hasVariants && (value === undefined || value === null || value === '')) {
-        throw new Error('wholesale_price is required when variants array is not provided');
-      }
-      return true;
-    }),
-  body('retail_price')
-    .optional({ nullable: true })
-    .custom((value, { req }) => {
-      const hasVariants = Array.isArray(req.body.variants) && req.body.variants.length > 0;
-      if (!hasVariants && (value === undefined || value === null || value === '')) {
-        throw new Error('retail_price is required when variants array is not provided');
-      }
-      return true;
-    }),
-  body('online_price').optional({ nullable: true }).isFloat({ min: 0 }),
+  requirePriceWhenNoVariants('mrp', 'mrp'),
+  requirePriceWhenNoVariants('special_price', 'special_price'),
+  requirePriceWhenNoVariants('expenses', 'expenses'),
+  body().custom((_, { req }) => {
+    const hasVariants = Array.isArray(req.body.variants) && req.body.variants.length > 0;
+    if (hasVariants) return true;
+    const hasPurchase =
+      (req.body.purchase_price != null && req.body.purchase_price !== '') ||
+      (req.body.purchase_cost != null && req.body.purchase_cost !== '');
+    if (!hasPurchase) {
+      throw new Error('purchase_price (or purchase_cost) is required when variants array is not provided');
+    }
+    return true;
+  }),
   body('purchase_cost').optional({ nullable: true }).isFloat({ min: 0 }),
   body('system_barcode').optional().isString().trim().notEmpty(),
   body('vendor_barcode').optional({ nullable: true }).isString().trim(),
@@ -101,8 +98,9 @@ const createProductValidator = [
     .custom((variants) => {
       if (!variants || !variants.length) return true;
       variants.forEach((v, i) => {
-        for (const key of ['mrp', 'wholesale_price', 'retail_price']) {
-          if (v[key] === undefined || v[key] === null || v[key] === '') {
+        for (const key of ['mrp', 'special_price', 'purchase_price', 'expenses']) {
+          const hasPurchaseAlias = key === 'purchase_price' && v.purchase_cost != null && v.purchase_cost !== '';
+          if ((v[key] === undefined || v[key] === null || v[key] === '') && !hasPurchaseAlias) {
             throw new Error(`variants[${i}].${key} is required — each variant needs its own price`);
           }
         }
@@ -157,10 +155,17 @@ const createVariantValidator = [
   body('system_barcode').optional().isString().trim().notEmpty(),
   body('vendor_barcode').optional({ nullable: true }).isString().trim(),
   body('mrp').isFloat({ min: 0 }),
-  body('wholesale_price').isFloat({ min: 0 }),
-  body('retail_price').isFloat({ min: 0 }),
-  body('online_price').optional({ nullable: true }).isFloat({ min: 0 }),
+  body('special_price').isFloat({ min: 0 }),
+  body('purchase_price').optional().isFloat({ min: 0 }),
   body('purchase_cost').optional({ nullable: true }).isFloat({ min: 0 }),
+  body('expenses').isFloat({ min: 0 }),
+  body().custom((_, { req }) => {
+    const hasPurchase =
+      (req.body.purchase_price != null && req.body.purchase_price !== '') ||
+      (req.body.purchase_cost != null && req.body.purchase_cost !== '');
+    if (!hasPurchase) throw new Error('purchase_price or purchase_cost is required');
+    return true;
+  }),
   body('weight').isFloat({ min: 0 }),
   body('length').isFloat({ min: 0 }),
   body('width').isFloat({ min: 0 }),

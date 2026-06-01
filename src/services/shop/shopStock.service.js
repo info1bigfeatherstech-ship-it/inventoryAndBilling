@@ -21,11 +21,11 @@ const SHOP_STOCK_SELECT = {
       sku: true,
       product_code: true, 
       system_barcode: true,
-      mrp: true,                    // ⭐ ADD THIS
-      wholesale_price: true,        // ⭐ ADD THIS
-      retail_price: true,           // ⭐ ADD THIS
-      online_price: true,           // ⭐ ADD THIS
-      purchase_cost: true,          // ⭐ ADD THIS (for warehouse staff)
+      mrp: true,
+      special_price: true,
+      purchase_price: true,
+      expenses: true,
+      purchase_code: true,
       product: { select: { product_id: true, product_code: true, name: true, warehouse_id: true } },
     },
   },

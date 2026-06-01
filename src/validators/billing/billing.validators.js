@@ -1,7 +1,7 @@
 const { body, param, query } = require('express-validator');
 
 const PAYMENT_METHODS = ['CASH', 'UPI', 'CARD', 'BANK_TRANSFER', 'CREDIT_ON_ACCOUNT', 'CREDIT_NOTE_REDEMPTION'];
-const PRICE_TYPES = ['MRP', 'RETAIL', 'WHOLESALE', 'ONLINE'];
+const PRICE_TYPES = ['MRP', 'SPECIAL', 'RETAIL', 'WHOLESALE', 'ONLINE'];
 const BILL_TYPES = ['GST_INVOICE', 'NON_GST_INVOICE'];
 const PAYMENT_STATUSES = ['PENDING', 'PAID', 'PARTIALLY_PAID', 'REFUNDED', 'CANCELLED'];
 

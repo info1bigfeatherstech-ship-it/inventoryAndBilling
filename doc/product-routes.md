@@ -17,7 +17,7 @@ Product (warehouse-scoped)
 └── Variants[]       → sellable SKUs
     ├── variant_code → "8878-1", "8878-2", … (auto serial)
     ├── system_barcode → 13-digit, auto-generated at listing
-    ├── prices         → mrp, wholesale_price, retail_price, online_price (each variant owns these)
+    ├── prices         → mrp, special_price, purchase_price, expenses, purchase_code (each variant owns these)
     ├── shipping       → weight, length, width, height (each variant owns these)
     ├── images[]       → up to 4 per variant (Cloudinary / R2)
     └── stock          → NOT on product create — use /product-stocks later
@@ -27,7 +27,7 @@ Product (warehouse-scoped)
 |---------|------|
 | **Product vs variant** | Product = catalog header. Variant = what you scan, price, ship, and stock. |
 | **Codes** | Never mix two bases on one product (no `8878` + `9978`). Add `8878-3` via add-variant. |
-| **Prices** | Always on **variant**. With `variants[]`, every item must include `mrp`, `wholesale_price`, `retail_price`. |
+| **Prices** | Always on **variant**. With `variants[]`, every item must include `mrp`, `special_price`, `purchase_price`, `expenses`. Server computes `purchase_code = purchase_price + expenses + 1986`. |
 | **Shipping** | Always on **variant** (for ecomm sync). With `variants[]`, every item needs `weight`, `length`, `width`, `height`. |
 | **Images** | Always on **variant** (max 4). Not on product root. |
 | **Stock** | **Only from inward receipt (MAPPED)** or manual `POST /product-stocks`. Product create/CSV does **not** add stock. `stock` / `initial_stock` on create → `STOCK_NOT_ALLOWED_ON_LISTING`. |
@@ -36,7 +36,7 @@ Product (warehouse-scoped)
 
 1. User fills product form + variant rows (prices, size/color, photos).
 2. **Create** → `POST /products` (JSON or multipart with images) — **no stock**.
-3. Print **system_barcode** from response.
+3. Print label from response: **product_code**, **name**, **purchase_code**, **special_price**, **mrp**, plus barcodes for `system_barcode` and `purchase_code`.
 4. Affix label on physical unit.
 5. **Stock in** → inward receipt: ARRIVED → map items → status **MAPPED** (stock auto-added), or manual `POST /product-stocks` for corrections.
 
@@ -101,8 +101,8 @@ Prices and shipping on the **root body** → stored on auto-created variant `887
 | `gst_percent` | Yes | 0–100 |
 | `gst_type` | Yes | `CGST_SGST` \| `IGST` \| `EXEMPT` |
 | `unit_of_measure` | Yes | e.g. `PCS` |
-| `mrp`, `wholesale_price`, `retail_price` | Yes | |
-| `online_price`, `purchase_cost` | No | |
+| `mrp`, `special_price`, `purchase_price`, `expenses` | Yes | `purchase_code` is server-computed (do not send) |
+| `purchase_cost` | No | Legacy alias for `purchase_price` |
 | `weight`, `length`, `width`, `height` | No* | Recommended for ecomm; required if you use `variants[]` |
 | `warehouse_id` | No | WH staff: ignored (uses their warehouse). Admin: optional |
 | `sub_category_id`, `description`, `title`, `brand_name`, `remarks` | No | |
@@ -119,9 +119,9 @@ Prices and shipping on the **root body** → stored on auto-created variant `887
   "gst_type": "CGST_SGST",
   "unit_of_measure": "PCS",
   "mrp": 999,
-  "wholesale_price": 700,
-  "retail_price": 850,
-  "online_price": 799,
+  "special_price": 799,
+  "purchase_price": 100,
+  "expenses": 20,
   "weight": 0.25,
   "length": 30,
   "width": 20,
@@ -129,7 +129,7 @@ Prices and shipping on the **root body** → stored on auto-created variant `887
 }
 ```
 
-**Expected:** `201`, body includes `variants[0].variant_code` = `8878-1`, `system_barcode`, prices, `shipping` object.
+**Expected:** `201`, body includes `variants[0].product_code` = `8878-1`, `system_barcode`, `purchase_code`, prices, `shipping` object.
 
 ### 4b. Multiple variants
 
@@ -149,9 +149,9 @@ Omit root-level prices/shipping. Send **`variants` array** — each object must 
     {
       "attributes": [{ "key": "Color", "value": "Red" }],
       "mrp": 999,
-      "wholesale_price": 700,
-      "retail_price": 850,
-      "online_price": 799,
+      "special_price": 799,
+      "purchase_price": 100,
+      "expenses": 20,
       "weight": 0.25,
       "length": 30,
       "width": 20,
@@ -160,9 +160,9 @@ Omit root-level prices/shipping. Send **`variants` array** — each object must 
     {
       "attributes": [{ "key": "Color", "value": "Blue" }],
       "mrp": 1099,
-      "wholesale_price": 800,
-      "retail_price": 949,
-      "online_price": 899,
+      "special_price": 899,
+      "purchase_price": 110,
+      "expenses": 20,
       "weight": 0.28,
       "length": 32,
       "width": 22,
@@ -209,12 +209,12 @@ const payload = {
   variants: [
     {
       attributes: [{ key: 'Color', value: 'Red' }],
-      mrp: 999, wholesale_price: 700, retail_price: 850,
+      mrp: 999, special_price: 799, purchase_price: 100, expenses: 20,
       weight: 0.2, length: 28, width: 18, height: 4,
     },
     {
       attributes: [{ key: 'Color', value: 'Blue' }],
-      mrp: 1099, wholesale_price: 800, retail_price: 949,
+      mrp: 1099, special_price: 899, purchase_price: 110, expenses: 20,
       weight: 0.28, length: 32, width: 22, height: 6,
     },
   ],
@@ -246,7 +246,7 @@ const res = await fetch(`${API}/products`, {
 **`POST /api/v1/products/:productId/variants`**
 
 - Next code is automatic: if product is `8878` with `8878-1`, `8878-2`, new one is `8878-3`.
-- **Required on body:** `mrp`, `wholesale_price`, `retail_price`, `weight`, `length`, `width`, `height`.
+- **Required on body:** `mrp`, `special_price`, `purchase_price`, `expenses`, `weight`, `length`, `width`, `height`.
 - Images: same multipart pattern (`data` + `variant_images_0` or `images`).
 
 ---
@@ -264,7 +264,9 @@ const res = await fetch(`${API}/products`, {
 PATCH /products/:productId
 {
   "mrp": 1050,
-  "wholesale_price": 720,
+  "special_price": 820,
+  "purchase_price": 100,
+  "expenses": 20,
   "apply_prices_to_variants": true
 }
 ```
@@ -331,7 +333,32 @@ Full variant list with all `images[]`, optional `stocks[]` summary.
 
 ---
 
-## 10. QA test checklist
+## 10. Barcode / purchase code lookup (POS)
+
+**`GET /api/v1/products/by-barcode/:code?shop_id=<optional>`**
+
+Accepts **`system_barcode`** or numeric **`purchase_code`**. Returns **variant-level** prices:
+
+```json
+{
+  "variant_id": "...",
+  "product_code": "8878-1",
+  "name": "Cotton Shirt",
+  "mrp": 999,
+  "special_price": 799,
+  "purchase_price": 100,
+  "expenses": 20,
+  "purchase_code": 2106,
+  "system_barcode": "21xxxxxxxxxxx",
+  "stock_available": 5
+}
+```
+
+Configure the purchase code offset via env: `PURCHASE_CODE_OFFSET=1986` (default).
+
+---
+
+## 11. QA test checklist
 
 | # | Test | Expect |
 |---|------|--------|
@@ -350,7 +377,7 @@ Full variant list with all `images[]`, optional `stocks[]` summary.
 
 ---
 
-## 11. Error codes
+## 12. Error codes
 
 | Code | HTTP | Meaning |
 |------|------|---------|
@@ -367,6 +394,7 @@ Full variant list with all `images[]`, optional `stocks[]` summary.
 | `INVALID_PRODUCT_DATA_JSON` | 400 | Invalid `data` field in multipart |
 | `IMAGE_REQUIRED` | 400 | Append images with empty files |
 | `DUPLICATE_BARCODE` | 409 | Same `system_barcode` twice in request |
+| `PURCHASE_CODE_COLLISION` | 409 | Another variant already has this purchase code |
 | `CLOUDINARY_AUTH_FAILED` | 502 | Wrong Cloudinary secret/key — fix `.env` |
 | `CLOUDINARY_UPLOAD_FAILED` | 502 | Other Cloudinary upload error |
 | `CLOUDINARY_MISCONFIGURED` | 503 | Missing Cloudinary env vars |
@@ -375,7 +403,7 @@ Full variant list with all `images[]`, optional `stocks[]` summary.
 
 ---
 
-## 12. Related docs
+## 13. Related docs
 
 - [category-routes.md](./category-routes.md) — global categories (admin create only)
 - [product-stock-routes.md](./product-stock-routes.md) — stock after labeling
@@ -406,8 +434,9 @@ Column	Type	Example	Description
 name	String	Premium Cotton T-Shirt	Product name (groups variants)
 product_code	String	6767-1	Variant code (BASE-N format)
 mrp	Number	1299	Maximum retail price
-wholesale_price	Number	899	Wholesale price
-retail_price	Number	999	Retail price
+special_price	Number	999	Special / offer selling price
+purchase_price	Number	100	Net purchase cost (before expenses)
+expenses	Number	20	Transport, labour, labelling, etc.
 hsn_code	String	6109	HSN code for GST
 gst_percent	Number	12	GST percentage
 gst_type	String	CGST_SGST	CGST_SGST / IGST
@@ -419,7 +448,7 @@ Column	Type	Example	Description
 title	String	Premium Cotton T-Shirt - White	SEO title (variant-specific)
 description	String	100% combed cotton	Product description
 brand_name	String	Apple	Brand (defaults to "Generic")
-online_price	Number	1099	E-commerce price
+purchase_cost	Number	100	Legacy alias for purchase_price
 weight	Number	200	Weight in grams (per unit)
 length	Number	35	Length in cm (per unit)
 width	Number	25	Width in cm (per unit)
@@ -458,12 +487,12 @@ Missing folders = product created without images (warning in response)
 
 📝 Sample CSV File
 csv
-name,title,product_code,vendor_name,category_name,mrp,wholesale_price,retail_price,hsn_code,gst_percent,gst_type,unit_of_measure,weight,length,width,height
-Premium Cotton T-Shirt,Premium Cotton T-Shirt - White,6767-1,Apple India,Electronics,1299,899,999,6109,12,CGST_SGST,PCS,200,35,25,3
-Premium Cotton T-Shirt,Premium Cotton T-Shirt - Black,6767-2,Apple India,Electronics,1299,899,999,6109,12,CGST_SGST,PCS,200,35,25,3
-Slim Fit Jeans,Slim Fit Jeans - Light Blue,8765-1,Samsung India,Apparel,2499,1799,1999,6204,18,CGST_SGST,PCS,600,45,35,12
-Slim Fit Jeans,Slim Fit Jeans - Dark Blue,8765-2,Samsung India,Apparel,2499,1799,1999,6204,18,CGST_SGST,PCS,600,45,35,12
-Wireless Mouse,Wireless Bluetooth Mouse,1112-1,Local Supplier,Electronics,1499,999,1199,8471,12,CGST_SGST,PCS,150,12,8,4
+name,title,product_code,vendor_name,category_name,mrp,special_price,purchase_price,expenses,hsn_code,gst_percent,gst_type,unit_of_measure,weight,length,width,height
+Premium Cotton T-Shirt,Premium Cotton T-Shirt - White,6767-1,Apple India,Electronics,1299,999,100,20,6109,12,CGST_SGST,PCS,200,35,25,3
+Premium Cotton T-Shirt,Premium Cotton T-Shirt - Black,6767-2,Apple India,Electronics,1299,999,100,20,6109,12,CGST_SGST,PCS,200,35,25,3
+Slim Fit Jeans,Slim Fit Jeans - Light Blue,8765-1,Samsung India,Apparel,2499,1999,500,50,6204,18,CGST_SGST,PCS,600,45,35,12
+Slim Fit Jeans,Slim Fit Jeans - Dark Blue,8765-2,Samsung India,Apparel,2499,1999,500,50,6204,18,CGST_SGST,PCS,600,45,35,12
+Wireless Mouse,Wireless Bluetooth Mouse,1112-1,Local Supplier,Electronics,1499,1199,400,30,8471,12,CGST_SGST,PCS,150,12,8,4
 📤 Response Format
 Success Response (Final Upload)
 json
