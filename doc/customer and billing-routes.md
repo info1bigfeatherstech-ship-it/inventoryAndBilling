@@ -157,7 +157,7 @@ json
   "message": "Bill created successfully",
   "data": {
     "bill_id": "bill_xyz789",
-    "bill_number": "INV-20260526-0001",
+    "bill_number": "INV-SHOP01-20260526-0001",
     "customer": {
       "name": "Rajesh Sharma",
       "mobile": "9876543210",
@@ -283,7 +283,7 @@ json
   "data": [
     {
       "bill_id": "bill_xyz789",
-      "bill_number": "INV-20260526-0001",
+      "bill_number": "INV-SHOP01-20260526-0001",
       "total_amount": 1413.64,
       "payment_status": "PAID",
       "created_at": "2026-05-26T10:30:00Z"

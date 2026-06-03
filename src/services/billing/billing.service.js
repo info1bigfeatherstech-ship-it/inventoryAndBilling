@@ -21,6 +21,7 @@ const {
   derivePaymentStatus,
   normalizeStateCode,
 } = require('../../utils/billing.utils');
+const { generateBillNumber } = require('../../utils/billNumber.utils');
 const logger = require('../../utils/logger.utils');
 
 const TX_OPTIONS = { isolationLevel: 'Serializable', maxWait: 10000, timeout: 30000 };
@@ -114,33 +115,6 @@ const BILL_SELECT = {
     },
     orderBy: { paid_at: 'asc' },
   },
-};
-
-/**
- * Generate bill number INV-YYYYMMDD-XXXX for a shop/day.
- * @param {string} shopId
- * @param {import('@prisma/client').Prisma.TransactionClient} tx
- */
-const generateBillNumber = async (shopId, tx = prisma) => {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const d = String(now.getDate()).padStart(2, '0');
-  const prefix = `INV-${y}${m}${d}-`;
-
-  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const endOfDay = new Date(startOfDay);
-  endOfDay.setDate(endOfDay.getDate() + 1);
-
-  const count = await tx.bill.count({
-    where: {
-      shop_id: shopId,
-      created_at: { gte: startOfDay, lt: endOfDay },
-    },
-  });
-
-  const seq = String(count + 1).padStart(4, '0');
-  return `${prefix}${seq}`;
 };
 
 const assertShopActive = async (shopId) => {
