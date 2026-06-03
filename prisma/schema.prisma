@@ -187,6 +187,7 @@ model Warehouse {
   transfers_from       TransferRequest[] @relation("TransferFromWarehouse")
   transfers_to         TransferRequest[] @relation("TransferToWarehouse")
   bulk_transfers_from  BulkTransferRequest[] @relation("BulkTransferFromWarehouse")
+  bulk_transfers_to    BulkTransferRequest[] @relation("BulkTransferToWarehouse")
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
@@ -913,7 +914,8 @@ model BulkTransferRequest {
   request_type      TransferRequestType @default(WH_TO_SHOP)
   from_warehouse_id String?
   from_shop_id      String?
-  to_shop_id        String
+  to_shop_id        String?
+  to_warehouse_id   String?
 
   status TransferRequestStatus @default(REQUESTED)
 
@@ -942,7 +944,8 @@ model BulkTransferRequest {
 
   from_warehouse Warehouse? @relation("BulkTransferFromWarehouse", fields: [from_warehouse_id], references: [warehouse_id])
   from_shop      Shop?      @relation("BulkTransferFromShop", fields: [from_shop_id], references: [shop_id])
-  to_shop        Shop       @relation("BulkTransferToShop", fields: [to_shop_id], references: [shop_id], onDelete: Restrict)
+  to_shop        Shop?      @relation("BulkTransferToShop", fields: [to_shop_id], references: [shop_id], onDelete: Restrict)
+  to_warehouse   Warehouse? @relation("BulkTransferToWarehouse", fields: [to_warehouse_id], references: [warehouse_id])
   requester      User       @relation("BulkTransferRequester", fields: [requested_by], references: [user_id])
   approver       User?      @relation("BulkTransferApprover", fields: [approved_by], references: [user_id])
   dispatcher     User?      @relation("BulkTransferDispatcher", fields: [dispatched_by], references: [user_id])
@@ -955,6 +958,7 @@ model BulkTransferRequest {
   @@index([status])
   @@index([request_type])
   @@index([to_shop_id, status])
+  @@index([to_warehouse_id, status])
   @@index([requested_by])
   @@map("bulk_transfer_requests")
 }

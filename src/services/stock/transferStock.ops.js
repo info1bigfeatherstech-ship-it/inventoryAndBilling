@@ -471,6 +471,73 @@ const receiveWhToShop = async (tx, params) => {
 };
 
 /**
+ * Dispatch WH→WH bulk/single line (deduct source; receive adds at destination).
+ */
+const dispatchWhToWh = async (tx, params) => {
+  const {
+    variant,
+    fromWarehouseId,
+    quantity,
+    batchNumber,
+    referenceId,
+    referenceType,
+    createdBy,
+    remarks,
+  } = params;
+
+  await deductWarehouseStock(tx, variant.variant_id, fromWarehouseId, quantity, batchNumber);
+
+  return createStockLedgerEntry(tx, {
+    productId: variant.product_id,
+    variantId: variant.variant_id,
+    movementType: 'WH_TO_WH',
+    quantity,
+    fromWarehouseId,
+    referenceId,
+    referenceType,
+    batchNumber: batchNumber || null,
+    createdBy,
+    remarks,
+  });
+};
+
+/**
+ * Receive WH→WH line at destination warehouse.
+ */
+const receiveWhToWh = async (tx, params) => {
+  const {
+    variant,
+    toWarehouseId,
+    quantity,
+    batchNumber,
+    referenceId,
+    referenceType,
+    createdBy,
+    remarks,
+  } = params;
+
+  await addWarehouseStock(tx, variant, toWarehouseId, quantity, batchNumber);
+
+  return createStockLedgerEntry(tx, {
+    productId: variant.product_id,
+    variantId: variant.variant_id,
+    movementType: 'WH_TO_WH',
+    quantity,
+    toWarehouseId,
+    referenceId,
+    referenceType,
+    batchNumber: batchNumber || null,
+    createdBy,
+    remarks,
+  });
+};
+
+const reverseWhToWhDispatch = async (tx, params) => {
+  const { variant, fromWarehouseId, quantity, batchNumber } = params;
+  await addWarehouseStock(tx, variant, fromWarehouseId, quantity, batchNumber);
+};
+
+/**
  * Cancel/reverse WH→Shop in-transit quantity.
  */
 const reverseWhToShopDispatch = async (tx, params) => {
@@ -489,6 +556,9 @@ module.exports = {
   decrementShopAvailable,
   dispatchWhToShop,
   receiveWhToShop,
+  dispatchWhToWh,
+  receiveWhToWh,
   reverseWhToShopDispatch,
+  reverseWhToWhDispatch,
   validateWarehouseStock,
 };

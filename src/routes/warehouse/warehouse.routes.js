@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 
 const WarehouseController = require('../../controllers/warehouse/warehouse.controller');
+const WarehousePeerCatalogController = require('../../controllers/stock/warehousePeerCatalog.controller');
+const { warehousePeerCatalogValidator } = require('../../validators/stock/warehousePeerCatalog.validators');
 const { validateRequest } = require('../../middlewares/validation.middleware');
 const {
   createWarehouseValidator,
@@ -23,6 +25,13 @@ router.get(
 );
 
 router.get('/', authorizeRoles(...WAREHOUSE_READ_ROLES), listWarehousesValidator, validateRequest, WarehouseController.list);
+router.get(
+  '/:warehouseId/peer-stock-catalog',
+  authorizeRoles('SUPER_ADMIN', 'WH_MANAGER', 'WH_STOCK_LISTER'),
+  warehousePeerCatalogValidator,
+  validateRequest,
+  WarehousePeerCatalogController.getPeerStockCatalog
+);
 router.get('/:warehouseId', authorizeRoles(...WAREHOUSE_READ_ROLES), warehouseIdParam, validateRequest, WarehouseController.getById);
 
 router.post('/', authorizeRoles(...ADMIN_ONLY), createWarehouseValidator, validateRequest, WarehouseController.create);

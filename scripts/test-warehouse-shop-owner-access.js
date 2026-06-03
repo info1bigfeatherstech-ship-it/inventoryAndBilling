@@ -43,13 +43,13 @@ function main() {
   try {
     const where = {};
     applyWarehouseListScope(where, whManager);
-    if (where.warehouse_id !== 'wh_own') {
-      fail('WH_MANAGER scope', `expected wh_own, got ${where.warehouse_id}`);
+    if (where.warehouse_id) {
+      fail('WH_MANAGER list', 'should list all warehouses for peer picker');
     } else {
-      ok('WH_MANAGER still scoped to own warehouse');
+      ok('WH_MANAGER can list warehouses for peer selection');
     }
   } catch (e) {
-    fail('WH_MANAGER scope', e.message);
+    fail('WH_MANAGER list', e.message);
   }
 
   console.log(`\nDone: ${passed} passed, ${failed} failed`);

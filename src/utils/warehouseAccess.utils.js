@@ -32,17 +32,11 @@ const assertCanReadWarehouse = (user, warehouseId) => {
   }
 };
 
+/** List all active warehouses (e.g. shop owner / WH peer source picker). */
 const applyWarehouseListScope = (where, user) => {
   if (isSuperAdmin(user)) return where;
-
-  if (isWarehouseStaff(user)) {
-    assertWarehouseAssigned(user);
-    where.warehouse_id = user.warehouseId;
-    return where;
-  }
-
   if (isShopTransferRole(user)) return where;
-
+  if (isWarehouseStaff(user)) return where;
   throw new AppError('Insufficient permissions', 403, 'FORBIDDEN');
 };
 

@@ -16,10 +16,10 @@ const {
 } = require('../../validators/stock/bulkTransfer.validators');
 
 const READ_ROLES = ['SUPER_ADMIN', 'SHOP_OWNER', 'WH_MANAGER', 'WH_STOCK_LISTER', 'SHOP_STOCK_LISTER'];
-const CREATE_ROLES = ['SUPER_ADMIN', 'SHOP_OWNER'];
+const CREATE_ROLES = ['SUPER_ADMIN', 'SHOP_OWNER', 'WH_MANAGER', 'WH_STOCK_LISTER'];
 const APPROVE_ROLES = ['SUPER_ADMIN', 'WH_MANAGER'];
 const DISPATCH_ROLES = ['SUPER_ADMIN', 'WH_MANAGER', 'WH_STOCK_LISTER'];
-const RECEIVE_ROLES = ['SUPER_ADMIN', 'SHOP_OWNER'];
+const RECEIVE_ROLES = ['SUPER_ADMIN', 'SHOP_OWNER', 'WH_MANAGER', 'WH_STOCK_LISTER'];
 
 const idem24h = idempotency({ ttlSeconds: 86400 });
 

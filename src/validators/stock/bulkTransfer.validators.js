@@ -4,6 +4,7 @@ const bulkRequestIdParam = [param('bulkRequestId').isString().trim().notEmpty()]
 
 const createBulkValidator = [
   body('to_shop_id').optional().isString().trim().notEmpty(),
+  body('to_warehouse_id').optional().isString().trim().notEmpty(),
   body('from_warehouse_id').isString().trim().notEmpty(),
   body('request_type').optional().isIn(['WH_TO_SHOP', 'WH_TO_WH', 'SHOP_TO_SHOP']),
   body('request_remarks').optional().isString().trim().isLength({ max: 500 }),
@@ -18,6 +19,7 @@ const listBulkValidator = [
   query('limit').optional().isInt({ min: 1, max: 100 }),
   query('status').optional().isString().trim(),
   query('to_shop_id').optional().isString().trim(),
+  query('to_warehouse_id').optional().isString().trim(),
 ];
 
 const approveBulkValidator = [
