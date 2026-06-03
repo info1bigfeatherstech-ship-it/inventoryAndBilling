@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 
 const ShopController = require('../../controllers/shop/shop.controller');
+const ShopWarehouseCatalogController = require('../../controllers/stock/shopWarehouseCatalog.controller');
+const { warehouseStockCatalogValidator } = require('../../validators/stock/shopWarehouseCatalog.validators');
 const { validateRequest } = require('../../middlewares/validation.middleware');
 const { requireAuth, authorizeRoles } = require('../../middlewares/auth.middleware');
 const {
@@ -18,6 +20,13 @@ router.use(requireAuth);
 
 router.get('/me', authorizeRoles('SHOP_OWNER'), ShopController.getMyShop);
 router.get('/', authorizeRoles(...SHOP_READ_ROLES), listShopsValidator, validateRequest, ShopController.list);
+router.get(
+  '/:shopId/warehouse-stock-catalog',
+  authorizeRoles('SUPER_ADMIN', 'SHOP_OWNER'),
+  warehouseStockCatalogValidator,
+  validateRequest,
+  ShopWarehouseCatalogController.getCatalog
+);
 router.get('/:shopId', authorizeRoles(...SHOP_READ_ROLES), shopIdParam, validateRequest, ShopController.getById);
 router.post('/', authorizeRoles(...ADMIN_ONLY), createShopValidator, validateRequest, ShopController.create);
 router.put('/:shopId', authorizeRoles(...ADMIN_ONLY), updateShopValidator, validateRequest, ShopController.update);

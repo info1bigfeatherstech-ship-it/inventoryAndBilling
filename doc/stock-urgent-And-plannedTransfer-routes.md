@@ -231,6 +231,43 @@ json
 }
 
 
+📋 3.10 Shop Warehouse Stock Catalog (variant picker)
+Endpoint: GET {{BASE_URL}}/shops/:shopId/warehouse-stock-catalog
+
+Access: SUPER_ADMIN, SHOP_OWNER (own shop only)
+
+Query Parameters:
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| warehouse_id | string | Yes | Source warehouse for WH→shop requests |
+| mode | string | No | `new`, `existing`, or `all` (default: `all`) |
+| search | string | No | Filter by product name, code, or SKU |
+| page | number | No | Default 1 |
+| limit | number | No | Default 50, max 100 |
+
+**Mode definitions:**
+
+| Mode | Variant included when |
+|------|----------------------|
+| `new` | Warehouse stock > 0 AND shop has no stock (no row or available + in_transit = 0) |
+| `existing` | Active `shop_product_level`, OR shop has stock, OR below min level |
+| `all` | Any variant with warehouse stock > 0 |
+
+Response groups products with `variants[]` per line: `warehouse_available`, `shop_available`, `suggested_quantity` (existing mode), `selectable`.
+
+Use with `POST /bulk-transfer-requests` — send only selected `variant_id` rows in `items[]`. Dispatch deducts warehouse stock per approved variant only (partial product selection is supported).
+
+**Create-time validation:** Each item quantity is checked against aggregate warehouse availability before the request is saved (`INSUFFICIENT_STOCK` if over-requested).
+
+Example:
+
+```http
+GET {{BASE_URL}}/shops/shop_noida_001/warehouse-stock-catalog?warehouse_id=wh_delhi_001&mode=new&search=case
+```
+
+---
+
 📦 4. BULK TRANSFER REQUEST (Multiple Items)
 4.1 Create Bulk Transfer Request
 Endpoint: POST {{BASE_URL}}/bulk-transfer-requests
@@ -260,7 +297,7 @@ request_type	No	string	Default: WH_TO_SHOP
 request_remarks	No	string	Max 500 chars
 items	Yes	array	Max 100 items
 items.*.variant_id	Yes	string	Variant ID
-items.*.quantity	Yes	integer	Positive integer
+items.*.quantity	Yes	integer	Positive integer; must not exceed warehouse available (validated at create)
 Response (201 Created):
 
 json
@@ -761,3 +798,4 @@ Bulk Transfer	/bulk-transfer-requests	POST, GET
 /bulk-transfer-requests/:id/cancel	PATCH
 Min-Max Levels	/shop-product-levels	POST
 Reorder Suggestions	/shop-reorder-suggestions	GET
+Shop WH Catalog	/shops/:shopId/warehouse-stock-catalog	GET

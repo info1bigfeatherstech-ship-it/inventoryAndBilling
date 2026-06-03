@@ -24,6 +24,7 @@ const {
   reverseWhToShopDispatch,
   validateWarehouseStock,
 } = require('./transferStock.ops');
+const { getWarehouseStockAvailable } = require('../../utils/warehouseStock.utils');
 
 const TX_OPTIONS = { isolationLevel: 'Serializable', maxWait: 10000, timeout: 30000 };
 
@@ -166,11 +167,33 @@ const BulkTransferService = {
         if (!Number.isInteger(qty) || qty <= 0) {
           throw new AppError('Item quantity must be a positive integer', 400, 'TRANSFER_QUANTITY_INVALID');
         }
-        await loadVariant(item.variant_id);
+        const variant = await loadVariant(item.variant_id);
+        if (variant.product.warehouse_id !== data.from_warehouse_id) {
+          throw new AppError(
+            `Variant ${variant.product.name || item.variant_id} does not belong to source warehouse`,
+            409,
+            'VARIANT_WAREHOUSE_MISMATCH'
+          );
+        }
+        const batchNumber = normalizeBatch(item.batch_number);
+        const available = await getWarehouseStockAvailable(
+          prisma,
+          item.variant_id,
+          data.from_warehouse_id,
+          batchNumber
+        );
+        if (qty > available) {
+          throw new AppError(
+            `Insufficient warehouse stock for ${variant.product.name || item.variant_id}. Available: ${available}, requested: ${qty}`,
+            409,
+            'INSUFFICIENT_STOCK',
+            { variant_id: item.variant_id, available, requested: qty, batch_number: batchNumber || null }
+          );
+        }
         lineItems.push({
           variant_id: item.variant_id,
           quantity: qty,
-          batch_number: normalizeBatch(item.batch_number) || null,
+          batch_number: batchNumber || null,
         });
       }
 

@@ -12,7 +12,7 @@ const {
 const { requireAuth, authorizeRoles } = require('../../middlewares/auth.middleware');
 
 const ADMIN_ONLY = ['SUPER_ADMIN'];
-const WAREHOUSE_READ_ROLES = ['SUPER_ADMIN', 'WH_MANAGER', 'WH_STOCK_LISTER', 'SHOP_OWNER'];
+const WAREHOUSE_READ_ROLES = ['SUPER_ADMIN', 'WH_MANAGER', 'WH_STOCK_LISTER', 'SHOP_OWNER', 'SHOP_STOCK_LISTER'];
 
 router.use(requireAuth);
 

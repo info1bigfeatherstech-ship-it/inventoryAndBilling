@@ -163,6 +163,17 @@ const buildLedgerWhere = (filters = {}) => {
   return where;
 };
 
+const formatLedgerRow = (row) => {
+  const { variant, ...rest } = row;
+  return {
+    ...rest,
+    product_name: variant?.product?.name ?? null,
+    product_code: variant?.product?.product_code ?? variant?.product_code ?? null,
+    variant_sku: variant?.sku ?? null,
+    variant_product_code: variant?.product_code ?? null,
+  };
+};
+
 const StockLedgerService = {
   async getLedgerEntries(filters = {}, pagination = {}, user) {
     const { page, limit, skip, take } = parsePagination(pagination, { page: 1, limit: 50, maxLimit: 200 });
@@ -177,11 +188,21 @@ const StockLedgerService = {
         skip,
         take,
         orderBy: { created_at: 'desc' },
-        select: LEDGER_SELECT,
+        select: {
+          ...LEDGER_SELECT,
+          variant: {
+            select: {
+              sku: true,
+              product_code: true,
+              product: { select: { name: true, product_code: true } },
+            },
+          },
+        },
       }),
     ]);
 
-    return { total, page, limit, entries };
+    const ledger = entries.map(formatLedgerRow);
+    return { total, page, limit, entries: ledger };
   },
 
   async getVariantLedger(variantId, dateRange = {}, user) {
