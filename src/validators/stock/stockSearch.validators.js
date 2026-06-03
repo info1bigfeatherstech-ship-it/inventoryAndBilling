@@ -8,6 +8,10 @@ const stockSearchValidator = [
   query('purchase_code').optional().isInt({ min: 1 }).toInt(),
   query('city').optional().isString().trim(),
   query('nearby_only').optional().isBoolean().toBoolean(),
+  query('request_type')
+    .optional()
+    .isIn(['WH_TO_WH', 'WH_TO_SHOP', 'SHOP_TO_SHOP'])
+    .withMessage('request_type must be WH_TO_WH, WH_TO_SHOP, or SHOP_TO_SHOP'),
   query().custom((_, { req }) => {
     const q = req.query;
     if (!q.variant_id && !q.product_code && !q.sku && !q.barcode && q.purchase_code == null) {

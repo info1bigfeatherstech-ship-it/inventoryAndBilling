@@ -25,7 +25,19 @@ sku	string	No*	SKU of variant
 barcode	string	No*	System or vendor barcode
 city	string	No	Filter by city for priority
 nearby_only	boolean	No	Show only same city results
+request_type	string	No	`WH_TO_WH`, `WH_TO_SHOP`, or `SHOP_TO_SHOP` — scopes results by transfer intent (see below)
 *At least one search parameter required
+
+**Search scope (role + request_type):**
+
+| Caller / `request_type` | Warehouses in response | Shops in response |
+|-------------------------|------------------------|-------------------|
+| `WH_MANAGER` / `WH_STOCK_LISTER` (default) | Other warehouses with stock; **own warehouse excluded** | **None** |
+| `WH_TO_WH` | Same as WH manager default | None |
+| `WH_TO_SHOP` | All warehouses with stock | None |
+| `SHOP_TO_SHOP` | None | Other shops with stock; **own shop excluded** |
+| `SHOP_OWNER` (no `request_type`) | All warehouses with stock | Other shops; own shop excluded |
+| `SUPER_ADMIN` (no `request_type`) | All | All |
 
 Example Request:
 

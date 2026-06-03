@@ -2,6 +2,7 @@ const prisma = require('../../utils/prisma.utils');
 const { AppError } = require('../../errors/AppError');
 const { resolveVariantByScanCode } = require('../../utils/variantScan.utils');
 const { formatDistanceLabel, prioritizeWarehouses, prioritizeShops } = require('../../utils/stock.utils');
+const { resolveStockSearchScope } = require('../../utils/stockSearchScope.utils');
 const logger = require('../../utils/logger.utils');
 
 /**
@@ -109,89 +110,101 @@ const StockSearchService = {
       const variant = await resolveVariant(query);
       const referenceCity = query.city?.trim() || null;
       const nearbyOnly = query.nearby_only === true || query.nearby_only === 'true';
+      const scope = await resolveStockSearchScope(user, query);
 
-      const warehouseStocks = await prisma.productStock.groupBy({
-        by: ['warehouse_id'],
-        where: {
-          variant_id: variant.variant_id,
-          quantity: { gt: 0 },
-          warehouse: { is_active: true },
-        },
-        _sum: { quantity: true },
-        _max: { updated_at: true },
-      });
+      let warehouses = [];
+      if (scope.includeWarehouses) {
+        const warehouseStocks = await prisma.productStock.groupBy({
+          by: ['warehouse_id'],
+          where: {
+            variant_id: variant.variant_id,
+            quantity: { gt: 0 },
+            warehouse: { is_active: true },
+            ...(scope.excludeWarehouseIds.length
+              ? { warehouse_id: { notIn: scope.excludeWarehouseIds } }
+              : {}),
+          },
+          _sum: { quantity: true },
+          _max: { updated_at: true },
+        });
 
-      const warehouseIds = warehouseStocks.map((w) => w.warehouse_id);
-      const warehousesMeta = warehouseIds.length
-        ? await prisma.warehouse.findMany({
-            where: { warehouse_id: { in: warehouseIds } },
-            select: {
-              warehouse_id: true,
-              warehouse_code: true,
-              warehouse_name: true,
-              city: true,
-            },
-          })
-        : [];
+        const warehouseIds = warehouseStocks.map((w) => w.warehouse_id);
+        const warehousesMeta = warehouseIds.length
+          ? await prisma.warehouse.findMany({
+              where: { warehouse_id: { in: warehouseIds } },
+              select: {
+                warehouse_id: true,
+                warehouse_code: true,
+                warehouse_name: true,
+                city: true,
+              },
+            })
+          : [];
 
-      const whMap = new Map(warehousesMeta.map((w) => [w.warehouse_id, w]));
+        const whMap = new Map(warehousesMeta.map((w) => [w.warehouse_id, w]));
 
-      let warehouses = warehouseStocks.map((row) => {
-        const meta = whMap.get(row.warehouse_id);
-        return {
-          warehouse_id: row.warehouse_id,
-          warehouse_code: meta?.warehouse_code,
-          warehouse_name: meta?.warehouse_name,
-          city: meta?.city,
-          distance: formatDistanceLabel(referenceCity, meta?.city),
-          stock_quantity: row._sum.quantity ?? 0,
-          last_updated: row._max.updated_at,
-        };
-      });
+        warehouses = warehouseStocks.map((row) => {
+          const meta = whMap.get(row.warehouse_id);
+          return {
+            warehouse_id: row.warehouse_id,
+            warehouse_code: meta?.warehouse_code,
+            warehouse_name: meta?.warehouse_name,
+            city: meta?.city,
+            distance: formatDistanceLabel(referenceCity, meta?.city),
+            stock_quantity: row._sum.quantity ?? 0,
+            last_updated: row._max.updated_at,
+          };
+        });
 
-      warehouses = prioritizeWarehouses(referenceCity || '', warehouses);
+        warehouses = prioritizeWarehouses(referenceCity || '', warehouses);
+      }
 
-      const shopStocks = await prisma.shopStock.findMany({
-        where: {
-          variant_id: variant.variant_id,
-          quantity_available: { gt: 0 },
-          shop: { is_active: true },
-          ...(user.shopId ? { shop_id: { not: user.shopId } } : {}),
-        },
-        include: {
-          shop: {
-            select: {
-              shop_id: true,
-              shop_code: true,
-              shop_name: true,
-              city: true,
+      let shops = [];
+      if (scope.includeShops) {
+        const shopStocks = await prisma.shopStock.findMany({
+          where: {
+            variant_id: variant.variant_id,
+            quantity_available: { gt: 0 },
+            shop: { is_active: true },
+            ...(scope.excludeShopIds.length ? { shop_id: { notIn: scope.excludeShopIds } } : {}),
+          },
+          include: {
+            shop: {
+              select: {
+                shop_id: true,
+                shop_code: true,
+                shop_name: true,
+                city: true,
+              },
             },
           },
-        },
-      });
+        });
 
-      let shops = shopStocks.map((row) => ({
-        shop_id: row.shop_id,
-        shop_code: row.shop.shop_code,
-        shop_name: row.shop.shop_name,
-        city: row.shop.city,
-        distance: formatDistanceLabel(referenceCity, row.shop.city),
-        stock_quantity: row.quantity_available,
-        last_updated: row.updated_at,
-      }));
+        shops = shopStocks.map((row) => ({
+          shop_id: row.shop_id,
+          shop_code: row.shop.shop_code,
+          shop_name: row.shop.shop_name,
+          city: row.shop.city,
+          distance: formatDistanceLabel(referenceCity, row.shop.city),
+          stock_quantity: row.quantity_available,
+          last_updated: row.updated_at,
+        }));
+
+        shops = prioritizeShops(referenceCity || '', shops);
+      }
 
       if (nearbyOnly && referenceCity) {
         shops = shops.filter((s) => s.distance === 'same city');
         warehouses = warehouses.filter((w) => w.distance === 'same city');
       }
 
-      shops = prioritizeShops(referenceCity || '', shops);
-
       logger.info('Cross-stock search', {
         variant_id: variant.variant_id,
         warehouse_hits: warehouses.length,
         shop_hits: shops.length,
         user_id: user.userId,
+        role: user.role,
+        search_scope: scope.requestType || 'DEFAULT',
       });
 
       return {
@@ -209,7 +222,8 @@ const StockSearchService = {
           purchase_code: variant.purchase_code,
         },
         shops,
-        warehouses
+        warehouses,
+        search_scope: scope.requestType,
       };
     } catch (err) {
       logger.error('searchStock failed', { error: err.message, stack: err.stack });
