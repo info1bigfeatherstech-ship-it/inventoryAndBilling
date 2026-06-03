@@ -1,5 +1,6 @@
 const prisma = require('./prisma.utils');
 const { AppError } = require('../errors/AppError');
+const { assertWarehouseStockAvailable } = require('./warehouseStock.utils');
 
 const TERMINAL_STATUSES = new Set(['REJECTED', 'COMPLETED', 'CANCELLED']);
 const PRE_DISPATCH_STATUSES = new Set(['REQUESTED', 'APPROVED']);
@@ -359,25 +360,13 @@ const validateStockBeforeDispatch = async (tx, request) => {
     return;
   }
 
-  const batchNumber = normalizeBatch(request.batch_number);
-  const row = await tx.productStock.findUnique({
-    where: {
-      variant_id_warehouse_id_batch_number: {
-        variant_id: request.variant_id,
-        warehouse_id: request.from_warehouse_id,
-        batch_number: batchNumber,
-      },
-    },
-  });
-  const available = row?.quantity ?? 0;
-  if (available < quantity) {
-    throw new AppError(
-      `Insufficient warehouse stock. Available: ${available}, requested: ${quantity}`,
-      409,
-      'INSUFFICIENT_STOCK',
-      { available, requested: quantity, batch_number: batchNumber }
-    );
-  }
+  await assertWarehouseStockAvailable(
+    tx,
+    request.variant_id,
+    request.from_warehouse_id,
+    quantity,
+    request.batch_number
+  );
 };
 
 module.exports = {

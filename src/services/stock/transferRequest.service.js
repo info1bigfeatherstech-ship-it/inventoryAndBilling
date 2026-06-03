@@ -25,6 +25,7 @@ const {
   TERMINAL_STATUSES,
   IN_FLIGHT_STATUSES,
 } = require('../../utils/transferRequest.utils');
+const { deductWarehouseStock } = require('../../utils/warehouseStock.utils');
 
 const TX_OPTIONS = { isolationLevel: 'Serializable', maxWait: 10000, timeout: 30000 };
 
@@ -179,33 +180,6 @@ const validateCreatePayload = async (data) => {
   }
 
   return { variant, quantity, batchNumber: normalizeBatch(data.batch_number) };
-};
-
-const deductWarehouseStock = async (tx, variantId, warehouseId, quantity, batchNumber) => {
-  const row = await tx.productStock.findUnique({
-    where: {
-      variant_id_warehouse_id_batch_number: {
-        variant_id: variantId,
-        warehouse_id: warehouseId,
-        batch_number: batchNumber,
-      },
-    },
-  });
-
-  const available = row?.quantity ?? 0;
-  if (available < quantity) {
-    throw new AppError(
-      `Insufficient warehouse stock. Available: ${available}, requested: ${quantity}`,
-      409,
-      'INSUFFICIENT_STOCK',
-      { available, requested: quantity }
-    );
-  }
-
-  await tx.productStock.update({
-    where: { stock_id: row.stock_id },
-    data: { quantity: { decrement: quantity } },
-  });
 };
 
 const addWarehouseStock = async (tx, variant, warehouseId, quantity, batchNumber) => {

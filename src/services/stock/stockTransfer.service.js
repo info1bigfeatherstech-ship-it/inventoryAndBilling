@@ -10,6 +10,11 @@ const {
   productListCachePattern,
 } = require('../../utils/cache.utils');
 const logger = require('../../utils/logger.utils');
+const {
+  normalizeBatch,
+  deductWarehouseStock: deductWarehouseStockFifo,
+  getWarehouseStockAvailable,
+} = require('../../utils/warehouseStock.utils');
 
 const TX_OPTIONS = { isolationLevel: 'Serializable', maxWait: 10000, timeout: 30000 };
 
@@ -19,8 +24,6 @@ const invalidateProductCaches = async (productId, warehouseId) => {
     cacheDelByPattern(productListCachePattern(warehouseId)),
   ]);
 };
-
-const normalizeBatch = (value) => (value != null ? String(value).trim() : '');
 
 const assertPositiveIntQuantity = (quantity) => {
   const qty = Number(quantity);
@@ -81,34 +84,8 @@ const lockWarehouseStock = async (tx, variantId, warehouseId, batchNumber) => {
   });
 };
 
-const assertWarehouseHasStock = async (tx, variantId, warehouseId, quantity, batchNumber) => {
-  const row = await lockWarehouseStock(tx, variantId, warehouseId, batchNumber);
-  const available = row?.quantity ?? 0;
-
-  if (available < quantity) {
-    throw new AppError(
-      `Insufficient warehouse stock. Available: ${available}, requested: ${quantity}`,
-      409,
-      'INSUFFICIENT_STOCK',
-      { available, requested: quantity, batch_number: batchNumber }
-    );
-  }
-
-  return row;
-};
-
 const deductWarehouseStock = async (tx, variant, warehouseId, quantity, batchNumber) => {
-  const row = await assertWarehouseHasStock(tx, variant.variant_id, warehouseId, quantity, batchNumber);
-
-  if (row) {
-    await tx.productStock.update({
-      where: { stock_id: row.stock_id },
-      data: { quantity: { decrement: quantity } },
-    });
-    return row;
-  }
-
-  throw new AppError('Warehouse stock row not found for deduction', 404, 'STOCK_NOT_FOUND');
+  await deductWarehouseStockFifo(tx, variant.variant_id, warehouseId, quantity, batchNumber);
 };
 
 const addWarehouseStock = async (tx, variant, warehouseId, quantity, batchNumber, location = {}) => {
@@ -197,7 +174,7 @@ const StockTransferService = {
         success: true,
         transferred: quantity,
         ledger_id: ledger.ledger_id,
-        source_remaining: (await lockWarehouseStock(tx, variantId, fromWarehouseId, batchNumber))?.quantity ?? 0,
+        source_remaining: await getWarehouseStockAvailable(tx, variantId, fromWarehouseId, batchNumber),
         destination_new_quantity: shopRow.quantity_available,
       };
     }, TX_OPTIONS);
@@ -260,7 +237,7 @@ const StockTransferService = {
         success: true,
         transferred: quantity,
         ledger_id: ledger.ledger_id,
-        source_remaining: (await lockWarehouseStock(tx, variantId, fromWarehouseId, batchNumber))?.quantity ?? 0,
+        source_remaining: await getWarehouseStockAvailable(tx, variantId, fromWarehouseId, batchNumber),
       };
     }, TX_OPTIONS);
 

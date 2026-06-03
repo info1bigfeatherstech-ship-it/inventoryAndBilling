@@ -308,58 +308,14 @@
 
 const { AppError } = require('../../errors/AppError');
 const { createStockLedgerEntry } = require('./stockLedger.helpers');
+const {
+  normalizeBatch,
+  deductWarehouseStock,
+  assertWarehouseStockAvailable,
+} = require('../../utils/warehouseStock.utils');
 
-const normalizeBatch = (value) => (value != null ? String(value).trim() : '');
-
-/**
- * Deduct warehouse stock with FIFO (oldest expiry first)
- * Supports both: specific batch OR any batch (all batches)
- */
-const deductWarehouseStock = async (tx, variantId, warehouseId, quantity, batchNumber) => {
-  let remainingToDeduct = quantity;
-  
-  // Build where clause based on batchNumber
-  const whereClause = {
-    variant_id: variantId,
-    warehouse_id: warehouseId,
-    quantity: { gt: 0 },
-  };
-  
-  // If batch number is specified and not empty, restrict to that batch only
-  if (batchNumber && batchNumber.trim() !== '') {
-    whereClause.batch_number = batchNumber;
-  }
-  
-  // Get all eligible stocks ordered by expiry date (FIFO)
-  const stocks = await tx.productStock.findMany({
-    where: whereClause,
-    orderBy: { expiry_date: 'asc' }, // Oldest expiry first
-  });
-  
-  for (const stock of stocks) {
-    if (remainingToDeduct <= 0) break;
-    
-    const deductQty = Math.min(stock.quantity, remainingToDeduct);
-    
-    await tx.productStock.update({
-      where: { stock_id: stock.stock_id },
-      data: { quantity: { decrement: deductQty } },
-    });
-    
-    remainingToDeduct -= deductQty;
-  }
-  
-  if (remainingToDeduct > 0) {
-    const batchInfo = (batchNumber && batchNumber.trim() !== '') 
-      ? ` in batch "${batchNumber}"` 
-      : ' in warehouse';
-    throw new AppError(
-      `Insufficient warehouse stock${batchInfo}. Requested: ${quantity}, short by: ${remainingToDeduct}`,
-      409,
-      'INSUFFICIENT_STOCK'
-    );
-  }
-};
+/** @deprecated Use assertWarehouseStockAvailable — kept for existing imports */
+const validateWarehouseStock = assertWarehouseStockAvailable;
 
 const addWarehouseStock = async (tx, variant, warehouseId, quantity, batchNumber) => {
   return tx.productStock.upsert({
@@ -521,50 +477,6 @@ const reverseWhToShopDispatch = async (tx, params) => {
   const { variant, fromWarehouseId, toShopId, quantity, batchNumber } = params;
   await addWarehouseStock(tx, variant, fromWarehouseId, quantity, batchNumber);
   await decrementShopInTransit(tx, toShopId, variant.variant_id, quantity);
-};
-
-/**
- * Validate warehouse stock availability before dispatch.
- * Supports both: specific batch OR sum across all batches.
- */
-const validateWarehouseStock = async (tx, variantId, warehouseId, quantity, batchNumber) => {
-  let totalAvailable = 0;
-  
-  // If batch number is specified and not empty, check only that batch
-  if (batchNumber && batchNumber.trim() !== '') {
-    const row = await tx.productStock.findUnique({
-      where: {
-        variant_id_warehouse_id_batch_number: {
-          variant_id: variantId,
-          warehouse_id: warehouseId,
-          batch_number: batchNumber,
-        },
-      },
-    });
-    totalAvailable = row?.quantity ?? 0;
-  } else {
-    // Sum across all batches for this variant in this warehouse
-    const result = await tx.productStock.aggregate({
-      where: {
-        variant_id: variantId,
-        warehouse_id: warehouseId,
-      },
-      _sum: { quantity: true },
-    });
-    totalAvailable = result._sum.quantity ?? 0;
-  }
-  
-  if (totalAvailable < quantity) {
-    const batchInfo = (batchNumber && batchNumber.trim() !== '') 
-      ? ` in batch "${batchNumber}"` 
-      : ' in warehouse';
-    throw new AppError(
-      `Insufficient warehouse stock${batchInfo}. Available: ${totalAvailable}, requested: ${quantity}`,
-      409,
-      'INSUFFICIENT_STOCK',
-      { available: totalAvailable, requested: quantity, warehouse_id: warehouseId, variant_id: variantId }
-    );
-  }
 };
 
 module.exports = {
