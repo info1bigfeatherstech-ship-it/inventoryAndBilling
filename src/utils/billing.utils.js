@@ -16,61 +16,96 @@ const LOYALTY_DISCOUNT_PERCENT = {
   PLATINUM: 10,
 };
 
+const PRODUCT_GST_TYPES = ['CGST_SGST', 'IGST', 'EXEMPT'];
+
 const roundMoney = (value) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 
+const normalizeProductGstType = (gstType) => {
+  const t = String(gstType || 'CGST_SGST').trim().toUpperCase();
+  return PRODUCT_GST_TYPES.includes(t) ? t : 'CGST_SGST';
+};
+
+const isCgstSgstProductType = (gstType) => normalizeProductGstType(gstType) === 'CGST_SGST';
+
 /**
- * Resolve loyalty tier from lifetime spend.
- * @param {number} totalSpent
+ * Split a line's tax amount into CGST/SGST or IGST per product master gst_type.
  */
-const calculateLoyaltyTier = (totalSpent) => {
-  const spent = Number(totalSpent) || 0;
-  for (const row of LOYALTY_THRESHOLDS) {
-    if (spent >= row.min) return row.tier;
+const splitTaxByProductGstType = (taxAmount, gstType) => {
+  const tax = roundMoney(taxAmount);
+  const type = normalizeProductGstType(gstType);
+  if (tax <= 0 || type === 'EXEMPT') {
+    return { cgst: 0, sgst: 0, igst: 0 };
   }
-  return 'BRONZE';
-};
-
-/**
- * Loyalty discount percent for tier.
- * @param {string} tier
- */
-const getLoyaltyDiscountPercent = (tier) => LOYALTY_DISCOUNT_PERCENT[tier] ?? 0;
-
-/**
- * Normalize 2-digit Indian state code.
- * @param {string|null|undefined} code
- */
-const normalizeStateCode = (code) => {
-  if (code == null || code === '') return null;
-  const trimmed = String(code).trim();
-  if (!/^\d{2}$/.test(trimmed)) {
-    throw new AppError('state_code must be a 2-digit numeric code', 400, 'INVALID_STATE_CODE');
+  if (type === 'IGST') {
+    return { cgst: 0, sgst: 0, igst: tax };
   }
-  return trimmed;
+  const half = roundMoney(tax / 2);
+  return { cgst: half, sgst: roundMoney(tax - half), igst: 0 };
 };
 
 /**
- * True when shop and place of supply are in the same state (CGST+SGST), else IGST.
- * @param {string|null} shopStateCode
- * @param {string|null} placeOfSupplyCode
+ * Per-line tax split for invoice display (from product gst_type + gst_percent).
  */
-const isIntraStateSupply = (shopStateCode, placeOfSupplyCode) => {
-  const shop = normalizeStateCode(shopStateCode) || process.env.DEFAULT_SHOP_STATE_CODE || null;
-  const pos = normalizeStateCode(placeOfSupplyCode) || shop;
-  if (!shop || !pos) return true;
-  return shop === pos;
+const splitLineTaxDisplay = (taxAmount, gstPercent, gstType) => {
+  const tax = roundMoney(taxAmount);
+  const rate = Number(gstPercent) || 0;
+  const type = normalizeProductGstType(gstType);
+
+  if (type === 'IGST') {
+    return { cgst_percent: 0, sgst_percent: 0, igst_percent: rate, cgst: 0, sgst: 0, igst: tax };
+  }
+  if (type === 'EXEMPT' || tax <= 0) {
+    return { cgst_percent: 0, sgst_percent: 0, igst_percent: 0, cgst: 0, sgst: 0, igst: 0 };
+  }
+  const halfRate = roundMoney(rate / 2);
+  const halfTax = roundMoney(tax / 2);
+  return {
+    cgst_percent: halfRate,
+    sgst_percent: roundMoney(rate - halfRate),
+    igst_percent: 0,
+    cgst: halfTax,
+    sgst: roundMoney(tax - halfTax),
+    igst: 0,
+  };
 };
 
 /**
- * Calculate line amounts for a bill item.
- * @param {object} params
+ * Bill-level CGST/SGST/IGST totals from line rows (each line uses product gst_type).
+ */
+const buildTaxSummaryFromLines = (lines) => {
+  let cgst = 0;
+  let sgst = 0;
+  let igst = 0;
+
+  for (const line of lines || []) {
+    const split = splitTaxByProductGstType(line.tax_amount, line.gst_type);
+    cgst = roundMoney(cgst + split.cgst);
+    sgst = roundMoney(sgst + split.sgst);
+    igst = roundMoney(igst + split.igst);
+  }
+
+  let tax_mode = 'EXEMPT';
+  if (igst > 0 && cgst === 0 && sgst === 0) tax_mode = 'IGST';
+  else if (cgst > 0 || sgst > 0) tax_mode = 'CGST_SGST';
+
+  return {
+    tax_mode,
+    cgst,
+    sgst,
+    igst,
+    is_intra_state: tax_mode === 'CGST_SGST',
+  };
+};
+
+/**
+ * Calculate line amounts for a bill item (GST from product gst_percent + gst_type).
  */
 const calculateLineAmounts = ({
   quantity,
   unitPrice,
   gstPercent,
+  gstType,
   billType,
-  isIntraState,
   lineDiscount = 0,
 }) => {
   const qty = Number(quantity);
@@ -78,13 +113,24 @@ const calculateLineAmounts = ({
   const lineSubtotal = roundMoney(qty * price);
   const discount = roundMoney(Math.min(lineDiscount, lineSubtotal));
   const taxableAmount = roundMoney(lineSubtotal - discount);
+  const productGstType = normalizeProductGstType(gstType);
+  const isGstInvoice = billType === 'GST_INVOICE';
 
   let taxAmount = 0;
-  if (billType === 'GST_INVOICE' && taxableAmount > 0) {
+  if (
+    isGstInvoice &&
+    taxableAmount > 0 &&
+    productGstType !== 'EXEMPT' &&
+    Number(gstPercent) > 0
+  ) {
     taxAmount = roundMoney((taxableAmount * Number(gstPercent)) / 100);
   }
 
   const lineTotal = roundMoney(taxableAmount + taxAmount);
+  let tax_mode = 'EXEMPT';
+  if (isGstInvoice && taxAmount > 0) {
+    tax_mode = productGstType === 'IGST' ? 'IGST' : 'CGST_SGST';
+  }
 
   return {
     line_subtotal: lineSubtotal,
@@ -92,21 +138,23 @@ const calculateLineAmounts = ({
     taxable_amount: taxableAmount,
     tax_amount: taxAmount,
     line_total: lineTotal,
-    tax_mode: billType === 'NON_GST_INVOICE' ? 'EXEMPT' : isIntraState ? 'CGST_SGST' : 'IGST',
+    gst_type: productGstType,
+    tax_mode,
   };
 };
 
 /**
  * Apply bill-level discount (loyalty + extra %) and scale tax proportionally.
- * @param {object[]} lines - Computed line rows with tax_amount, line_subtotal, taxable_amount
- * @param {number} extraDiscountPercent - 0-100 from request
  */
 const aggregateBillTotals = (lines, extraDiscountPercent = 0, loyaltyDiscountPercent = 0) => {
   const subtotal = roundMoney(lines.reduce((sum, l) => sum + l.line_subtotal, 0));
   const lineTaxSum = roundMoney(lines.reduce((sum, l) => sum + l.tax_amount, 0));
   const lineTaxableSum = roundMoney(lines.reduce((sum, l) => sum + l.taxable_amount, 0));
 
-  const discountPercent = Math.min(100, Math.max(0, Number(extraDiscountPercent) || 0) + (Number(loyaltyDiscountPercent) || 0));
+  const discountPercent = Math.min(
+    100,
+    Math.max(0, Number(extraDiscountPercent) || 0) + (Number(loyaltyDiscountPercent) || 0)
+  );
   const discount = roundMoney((subtotal * discountPercent) / 100);
   const taxableAmount = roundMoney(Math.max(0, lineTaxableSum - discount));
 
@@ -128,23 +176,16 @@ const aggregateBillTotals = (lines, extraDiscountPercent = 0, loyaltyDiscountPer
   };
 };
 
-/**
- * Split GST for reports (intra-state → equal CGST/SGST).
- * @param {number} gstAmount
- * @param {boolean} intraState
- */
-const splitGstComponents = (gstAmount, intraState) => {
-  const tax = roundMoney(gstAmount);
-  if (!intraState) {
-    return { cgst: 0, sgst: 0, igst: tax };
+const calculateLoyaltyTier = (totalSpent) => {
+  const spent = Number(totalSpent) || 0;
+  for (const row of LOYALTY_THRESHOLDS) {
+    if (spent >= row.min) return row.tier;
   }
-  const half = roundMoney(tax / 2);
-  return { cgst: half, sgst: roundMoney(tax - half), igst: 0 };
+  return 'BRONZE';
 };
 
-/**
- * Derive payment status from amounts.
- */
+const getLoyaltyDiscountPercent = (tier) => LOYALTY_DISCOUNT_PERCENT[tier] ?? 0;
+
 const derivePaymentStatus = (totalAmount, paidAmount, isCancelled = false) => {
   if (isCancelled) return 'CANCELLED';
   const total = roundMoney(totalAmount);
@@ -154,16 +195,37 @@ const derivePaymentStatus = (totalAmount, paidAmount, isCancelled = false) => {
   return 'PARTIALLY_PAID';
 };
 
+/** @deprecated Reports only — use buildTaxSummaryFromLines for billing. */
+const splitGstComponents = (gstAmount, intraState) => {
+  const tax = roundMoney(gstAmount);
+  if (!intraState) return { cgst: 0, sgst: 0, igst: tax };
+  const half = roundMoney(tax / 2);
+  return { cgst: half, sgst: roundMoney(tax - half), igst: 0 };
+};
+
+/** @deprecated Reports only */
+const isIntraStateSupply = (shopStateCode, placeOfSupplyCode) => {
+  const shop = shopStateCode ? String(shopStateCode).trim() : null;
+  const pos = placeOfSupplyCode ? String(placeOfSupplyCode).trim() : shop;
+  if (!shop || !pos) return true;
+  return shop === pos;
+};
+
 module.exports = {
   LOYALTY_TIERS,
   LOYALTY_DISCOUNT_PERCENT,
+  PRODUCT_GST_TYPES,
   roundMoney,
+  normalizeProductGstType,
+  isCgstSgstProductType,
+  splitTaxByProductGstType,
   calculateLoyaltyTier,
   getLoyaltyDiscountPercent,
-  normalizeStateCode,
-  isIntraStateSupply,
+  splitLineTaxDisplay,
+  buildTaxSummaryFromLines,
   calculateLineAmounts,
   aggregateBillTotals,
   splitGstComponents,
+  isIntraStateSupply,
   derivePaymentStatus,
 };

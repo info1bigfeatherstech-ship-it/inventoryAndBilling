@@ -15,11 +15,11 @@ const {
 const {
   roundMoney,
   isIntraStateSupply,
+  buildTaxSummaryFromLines,
   calculateLineAmounts,
   aggregateBillTotals,
   splitGstComponents,
   derivePaymentStatus,
-  normalizeStateCode,
 } = require('../../utils/billing.utils');
 const { generateBillNumber } = require('../../utils/billNumber.utils');
 const logger = require('../../utils/logger.utils');
@@ -87,6 +87,7 @@ const BILL_SELECT = {
       unit_price: true,
       price_type: true,
       gst_percent: true,
+      gst_type: true,
       hsn_code: true,
       line_subtotal: true,
       discount: true,
@@ -187,14 +188,11 @@ const BillingService = {
       }
 
       const billType = data.bill_type || 'GST_INVOICE';
-      const placeOfSupply =
-        data.place_of_supply_state_code != null
-          ? normalizeStateCode(data.place_of_supply_state_code)
-          : customer?.state_code
-            ? normalizeStateCode(customer.state_code)
-            : shop.state_code;
 
-      const intraState = isIntraStateSupply(shop.state_code, placeOfSupply);
+      const customerGstin =
+        data.customer_gstin?.trim() ||
+        customer?.gst_number?.trim() ||
+        null;
       const loyaltyDiscountPercent = customer
         ? await CustomerService.getCustomerDiscountPercent(customer.customer_id)
         : 0;
@@ -215,8 +213,8 @@ const BillingService = {
           quantity: qty,
           unitPrice,
           gstPercent: variant.product.gst_percent,
+          gstType: variant.product.gst_type,
           billType,
-          isIntraState: intraState,
           lineDiscount: Number(item.discount) || 0,
         });
 
@@ -227,6 +225,7 @@ const BillingService = {
           unit_price: unitPrice,
           price_type: item.price_type || 'SPECIAL',
           gst_percent: variant.product.gst_percent,
+          gst_type: amounts.gst_type,
           hsn_code: variant.product.hsn_code,
           product_name: variant.product.name,
           low_stock_threshold: variant.low_stock_threshold,
@@ -259,8 +258,8 @@ const BillingService = {
             bill_type: billType,
             customer_mobile: customer?.mobile ?? data.customer_mobile?.trim() ?? null,
             customer_name: customer?.name ?? data.customer_name?.trim() ?? null,
-            customer_gstin: customer?.gst_number ?? data.customer_gstin?.trim() ?? null,
-            place_of_supply_state_code: placeOfSupply,
+            customer_gstin: customerGstin,
+            place_of_supply_state_code: null,
             subtotal: totals.subtotal,
             discount: totals.discount,
             taxable_amount: totals.taxable_amount,
@@ -282,6 +281,7 @@ const BillingService = {
                 unit_price: line.unit_price,
                 price_type: line.price_type,
                 gst_percent: line.gst_percent,
+                gst_type: line.gst_type,
                 hsn_code: line.hsn_code,
                 line_subtotal: line.line_subtotal,
                 discount: line.discount,
@@ -372,10 +372,25 @@ const BillingService = {
           });
         }
 
+        const lineTaxSum = roundMoney(
+          computedLines.reduce((sum, l) => sum + l.tax_amount, 0)
+        );
+        const taxScale =
+          lineTaxSum > 0 ? billAfterCredit.gst_amount / lineTaxSum : 0;
+        const summaryLines = computedLines.map((line) => ({
+          gst_type: line.gst_type,
+          tax_amount: roundMoney(line.tax_amount * taxScale),
+        }));
+        const taxSummary =
+          billType === 'GST_INVOICE'
+            ? buildTaxSummaryFromLines(summaryLines)
+            : { tax_mode: 'EXEMPT', is_intra_state: true, cgst: 0, sgst: 0, igst: 0 };
+
         return {
           ...billAfterCredit,
           credit_applied: creditApplied,
           credit_notes_applied: creditAllocations,
+          tax_summary: taxSummary,
         };
       }, TX_OPTIONS);
 
@@ -399,7 +414,11 @@ const BillingService = {
     const bill = await prisma.bill.findUnique({ where: { bill_id: billId }, select: BILL_SELECT });
     if (!bill) throw new AppError('Bill not found', 404, 'BILL_NOT_FOUND');
     await assertBillReadAccess(bill.shop_id, user);
-    return bill;
+    const tax_summary =
+      bill.bill_type === 'GST_INVOICE'
+        ? buildTaxSummaryFromLines(bill.items)
+        : { tax_mode: 'EXEMPT', is_intra_state: true, cgst: 0, sgst: 0, igst: 0 };
+    return { ...bill, tax_summary };
   },
 
   async listBills(filters, user) {

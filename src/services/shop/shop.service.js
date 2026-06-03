@@ -2,7 +2,18 @@ const prisma = require('../../utils/prisma.utils');
 const { AppError } = require('../../middlewares/error.middleware');
 const { parsePagination } = require('../../utils/pagination.utils');
 const { assertShopReadAccess, applyShopListScope } = require('../../utils/shopAccess.utils');
+const { normalizeStateCode } = require('../../utils/billing.utils');
+const { isValidStateCode } = require('../../constants/indianStateCodes');
 const logger = require('../../utils/logger.utils');
+
+const parseShopStateCode = (value) => {
+  if (value == null || String(value).trim() === '') return null;
+  const code = normalizeStateCode(value);
+  if (!isValidStateCode(code)) {
+    throw new AppError('state_code must be a valid 2-digit GST state code', 400, 'INVALID_STATE_CODE');
+  }
+  return code;
+};
 
 const SHOP_SELECT = {
   shop_id: true,
@@ -10,6 +21,7 @@ const SHOP_SELECT = {
   shop_name: true,
   address: true,
   city: true,
+  state_code: true,
   phone: true,
   email: true,
   owner_user_id: true,
@@ -120,6 +132,10 @@ const ShopService = {
         shop_name: String(data.shop_name).trim(),
         address: String(data.address).trim(),
         city: String(data.city).trim(),
+        state_code:
+          data.state_code != null && String(data.state_code).trim() !== ''
+            ? parseShopStateCode(data.state_code)
+            : null,
         phone: String(data.phone).trim(),
         email: data.email ? String(data.email).trim().toLowerCase() : null,
         owner_user_id: ownerUserId,  // ⭐ ADD THIS
@@ -220,10 +236,12 @@ const ShopService = {
   
     const payload = {};
     // ⭐ ADD 'owner_user_id' and 'sales_channels' to allowed fields
-    const allowed = ['shop_name', 'address', 'city', 'phone', 'email', 'is_active', 'remarks', 'owner_user_id', 'sales_channels'];
+    const allowed = ['shop_name', 'address', 'city', 'state_code', 'phone', 'email', 'is_active', 'remarks', 'owner_user_id', 'sales_channels'];
   
     for (const key of allowed) {
-      if (Object.prototype.hasOwnProperty.call(data, key)) payload[key] = data[key];
+      if (Object.prototype.hasOwnProperty.call(data, key)) {
+        payload[key] = key === 'state_code' ? parseShopStateCode(data.state_code) : data[key];
+      }
     }
   
     if (payload.shop_code !== undefined) {

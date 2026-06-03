@@ -725,6 +725,7 @@ model BillLineItem {
   unit_price Float
 
   gst_percent    Float
+  gst_type       GSTType @default(CGST_SGST)
   hsn_code       String
   line_subtotal  Float
   discount       Float @default(0)

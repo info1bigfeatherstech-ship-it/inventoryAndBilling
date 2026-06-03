@@ -26,7 +26,17 @@ const SHOP_STOCK_SELECT = {
       purchase_price: true,
       expenses: true,
       purchase_code: true,
-      product: { select: { product_id: true, product_code: true, name: true, warehouse_id: true } },
+      product: {
+        select: {
+          product_id: true,
+          product_code: true,
+          name: true,
+          warehouse_id: true,
+          hsn_code: true,
+          gst_percent: true,
+          gst_type: true,
+        },
+      },
     },
   },
   shop: { select: { shop_id: true, shop_code: true, shop_name: true, is_active: true } },

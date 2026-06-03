@@ -18,6 +18,10 @@ const createShopValidator = [
   body('shop_name').isString().trim().isLength({ min: 2, max: 100 }),
   body('address').isString().trim().isLength({ min: 2, max: 300 }),
   body('city').isString().trim().isLength({ min: 2, max: 50 }),
+  body('state_code')
+    .optional({ nullable: true })
+    .matches(/^\d{2}$/)
+    .withMessage('state_code must be 2 digits (e.g. 27 for Maharashtra)'),
   body('phone').isString().trim().matches(/^[0-9]{10}$/).withMessage('phone must be a 10-digit number'),
   body('email').optional({ nullable: true }).isEmail(),
   body('owner_user_id')
@@ -42,6 +46,7 @@ const updateShopValidator = [
   body('shop_name').optional().isString().trim().isLength({ min: 2, max: 100 }),
   body('address').optional().isString().trim().isLength({ min: 2, max: 300 }),
   body('city').optional().isString().trim().isLength({ min: 2, max: 50 }),
+  body('state_code').optional({ nullable: true }).matches(/^\d{2}$/),
   body('phone').optional().isString().trim().matches(/^[0-9]{10}$/),
   body('email').optional({ nullable: true }).isEmail(),
   body('is_active').optional().isBoolean().toBoolean(),
