@@ -321,6 +321,7 @@ const BillingService = {
         });
 
         let creditApplied = 0;
+        let creditAllocations = [];
         if (creditNoteIds.length) {
           const redemption = await CreditNoteService.applyCreditNotesOnBill(tx, {
             creditNoteIds,
@@ -328,9 +329,11 @@ const BillingService = {
             billId: bill.bill_id,
             billTotal: totals.total_amount,
             customerId: customer?.customer_id ?? null,
+            customerMobile: customer?.mobile ?? data.customer_mobile?.trim() ?? null,
             userId: user.userId,
           });
           creditApplied = redemption.creditApplied;
+          creditAllocations = redemption.allocations ?? [];
         }
 
         const finalTotal = roundMoney(Math.max(0, totals.total_amount - creditApplied));
@@ -398,6 +401,7 @@ const BillingService = {
         return {
           ...billAfterCredit,
           credit_applied: creditApplied,
+          credit_notes_applied: creditAllocations,
         };
       }, TX_OPTIONS);
 

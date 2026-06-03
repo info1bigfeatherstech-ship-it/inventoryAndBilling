@@ -21,10 +21,18 @@ const listCreditNotesValidator = [
   query('page').optional().isInt({ min: 1 }),
   query('limit').optional().isInt({ min: 1, max: 100 }),
   query('shop_id').optional().isString().trim(),
+  query('redeemable_at_shop').optional().isString().trim(),
   query('status').optional().isIn(CN_STATUSES),
   query('customer_id').optional().isString().trim(),
   query('customer_mobile').optional().isString().trim(),
   query('original_bill_id').optional().isString().trim(),
+  query('credit_note_number').optional().isString().trim(),
+];
+
+const lookupCreditNoteValidator = [
+  query('credit_note_number').isString().trim().notEmpty(),
+  query('redeeming_shop_id').optional().isString().trim(),
+  query('shop_id').optional().isString().trim(),
 ];
 
 const redeemCreditNoteValidator = [
@@ -50,6 +58,7 @@ module.exports = {
   creditNoteIdParam,
   createCreditNoteValidator,
   listCreditNotesValidator,
+  lookupCreditNoteValidator,
   redeemCreditNoteValidator,
   refundCreditNoteValidator,
   cancelCreditNoteValidator,

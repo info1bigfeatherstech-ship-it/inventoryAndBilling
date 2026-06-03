@@ -10,6 +10,7 @@ const {
   createBulkValidator,
   listBulkValidator,
   approveBulkValidator,
+  rejectBulkValidator,
   dispatchBulkValidator,
   receiveBulkValidator,
   cancelBulkValidator,
@@ -17,7 +18,7 @@ const {
 
 const READ_ROLES = ['SUPER_ADMIN', 'SHOP_OWNER', 'WH_MANAGER', 'WH_STOCK_LISTER', 'SHOP_STOCK_LISTER'];
 const CREATE_ROLES = ['SUPER_ADMIN', 'SHOP_OWNER', 'WH_MANAGER', 'WH_STOCK_LISTER'];
-const APPROVE_ROLES = ['SUPER_ADMIN', 'WH_MANAGER'];
+const APPROVE_ROLES = ['SUPER_ADMIN', 'WH_MANAGER', 'WH_STOCK_LISTER'];
 const DISPATCH_ROLES = ['SUPER_ADMIN', 'WH_MANAGER', 'WH_STOCK_LISTER'];
 const RECEIVE_ROLES = ['SUPER_ADMIN', 'SHOP_OWNER', 'WH_MANAGER', 'WH_STOCK_LISTER'];
 
@@ -57,6 +58,15 @@ router.patch(
   approveBulkValidator,
   validateRequest,
   BulkTransferController.approve
+);
+
+router.patch(
+  '/:bulkRequestId/reject',
+  authorizeRoles(...APPROVE_ROLES),
+  idem24h,
+  rejectBulkValidator,
+  validateRequest,
+  BulkTransferController.reject
 );
 
 router.patch(

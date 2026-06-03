@@ -9,6 +9,7 @@ const {
   creditNoteIdParam,
   createCreditNoteValidator,
   listCreditNotesValidator,
+  lookupCreditNoteValidator,
   redeemCreditNoteValidator,
   refundCreditNoteValidator,
   cancelCreditNoteValidator,
@@ -44,6 +45,14 @@ router.get(
   listCreditNotesValidator,
   validateRequest,
   CreditNoteController.list
+);
+
+router.get(
+  '/lookup',
+  authorizeRoles(...READ_ROLES),
+  lookupCreditNoteValidator,
+  validateRequest,
+  CreditNoteController.lookup
 );
 
 router.get(

@@ -317,7 +317,12 @@ const BulkTransferService = {
 
     if (filters.status) where.status = filters.status;
     if (filters.to_shop_id) where.to_shop_id = filters.to_shop_id;
-    if (filters.to_warehouse_id) where.to_warehouse_id = filters.to_warehouse_id;
+    // WH staff already scoped by OR (from/to); extra to_warehouse_id would hide outgoing approve queue
+    const isWhStaff = ['WH_MANAGER', 'WH_STOCK_LISTER'].includes(user.role);
+    if (filters.to_warehouse_id && !isWhStaff) where.to_warehouse_id = filters.to_warehouse_id;
+    if (filters.from_warehouse_id && isWhStaff && user.warehouseId) {
+      where.from_warehouse_id = filters.from_warehouse_id;
+    }
 
     const [total, rows] = await Promise.all([
       prisma.bulkTransferRequest.count({ where }),
@@ -332,7 +337,6 @@ const BulkTransferService = {
           request_type: true,
           status: true,
           requested_at: true,
-          request_type: true,
           from_warehouse: { select: { warehouse_id: true, warehouse_name: true } },
           to_shop: { select: { shop_id: true, shop_name: true } },
           to_warehouse: { select: { warehouse_id: true, warehouse_name: true } },
@@ -345,8 +349,11 @@ const BulkTransferService = {
       bulk_request_id: row.bulk_request_id,
       bulk_request_number: row.bulk_request_number,
       request_type: row.request_type,
+      from_warehouse_id: row.from_warehouse?.warehouse_id ?? null,
       from_warehouse: row.from_warehouse,
+      to_shop_id: row.to_shop?.shop_id ?? null,
       to_shop: row.to_shop,
+      to_warehouse_id: row.to_warehouse?.warehouse_id ?? null,
       to_warehouse: row.to_warehouse,
       status: row.status,
       items_count: row.items.length,
@@ -369,8 +376,8 @@ const BulkTransferService = {
 
   async approveBulkRequest(bulkRequestId, data, user) {
     try {
-      if (!['SUPER_ADMIN', 'WH_MANAGER'].includes(user.role)) {
-        throw new AppError('Only warehouse managers can approve bulk requests', 403, 'FORBIDDEN');
+      if (!['SUPER_ADMIN', 'WH_MANAGER', 'WH_STOCK_LISTER'].includes(user.role)) {
+        throw new AppError('Only warehouse staff can approve bulk requests', 403, 'FORBIDDEN');
       }
 
       const bulk = await prisma.bulkTransferRequest.findUnique({
@@ -381,8 +388,11 @@ const BulkTransferService = {
       if (bulk.status !== 'REQUESTED') {
         throw new AppError('Only REQUESTED bulk requests can be approved', 409, 'INVALID_TRANSFER_STATUS');
       }
-      if (user.role === 'WH_MANAGER' && user.warehouseId !== bulk.from_warehouse_id) {
-        throw new AppError('Only source warehouse manager can approve', 403, 'WAREHOUSE_FORBIDDEN');
+      if (
+        ['WH_MANAGER', 'WH_STOCK_LISTER'].includes(user.role) &&
+        user.warehouseId !== bulk.from_warehouse_id
+      ) {
+        throw new AppError('Only source warehouse staff can approve', 403, 'WAREHOUSE_FORBIDDEN');
       }
 
       const approvalItems = Array.isArray(data.items) ? data.items : null;
@@ -442,6 +452,62 @@ const BulkTransferService = {
       return updated;
     } catch (err) {
       logger.error('approveBulkRequest failed', { bulkRequestId, error: err.message, stack: err.stack });
+      throw err;
+    }
+  },
+
+  async rejectBulkRequest(bulkRequestId, data, user) {
+    try {
+      if (!['SUPER_ADMIN', 'WH_MANAGER', 'WH_STOCK_LISTER'].includes(user.role)) {
+        throw new AppError('Only warehouse staff can reject bulk requests', 403, 'FORBIDDEN');
+      }
+
+      const bulk = await prisma.bulkTransferRequest.findUnique({
+        where: { bulk_request_id: bulkRequestId },
+        include: { items: true },
+      });
+      if (!bulk) throw new AppError('Bulk transfer request not found', 404, 'BULK_REQUEST_NOT_FOUND');
+      if (bulk.status !== 'REQUESTED') {
+        throw new AppError('Only REQUESTED bulk requests can be rejected', 409, 'INVALID_TRANSFER_STATUS');
+      }
+      if (
+        ['WH_MANAGER', 'WH_STOCK_LISTER'].includes(user.role) &&
+        user.warehouseId !== bulk.from_warehouse_id
+      ) {
+        throw new AppError('Only source warehouse staff can reject', 403, 'WAREHOUSE_FORBIDDEN');
+      }
+
+      const reason = data.rejection_reason?.trim() || data.reject_reason?.trim();
+      if (!reason) {
+        throw new AppError('Rejection reason is required', 400, 'REJECTION_REASON_REQUIRED');
+      }
+
+      const updated = await prisma.$transaction(async (tx) => {
+        await tx.bulkTransferRequestItem.updateMany({
+          where: { bulk_request_id: bulkRequestId },
+          data: {
+            is_approved: false,
+            approved_quantity: 0,
+            rejection_reason: reason,
+          },
+        });
+
+        return tx.bulkTransferRequest.update({
+          where: { bulk_request_id: bulkRequestId },
+          data: {
+            status: 'REJECTED',
+            approved_by: user.userId,
+            approved_at: new Date(),
+            rejection_reason: reason,
+          },
+          select: BULK_SELECT,
+        });
+      }, TX_OPTIONS);
+
+      logger.info('Bulk transfer rejected', { bulk_request_id: bulkRequestId, user_id: user.userId });
+      return updated;
+    } catch (err) {
+      logger.error('rejectBulkRequest failed', { bulkRequestId, error: err.message, stack: err.stack });
       throw err;
     }
   },

@@ -46,6 +46,15 @@ const BulkTransferController = {
     });
   }),
 
+  reject: asyncHandler(async (req, res) => {
+    const data = await BulkTransferService.rejectBulkRequest(req.params.bulkRequestId, req.body, req.user);
+    return successResponse(res, req, {
+      statusCode: 200,
+      message: 'Bulk transfer request rejected successfully',
+      data,
+    });
+  }),
+
   dispatch: asyncHandler(async (req, res) => {
     const data = await BulkTransferService.dispatchBulkRequest(req.params.bulkRequestId, req.body, req.user);
     return successResponse(res, req, {

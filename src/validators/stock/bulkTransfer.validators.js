@@ -20,6 +20,7 @@ const listBulkValidator = [
   query('status').optional().isString().trim(),
   query('to_shop_id').optional().isString().trim(),
   query('to_warehouse_id').optional().isString().trim(),
+  query('from_warehouse_id').optional().isString().trim(),
 ];
 
 const approveBulkValidator = [
@@ -51,11 +52,17 @@ const cancelBulkValidator = [
   body('cancel_reason').optional().isString().trim().isLength({ max: 500 }),
 ];
 
+const rejectBulkValidator = [
+  ...bulkRequestIdParam,
+  body('rejection_reason').isString().trim().isLength({ min: 1, max: 500 }),
+];
+
 module.exports = {
   bulkRequestIdParam,
   createBulkValidator,
   listBulkValidator,
   approveBulkValidator,
+  rejectBulkValidator,
   dispatchBulkValidator,
   receiveBulkValidator,
   cancelBulkValidator,

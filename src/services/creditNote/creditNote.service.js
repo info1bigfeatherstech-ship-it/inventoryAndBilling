@@ -6,10 +6,15 @@ const ShopStockService = require('../shop/shopStock.service');
 const CustomerService = require('../customer/customer.service');
 const {
   resolveBillingShopId,
-  assertBillReadAccess,
   assertBillWriteAccess,
   applyBillListScope,
 } = require('../../utils/billAccess.utils');
+const {
+  assertShopActive,
+  assertCreditNoteLookupAccess,
+  assertCreditNoteRedeemable,
+  REDEEMABLE_STATUSES,
+} = require('../../utils/creditNoteAccess.utils');
 const {
   roundMoney,
   isIntraStateSupply,
@@ -51,6 +56,19 @@ const CREDIT_NOTE_SELECT = {
   original_bill: { select: { bill_id: true, bill_number: true, bill_type: true, is_cancelled: true } },
   redeemed_against_bill: { select: { bill_id: true, bill_number: true } },
   shop: { select: { shop_id: true, shop_name: true, shop_code: true } },
+  redeemed_at_shop: { select: { shop_id: true, shop_name: true, shop_code: true } },
+  redemptions: {
+    orderBy: { redeemed_at: 'desc' },
+    select: {
+      redemption_id: true,
+      amount: true,
+      redeemed_at: true,
+      redeemed_at_shop_id: true,
+      against_bill_id: true,
+      redeemed_at_shop: { select: { shop_id: true, shop_name: true } },
+      against_bill: { select: { bill_id: true, bill_number: true } },
+    },
+  },
   lines: {
     select: {
       line_id: true,
@@ -105,15 +123,52 @@ const getReturnedQuantitiesForBill = async (billId, tx = prisma) => {
   return map;
 };
 
+const recordCreditNoteRedemption = async (
+  tx,
+  { creditNoteId, amount, redeemingShopId, billId, userId }
+) => {
+  await tx.creditNoteRedemption.create({
+    data: {
+      credit_note_id: creditNoteId,
+      amount,
+      redeemed_at_shop_id: redeemingShopId,
+      against_bill_id: billId ?? null,
+      redeemed_by_user_id: userId,
+    },
+  });
+};
+
+const formatCreditNoteResponse = (cn) => ({
+  ...cn,
+  balance: getCreditNoteBalance(cn),
+  last_redemption: cn.redemptions?.[0]
+    ? {
+        amount: cn.redemptions[0].amount,
+        redeemed_at: cn.redemptions[0].redeemed_at,
+        shop_name: cn.redemptions[0].redeemed_at_shop?.shop_name,
+        bill_number: cn.redemptions[0].against_bill?.bill_number,
+      }
+    : cn.redeemed_at
+      ? {
+          amount: null,
+          redeemed_at: cn.redeemed_at,
+          shop_name: cn.redeemed_at_shop?.shop_name,
+          bill_number: cn.redeemed_against_bill?.bill_number,
+        }
+      : null,
+});
+
 /**
- * Apply credit notes to a new bill inside a transaction.
+ * Apply credit notes to a new bill inside a transaction (org-wide pool; redeeming shop may differ from origin).
  * @returns {{ creditApplied: number, allocations: Array }}
  */
 const applyCreditNotesOnBill = async (
   tx,
-  { creditNoteIds, shopId, billId, billTotal, customerId, userId }
+  { creditNoteIds, shopId, billId, billTotal, customerId, customerMobile, userId }
 ) => {
   if (!creditNoteIds?.length) return { creditApplied: 0, allocations: [] };
+
+  await assertShopActive(shopId);
 
   const uniqueIds = [...new Set(creditNoteIds)];
   let remainingBill = roundMoney(billTotal);
@@ -125,20 +180,8 @@ const applyCreditNotesOnBill = async (
 
     const locked = await tx.creditNote.findUnique({ where: { credit_note_id: creditNoteId } });
     if (!locked) throw new AppError(`Credit note not found: ${creditNoteId}`, 404, 'CREDIT_NOTE_NOT_FOUND');
-    if (locked.shop_id !== shopId) {
-      throw new AppError('Credit note belongs to a different shop', 409, 'CREDIT_NOTE_SHOP_MISMATCH');
-    }
-    if (!['ACTIVE', 'PARTIALLY_REDEEMED'].includes(locked.status)) {
-      throw new AppError(
-        `Credit note ${locked.credit_note_number} is not available for redemption`,
-        409,
-        'CREDIT_NOTE_NOT_ACTIVE',
-        { credit_note_id: creditNoteId, status: locked.status }
-      );
-    }
-    if (customerId && locked.customer_id && locked.customer_id !== customerId) {
-      throw new AppError('Credit note customer does not match bill customer', 409, 'CREDIT_NOTE_CUSTOMER_MISMATCH');
-    }
+
+    assertCreditNoteRedeemable(locked, { customerId, customerMobile });
 
     const balance = getCreditNoteBalance(locked);
     if (balance <= 0) continue;
@@ -161,7 +204,20 @@ const applyCreditNotesOnBill = async (
       },
     });
 
-    allocations.push({ credit_note_id: creditNoteId, amount: applyAmount });
+    await recordCreditNoteRedemption(tx, {
+      creditNoteId,
+      amount: applyAmount,
+      redeemingShopId: shopId,
+      billId,
+      userId,
+    });
+
+    allocations.push({
+      credit_note_id: creditNoteId,
+      credit_note_number: locked.credit_note_number,
+      amount: applyAmount,
+      origin_shop_id: locked.shop_id,
+    });
     totalApplied = roundMoney(totalApplied + applyAmount);
     remainingBill = roundMoney(remainingBill - applyAmount);
   }
@@ -370,18 +426,39 @@ const CreditNoteService = {
 
   async listCreditNotes(filters, user) {
     const { page, limit, skip, take } = parsePagination(filters, { page: 1, limit: 20, maxLimit: 100 });
-    const where = await applyBillListScope({}, user);
+    const where = {};
+    const crossShop =
+      !!(filters.customer_id || filters.customer_mobile || filters.redeemable_at_shop);
 
-    if (filters.shop_id) {
-      const shopId = await resolveBillingShopId(user, filters.shop_id);
-      where.shop_id = shopId;
+    if (crossShop) {
+      const redeemingShopId = await assertCreditNoteLookupAccess(
+        user,
+        filters.redeemable_at_shop || filters.shop_id
+      );
+      if (redeemingShopId) filters._redeemingShopId = redeemingShopId;
+    } else {
+      Object.assign(where, await applyBillListScope({}, user));
+      if (filters.shop_id) {
+        where.shop_id = await resolveBillingShopId(user, filters.shop_id);
+      }
     }
-    if (filters.status) where.status = filters.status;
+
+    if (filters.status) {
+      where.status = filters.status;
+    } else if (crossShop) {
+      where.status = { in: [...REDEEMABLE_STATUSES] };
+    }
     if (filters.customer_id) where.customer_id = filters.customer_id;
     if (filters.customer_mobile) {
       where.customer_mobile = { contains: String(filters.customer_mobile).trim() };
     }
     if (filters.original_bill_id) where.original_bill_id = filters.original_bill_id;
+    if (filters.credit_note_number) {
+      where.credit_note_number = {
+        contains: String(filters.credit_note_number).trim(),
+        mode: 'insensitive',
+      };
+    }
 
     const [total, creditNotes] = await Promise.all([
       prisma.creditNote.count({ where }),
@@ -394,22 +471,47 @@ const CreditNoteService = {
       }),
     ]);
 
-    const data = creditNotes.map((cn) => ({
-      ...cn,
-      balance: getCreditNoteBalance(cn),
-    }));
+    const data = creditNotes.map((cn) => formatCreditNoteResponse(cn));
 
     return { total, page, limit, creditNotes: data };
   },
 
-  async getCreditNoteById(creditNoteId, user) {
+  /**
+   * Look up a credit note by number for use at any shop counter (org-wide pool).
+   */
+  async lookupCreditNoteByNumber(filters, user) {
+    const number = String(filters.credit_note_number || '').trim();
+    if (!number) {
+      throw new AppError('credit_note_number is required', 400, 'CREDIT_NOTE_NUMBER_REQUIRED');
+    }
+
+    await assertCreditNoteLookupAccess(user, filters.redeeming_shop_id || filters.shop_id);
+
+    const cn = await prisma.creditNote.findFirst({
+      where: { credit_note_number: { equals: number, mode: 'insensitive' } },
+      select: CREDIT_NOTE_SELECT,
+    });
+
+    if (!cn) throw new AppError('Credit note not found', 404, 'CREDIT_NOTE_NOT_FOUND');
+
+    const balance = getCreditNoteBalance(cn);
+    const redeemable = REDEEMABLE_STATUSES.has(cn.status) && balance > 0;
+
+    return {
+      ...formatCreditNoteResponse(cn),
+      redeemable,
+      origin_shop: cn.shop,
+    };
+  },
+
+  async getCreditNoteById(creditNoteId, user, options = {}) {
     const cn = await prisma.creditNote.findUnique({
       where: { credit_note_id: creditNoteId },
       select: CREDIT_NOTE_SELECT,
     });
     if (!cn) throw new AppError('Credit note not found', 404, 'CREDIT_NOTE_NOT_FOUND');
-    await assertBillReadAccess(cn.shop_id, user);
-    return { ...cn, balance: getCreditNoteBalance(cn) };
+    await assertCreditNoteLookupAccess(user, options.redeeming_shop_id);
+    return formatCreditNoteResponse(cn);
   },
 
   /**
@@ -419,17 +521,27 @@ const CreditNoteService = {
     try {
       const cn = await prisma.creditNote.findUnique({ where: { credit_note_id: creditNoteId } });
       if (!cn) throw new AppError('Credit note not found', 404, 'CREDIT_NOTE_NOT_FOUND');
-      await assertBillWriteAccess(cn.shop_id, user);
 
       const againstBill = await prisma.bill.findUnique({
         where: { bill_id: data.against_bill_id },
-        select: { bill_id: true, shop_id: true, customer_id: true, is_cancelled: true, total_amount: true, balance_amount: true },
+        select: {
+          bill_id: true,
+          shop_id: true,
+          customer_id: true,
+          customer_mobile: true,
+          is_cancelled: true,
+          total_amount: true,
+          balance_amount: true,
+        },
       });
       if (!againstBill) throw new AppError('Bill not found', 404, 'BILL_NOT_FOUND');
+      await assertBillWriteAccess(againstBill.shop_id, user);
       if (againstBill.is_cancelled) throw new AppError('Cannot redeem against a cancelled bill', 409, 'BILL_CANCELLED');
-      if (againstBill.shop_id !== cn.shop_id) {
-        throw new AppError('Bill and credit note must be from the same shop', 409, 'SHOP_MISMATCH');
-      }
+
+      assertCreditNoteRedeemable(cn, {
+        customerId: againstBill.customer_id,
+        customerMobile: againstBill.customer_mobile,
+      });
 
       const redeemAmount = roundMoney(data.redeemed_amount);
       if (redeemAmount <= 0) {
@@ -476,6 +588,14 @@ const CreditNoteService = {
           select: CREDIT_NOTE_SELECT,
         });
 
+        await recordCreditNoteRedemption(tx, {
+          creditNoteId,
+          amount: redeemAmount,
+          redeemingShopId: againstBill.shop_id,
+          billId: againstBill.bill_id,
+          userId: user.userId,
+        });
+
         const newBillBalance = roundMoney(Math.max(0, billPayable - redeemAmount));
         const newPaid = roundMoney(againstBill.total_amount - newBillBalance);
         await tx.bill.update({
@@ -491,7 +611,7 @@ const CreditNoteService = {
       }, TX_OPTIONS);
 
       logger.info('Credit note redeemed', { credit_note_id: creditNoteId, redeemed_amount: redeemAmount });
-      return { ...updated, balance: getCreditNoteBalance(updated) };
+      return formatCreditNoteResponse(updated);
     } catch (err) {
       logger.error('redeemCreditNote failed', { creditNoteId, error: err.message, stack: err.stack });
       throw err;
@@ -558,7 +678,7 @@ const CreditNoteService = {
         method: data.refund_method,
       });
 
-      return { ...updated, balance: getCreditNoteBalance(updated) };
+      return formatCreditNoteResponse(updated);
     } catch (err) {
       logger.error('refundCreditNote failed', { creditNoteId, error: err.message, stack: err.stack });
       throw err;

@@ -228,6 +228,7 @@ model Shop {
   credit_notes_issued_here CreditNote[] @relation("CreditNoteReturnShop")
   /// Credit notes redeemed against a new sale at this shop.
   credit_notes_redeemed_here CreditNote[] @relation("CreditNoteRedeemedAtShop")
+  credit_note_redemptions    CreditNoteRedemption[] @relation("CreditNoteRedemptionShop")
 
   stock_ledger_from StockLedger[] @relation("LedgerFromShop")
   stock_ledger_to   StockLedger[] @relation("LedgerToShop")
@@ -699,6 +700,7 @@ model Bill {
   payments     BillPayment[]
   credit_notes_from          CreditNote[] @relation("CreditNoteOriginalBill")
   credit_notes_redeemed_here CreditNote[] @relation("CreditNoteRedeemedOnBill")
+  credit_note_redemptions    CreditNoteRedemption[] @relation("BillCreditNoteRedemptions")
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
@@ -801,7 +803,8 @@ model CreditNote {
   created_by     User    @relation("CreditNoteCreatedBy", fields: [created_by_user_id], references: [user_id])
   refunded_by    User?   @relation("CreditNoteRefundedBy", fields: [refunded_by_user_id], references: [user_id], onDelete: SetNull)
 
-  lines CreditNoteLineItem[]
+  lines        CreditNoteLineItem[]
+  redemptions  CreditNoteRedemption[]
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
@@ -809,6 +812,26 @@ model CreditNote {
   @@index([shop_id, status])
   @@index([customer_mobile])
   @@map("credit_notes")
+}
+
+/// Per-use ledger when a credit note is applied (supports cross-shop partial redemptions).
+model CreditNoteRedemption {
+  redemption_id       String   @id @default(cuid())
+  credit_note_id      String
+  amount              Float
+  redeemed_at_shop_id String
+  against_bill_id     String?
+  redeemed_by_user_id String
+  redeemed_at         DateTime @default(now())
+
+  credit_note      CreditNote @relation(fields: [credit_note_id], references: [credit_note_id], onDelete: Cascade)
+  redeemed_at_shop Shop       @relation("CreditNoteRedemptionShop", fields: [redeemed_at_shop_id], references: [shop_id], onDelete: Restrict)
+  against_bill     Bill?      @relation("BillCreditNoteRedemptions", fields: [against_bill_id], references: [bill_id], onDelete: SetNull)
+  redeemed_by      User       @relation("CreditNoteRedemptionBy", fields: [redeemed_by_user_id], references: [user_id])
+
+  @@index([credit_note_id, redeemed_at])
+  @@index([redeemed_at_shop_id])
+  @@map("credit_note_redemptions")
 }
 
 model CreditNoteLineItem {
@@ -858,6 +881,7 @@ model User {
   bill_payments_collected   BillPayment[]   @relation("BillPaymentCollector")
   credit_notes_created      CreditNote[]    @relation("CreditNoteCreatedBy")
   credit_notes_refunded     CreditNote[]    @relation("CreditNoteRefundedBy")
+  credit_note_redemptions   CreditNoteRedemption[] @relation("CreditNoteRedemptionBy")
   refresh_tokens            RefreshToken[]
   inward_receipts_created   InwardReceipt[] @relation("InwardCreatedBy")
   inward_receipts_received  InwardReceipt[] @relation("InwardReceivedBy")
