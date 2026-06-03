@@ -256,6 +256,7 @@ const PRODUCT_LIST_SELECT = {
       system_barcode: true,
       attributes: true,
       ...PRODUCT_PRICE_SELECT,
+      purchase_code: true,
       weight: true,
       length: true,
       width: true,
@@ -317,6 +318,13 @@ const parseVariantSerial = (variantCode, baseProductCode) => {
 const resolvePurchasePriceInput = (obj) => {
   if (priceFieldPresent(obj, 'purchase_price')) return Number(obj.purchase_price);
   if (priceFieldPresent(obj, 'purchase_cost')) return Number(obj.purchase_cost);
+  if (priceFieldPresent(obj, 'wholesale_price')) return Number(obj.wholesale_price);
+  return null;
+};
+
+const resolveSpecialPriceInput = (obj) => {
+  if (priceFieldPresent(obj, 'special_price')) return Number(obj.special_price);
+  if (priceFieldPresent(obj, 'retail_price')) return Number(obj.retail_price);
   return null;
 };
 
@@ -374,7 +382,7 @@ const buildCsvVariantPrices = (row, rowNumber) => {
   const indexLabel = `Row ${rowNumber}`;
   const prices = {
     mrp: priceFieldPresent(row, 'mrp') ? Number(row.mrp) : 0,
-    special_price: priceFieldPresent(row, 'special_price') ? Number(row.special_price) : 0,
+    special_price: resolveSpecialPriceInput(row) ?? 0,
     purchase_price: resolvePurchasePriceInput(row) ?? 0,
     expenses: priceFieldPresent(row, 'expenses') ? Number(row.expenses) : 0,
   };
@@ -1038,6 +1046,25 @@ const createBulkVariant = async ({ productId, variantData, warehouseId, productN
   });
 
   return newVariant;
+};
+
+const updateBulkVariantFromCsv = async ({ variantId, variantData }) => {
+  await prisma.productVariant.update({
+    where: { variant_id: variantId },
+    data: {
+      mrp: variantData.mrp,
+      special_price: variantData.special_price,
+      purchase_price: variantData.purchase_price,
+      expenses: variantData.expenses,
+      purchase_code: variantData.purchase_code,
+      weight: variantData.weight,
+      length: variantData.length,
+      width: variantData.width,
+      height: variantData.height,
+      low_stock_threshold: variantData.low_stock_threshold,
+      remarks: variantData.remarks ?? null,
+    },
+  });
 };
 
 const ProductService = {
@@ -1851,8 +1878,24 @@ const ProductService = {
             warehouseId,
             productName,
           });
+        } else {
+          await updateBulkVariantFromCsv({
+            variantId: existingVariant.variant_id,
+            variantData,
+          });
         }
       }
+
+      await prisma.product.update({
+        where: { product_id: existingProduct.product_id },
+        data: {
+          mrp: variantsData[0].mrp,
+          special_price: variantsData[0].special_price,
+          purchase_price: variantsData[0].purchase_price,
+          expenses: variantsData[0].expenses,
+        },
+      });
+      await invalidateProductCaches(existingProduct.product_id, warehouseId);
       results.created++;
     } else {
       const firstVariantPrices = {

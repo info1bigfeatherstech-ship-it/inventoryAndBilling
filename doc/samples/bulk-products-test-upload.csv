@@ -1,0 +1,7 @@
+name,title,description,brand_name,product_code,vendor_name,category_name,sub_category_name,mrp,special_price,purchase_price,expenses,hsn_code,gst_percent,gst_type,unit_of_measure,weight,length,width,height,low_stock_threshold,remarks
+Ceramic Coffee Mug,Ceramic Coffee Mug - Matte Black,350ml ceramic mug with handle,HomeStyle,9901-1,HiTech,Electronics,,599,449,80,20,6912,12,CGST_SGST,PCS,350,12,9,10,15,Test upload - expect purchase_code 2086
+Running Sports Shoes,Running Shoes - Size 8 UK,Lightweight mesh running shoes,SportMax,9902-1,HiTech,Electronics,,3499,2799,350,45,6404,18,CGST_SGST,PCS,450,32,22,12,8,Test upload variant 1 - expect purchase_code 2381
+Running Sports Shoes,Running Shoes - Size 9 UK,Lightweight mesh running shoes,SportMax,9902-2,HiTech,Electronics,,3499,2799,350,45,6404,18,CGST_SGST,PCS,450,32,22,12,8,Test upload variant 2 - same pricing - expect purchase_code 2381
+USB-C Cable 3-Pack,USB-C to USB-A Cable 1m (3 pcs),Fast charge braided cables,TechLine,9903-1,HiTech,Electronics,,899,699,120,25,8544,12,CGST_SGST,PCS,120,18,12,3,20,Test upload - expect purchase_code 2131
+Wireless Earbuds Pro,Wireless Earbuds - White,ANC TWS earbuds with case,AudioPro,9904-1,HiTech,Electronics,,4999,3999,900,100,8518,18,CGST_SGST,PCS,55,6,4,3,10,Test upload - expect purchase_code 2986
+Wireless Earbuds Pro,Wireless Earbuds - Black,ANC TWS earbuds with case,AudioPro,9904-2,HiTech,Electronics,,4999,3999,950,80,8518,18,CGST_SGST,PCS,55,6,4,3,10,Test upload variant 2 - different pricing - expect purchase_code 3016
