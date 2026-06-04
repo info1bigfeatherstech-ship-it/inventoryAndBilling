@@ -44,6 +44,14 @@ router.get(
 );
 
 router.get(
+  '/:bulkRequestId/challan/pdf',
+  authorizeRoles(...READ_ROLES),
+  bulkRequestIdParam,
+  validateRequest,
+  BulkTransferController.downloadChallanPdf
+);
+
+router.get(
   '/:bulkRequestId',
   authorizeRoles(...READ_ROLES),
   bulkRequestIdParam,

@@ -1,6 +1,7 @@
 const prisma = require('../../utils/prisma.utils');
 const { AppError } = require('../../middlewares/error.middleware');
 const { parsePagination } = require('../../utils/pagination.utils');
+const { generatePurchaseEntryPdf } = require('./purchaseEntryPdf.service');
 
 const PURCHASE_SELECT = {
   purchase_id: true,
@@ -97,8 +98,12 @@ const PurchaseEntryService = {
           select: {
             purchase_item_id: true,
             product_id: true,
+            variant_id: true,
             quantity: true,
             purchase_cost: true,
+            line_subtotal: true,
+            gst_percent: true,
+            tax_amount: true,
             batch_number: true,
             expiry_date: true,
             room_zone: true,
@@ -183,6 +188,11 @@ const PurchaseEntryService = {
     }));
 
     return enrichedSummary;
+  },
+
+  async generatePurchasePdf(purchaseId, user) {
+    const purchase = await this.getPurchaseEntryById(purchaseId, user);
+    return generatePurchaseEntryPdf(purchase);
   },
 };
 

@@ -16,6 +16,8 @@ const READ_ROLES = ['SUPER_ADMIN', 'WH_MANAGER', 'WH_STOCK_LISTER', 'SHOP_OWNER'
 
 router.use(requireAuth);
 
+router.get('/export', authorizeRoles(...READ_ROLES), listLedgerValidator, validateRequest, StockLedgerController.exportCsv);
+
 router.get('/', authorizeRoles(...READ_ROLES), listLedgerValidator, validateRequest, StockLedgerController.list);
 router.get(
   '/variant/:variantId',

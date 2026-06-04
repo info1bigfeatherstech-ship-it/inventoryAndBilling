@@ -1,5 +1,7 @@
 const asyncHandler = require('../../utils/asyncHandler.utils');
 const TransferRequestService = require('../../services/stock/transferRequest.service');
+const TransferChallanService = require('../../services/stock/transferChallan.service');
+const { generateTransferChallanPdf } = require('../../services/stock/transferChallanPdf.service');
 const { successResponse, paginatedMeta } = require('../../utils/response.utils');
 
 const TransferRequestController = {
@@ -29,6 +31,20 @@ const TransferRequestController = {
       data: requests,
       meta: paginatedMeta({ page, limit, total }),
     });
+  }),
+
+  downloadChallanPdf: asyncHandler(async (req, res) => {
+    const challanDoc = await TransferChallanService.buildSingleRequestChallan(
+      req.params.requestId,
+      req.user
+    );
+    const { buffer } = await generateTransferChallanPdf(challanDoc);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="transfer-challan-${challanDoc.document_number}.pdf"`
+    );
+    return res.send(buffer);
   }),
 
   getById: asyncHandler(async (req, res) => {

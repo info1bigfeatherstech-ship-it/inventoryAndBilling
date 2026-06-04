@@ -1,5 +1,7 @@
 const asyncHandler = require('../../utils/asyncHandler.utils');
 const BulkTransferService = require('../../services/stock/bulkTransfer.service');
+const TransferChallanService = require('../../services/stock/transferChallan.service');
+const { generateTransferChallanPdf } = require('../../services/stock/transferChallanPdf.service');
 const { successResponse, paginatedMeta } = require('../../utils/response.utils');
 
 const BulkTransferController = {
@@ -26,6 +28,20 @@ const BulkTransferController = {
       data: requests,
       meta: paginatedMeta({ page, limit, total }),
     });
+  }),
+
+  downloadChallanPdf: asyncHandler(async (req, res) => {
+    const challanDoc = await TransferChallanService.buildBulkRequestChallan(
+      req.params.bulkRequestId,
+      req.user
+    );
+    const { buffer } = await generateTransferChallanPdf(challanDoc);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="bulk-transfer-challan-${challanDoc.document_number}.pdf"`
+    );
+    return res.send(buffer);
   }),
 
   getById: asyncHandler(async (req, res) => {

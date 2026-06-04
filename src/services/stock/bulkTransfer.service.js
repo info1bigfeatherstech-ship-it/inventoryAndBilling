@@ -29,6 +29,7 @@ const {
   validateWarehouseStock,
 } = require('./transferStock.ops');
 const { getWarehouseStockAvailable } = require('../../utils/warehouseStock.utils');
+const { snapshotTransferCost } = require('../../utils/transferCost.utils');
 
 const TX_OPTIONS = { isolationLevel: 'Serializable', maxWait: 10000, timeout: 30000 };
 
@@ -79,12 +80,14 @@ const BULK_SELECT = {
       approved_quantity: true,
       rejection_reason: true,
       received_quantity: true,
+      unit_cost_snapshot: true,
+      line_value_snapshot: true,
       variant: {
         select: {
           variant_id: true,
           sku: true,
           product_code: true,
-          product: { select: { product_id: true, name: true } },
+          product: { select: { product_id: true, name: true, hsn_code: true } },
         },
       },
     },
@@ -107,7 +110,9 @@ const loadVariant = async (variantId) => {
       product_id: true,
       is_active: true,
       low_stock_threshold: true,
-      product: { select: { warehouse_id: true, is_active: true, name: true } },
+      purchase_price: true,
+      expenses: true,
+      product: { select: { warehouse_id: true, is_active: true, name: true, expenses: true } },
     },
   });
   if (!variant || !variant.is_active || !variant.product.is_active) {
@@ -544,32 +549,40 @@ const BulkTransferService = {
 
           await validateWarehouseStock(tx, variant.variant_id, bulk.from_warehouse_id, qty, batchNumber);
 
+          const costSnap = snapshotTransferCost(variant, qty);
+          await tx.bulkTransferRequestItem.update({
+            where: { bulk_item_id: item.bulk_item_id },
+            data: {
+              unit_cost_snapshot: costSnap.unit_cost,
+              line_value_snapshot: costSnap.line_value,
+            },
+          });
+
+          const dispatchParams = {
+            variant,
+            quantity: qty,
+            batchNumber,
+            referenceId: bulk.bulk_request_id,
+            referenceType: 'BULK_TRANSFER_REQUEST',
+            createdBy: user.userId,
+            remarks: bulk.request_remarks,
+            unitCost: costSnap.unit_cost,
+            lineValue: costSnap.line_value,
+          };
+
           if (bulk.request_type === 'WH_TO_WH') {
             await dispatchWhToWh(tx, {
-              variant,
+              ...dispatchParams,
               fromWarehouseId: bulk.from_warehouse_id,
-              quantity: qty,
-              batchNumber,
-              referenceId: bulk.bulk_request_id,
-              referenceType: 'BULK_TRANSFER_REQUEST',
-              createdBy: user.userId,
-              remarks: bulk.request_remarks,
             });
-            await invalidateProductCaches(variant.product_id, bulk.from_warehouse_id);
           } else {
             await dispatchWhToShop(tx, {
-              variant,
+              ...dispatchParams,
               fromWarehouseId: bulk.from_warehouse_id,
               toShopId: bulk.to_shop_id,
-              quantity: qty,
-              batchNumber,
-              referenceId: bulk.bulk_request_id,
-              referenceType: 'BULK_TRANSFER_REQUEST',
-              createdBy: user.userId,
-              remarks: bulk.request_remarks,
             });
-            await invalidateProductCaches(variant.product_id, bulk.from_warehouse_id);
           }
+          await invalidateProductCaches(variant.product_id, bulk.from_warehouse_id);
         }
 
         await tx.bulkTransferRequest.update({

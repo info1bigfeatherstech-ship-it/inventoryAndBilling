@@ -8,6 +8,10 @@ const {
   productListCachePattern,
 } = require('../../utils/cache.utils');
 const { createStockLedgerEntry } = require('../stock/stockLedger.helpers');
+const {
+  assertVendorInvoiceNotDuplicate,
+  buildPurchaseLinesFromInwardItems,
+} = require('../../utils/inwardPurchase.utils');
 
 const MUTABLE_STATUSES = new Set(['ARRIVED']);
 
@@ -631,6 +635,9 @@ const InwardService = {
       if (unmapped > 0) {
         throw new AppError('All inward items must be mapped before status MAPPED', 409, 'INWARD_ITEMS_UNMAPPED', { unmappedItems: unmapped });
       }
+      if (!inward.vendor_invoice_no?.trim()) {
+        throw new AppError('Vendor invoice number is required before marking MAPPED', 400, 'VENDOR_INVOICE_REQUIRED');
+      }
     }
   
     const previousStatus = inward.status;
@@ -650,37 +657,12 @@ const InwardService = {
       });
   
       if (shouldApplyStock) {
-        // Get all mapped items to calculate total
-        const mappedItemsForPurchase = await tx.inwardReceiptItem.findMany({
-          where: { inward_id: inwardId, mapped_product_id: { not: null } },
-          select: { purchase_cost: true, quantity_received: true }
+        await assertVendorInvoiceNotDuplicate(tx, {
+          vendorId: inward.vendor_id,
+          vendorInvoiceNo: inward.vendor_invoice_no,
+          inwardId,
         });
-        
-        let subtotal = 0;
-        for (const item of mappedItemsForPurchase) {
-          subtotal += (item.purchase_cost || 0) * item.quantity_received;
-        }
-        
-        // Create Purchase Entry (header)
-        const purchaseEntry = await tx.purchaseEntry.create({
-          data: {
-            purchase_number: `PO-${inward.inward_number}`,
-            vendor_id: inward.vendor_id,
-            warehouse_id: inward.warehouse_id,
-            vendor_invoice_no: inward.vendor_invoice_no || null,
-            purchase_date: new Date(),
-            status: 'RECEIVED',
-            subtotal: subtotal,
-            tax_amount: 0,
-            total_amount: subtotal,
-            received_by: actorUserId,
-            received_at: new Date(),
-            remarks: `Created from inward: ${inward.inward_number}`,
-          },
-          select: { purchase_id: true }
-        });
-        
-        // ⭐⭐⭐ NEW CODE — Create Purchase Items (line items) ⭐⭐⭐
+
         const mappedItemsForPurchaseItems = await tx.inwardReceiptItem.findMany({
           where: { inward_id: inwardId, mapped_product_id: { not: null } },
           select: {
@@ -695,25 +677,51 @@ const InwardService = {
             remarks: true,
           },
         });
-        
-        for (const item of mappedItemsForPurchaseItems) {
+
+        const { lines: purchaseLines, totals } = await buildPurchaseLinesFromInwardItems(
+          tx,
+          mappedItemsForPurchaseItems
+        );
+
+        const purchaseEntry = await tx.purchaseEntry.create({
+          data: {
+            purchase_number: `PO-${inward.inward_number}`,
+            vendor_id: inward.vendor_id,
+            warehouse_id: inward.warehouse_id,
+            vendor_invoice_no: inward.vendor_invoice_no.trim(),
+            purchase_date: new Date(),
+            status: 'RECEIVED',
+            subtotal: totals.subtotal,
+            tax_amount: totals.tax_amount,
+            total_amount: totals.total_amount,
+            received_by: actorUserId,
+            received_at: new Date(),
+            remarks: `Created from inward: ${inward.inward_number}`,
+          },
+          select: { purchase_id: true },
+        });
+
+        for (const line of purchaseLines) {
           await tx.purchaseItem.create({
             data: {
               purchase_id: purchaseEntry.purchase_id,
-              product_id: item.mapped_product_id,
-              quantity: item.quantity_received,
-              purchase_cost: item.purchase_cost || 0,
-              batch_number: item.batch_number || null,
-              expiry_date: item.expiry_date || null,
-              room_zone: item.room_zone || 'DEFAULT',
-              rack_shelf: item.rack_shelf || 'DEFAULT',
-              position: item.position || null,
-              remarks: item.remarks || null,
+              product_id: line.mapped_product_id,
+              variant_id: line.variant_id,
+              quantity: line.quantity,
+              purchase_cost: line.purchase_cost,
+              line_subtotal: line.line_subtotal,
+              gst_percent: line.gst_percent,
+              tax_amount: line.tax_amount,
+              batch_number: line.batch_number || null,
+              expiry_date: line.expiry_date || null,
+              room_zone: line.room_zone || 'DEFAULT',
+              rack_shelf: line.rack_shelf || 'DEFAULT',
+              position: line.position || null,
+              remarks: line.remarks || null,
             },
           });
         }
-        
-        // Apply stock with purchase entry ID
+
         await applyStockFromMappedInward(tx, inwardId, inward.warehouse_id, actorUserId, purchaseEntry.purchase_id);
       }
   

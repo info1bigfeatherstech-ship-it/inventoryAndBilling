@@ -22,6 +22,14 @@ const PurchaseEntryController = {
    * Get single purchase entry by ID
    * GET /api/v1/purchase-entries/:purchaseId
    */
+  downloadPdf: asyncHandler(async (req, res) => {
+    const purchase = await PurchaseEntryService.getPurchaseEntryById(req.params.purchaseId, req.user);
+    const { buffer } = await PurchaseEntryService.generatePurchasePdf(req.params.purchaseId, req.user);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="purchase-${purchase.purchase_number}.pdf"`);
+    return res.send(buffer);
+  }),
+
   getById: asyncHandler(async (req, res) => {
     const purchase = await PurchaseEntryService.getPurchaseEntryById(req.params.purchaseId, req.user);
 

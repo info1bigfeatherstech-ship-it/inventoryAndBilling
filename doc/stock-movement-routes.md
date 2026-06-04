@@ -148,7 +148,7 @@ Immutable audit trail for every movement.
 | GET | `/warehouse/:warehouseId` |
 | GET | `/shop/:shopId` |
 
-**Movement types:** `PURCHASE`, `WH_TO_SHOP`, `WH_TO_WH`, `SHOP_TO_SHOP`, `ADJUSTMENT`, `SALES`, `RETURN`
+**Movement types:** `PURCHASE`, `PURCHASE_RETURN`, `WH_TO_SHOP`, `WH_TO_WH`, `SHOP_TO_SHOP`, `ADJUSTMENT`, `SALES`, `RETURN`
 
 ---
 

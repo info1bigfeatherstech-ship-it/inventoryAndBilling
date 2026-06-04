@@ -16,8 +16,16 @@ router.use(requireAuth);
 // List purchase entries
 router.get('/',authorizeRoles(...READ_ROLES),listPurchaseEntriesValidator,validateRequest,PurchaseEntryController.list);
 
+router.get(
+  '/:purchaseId/pdf',
+  authorizeRoles(...READ_ROLES),
+  purchaseIdParam,
+  validateRequest,
+  PurchaseEntryController.downloadPdf
+);
+
 // Get single purchase entry
-router.get( '/:purchaseId', authorizeRoles(...READ_ROLES), purchaseIdParam, validateRequest, PurchaseEntryController.getById);
+router.get('/:purchaseId', authorizeRoles(...READ_ROLES), purchaseIdParam, validateRequest, PurchaseEntryController.getById);
 
 // Vendor summary (for reports)
 router.get('/summary/vendor', authorizeRoles('SUPER_ADMIN', 'WH_MANAGER'), PurchaseEntryController.vendorSummary);

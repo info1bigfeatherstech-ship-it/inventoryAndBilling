@@ -26,6 +26,7 @@ enum BusinessType {
 /// Immutable domain values — DB uses existing "SALES" value from initial migration.
 enum MovementType {
   PURCHASE
+  PURCHASE_RETURN
   WH_TO_SHOP
   SHOP_TO_SHOP
   WH_TO_WH
@@ -89,6 +90,18 @@ enum CreditNoteStatus {
   REDEEMED
   PARTIALLY_REDEEMED
   REFUNDED
+  CANCELLED
+}
+
+enum DebitNoteType {
+  SHORTAGE
+  DEFECTIVE
+  RATE_DIFFERENCE
+  OTHER
+}
+
+enum DebitNoteStatus {
+  ISSUED
   CANCELLED
 }
 
@@ -157,6 +170,7 @@ model Vendor {
 
   products         Product[]
   purchase_entries PurchaseEntry[]
+  debit_notes      DebitNote[]
   inward_receipts  InwardReceipt[]
 
   created_at DateTime @default(now())
@@ -180,6 +194,7 @@ model Warehouse {
   products          Product[]
   product_stocks    ProductStock[]
   purchase_entries PurchaseEntry[]
+  debit_notes      DebitNote[]
   users           User[]
   inward_receipts InwardReceipt[]
   stock_ledger_out StockLedger[] @relation("LedgerFromWarehouse")
@@ -367,6 +382,7 @@ model Product {
   stock_ledgers  StockLedger[]
   bill_lines     BillLineItem[]
   credit_lines   CreditNoteLineItem[]
+  debit_note_lines DebitNoteLineItem[] @relation("DebitNoteLineProduct")
   inward_items   InwardReceiptItem[]
 
   created_at DateTime @default(now())
@@ -420,6 +436,8 @@ model ProductVariant {
   shop_product_levels ShopProductLevel[]
   bill_lines          BillLineItem[] @relation("BillLineVariant")
   credit_note_lines   CreditNoteLineItem[]
+  debit_note_lines    DebitNoteLineItem[] @relation("DebitNoteLineVariant")
+  purchase_items      PurchaseItem[]
 
   @@unique([product_id, sku])
   @@unique([product_id, product_code])
@@ -535,6 +553,7 @@ model PurchaseEntry {
   vendor          Vendor          @relation(fields: [vendor_id], references: [vendor_id])
   warehouse       Warehouse       @relation(fields: [warehouse_id], references: [warehouse_id])
   items           PurchaseItem[]
+  debit_notes     DebitNote[]
   product_stocks  ProductStock[]  @relation("LastPurchase")
   receivedByUser  User            @relation("PurchaseReceivedBy", fields: [received_by], references: [user_id])
 
@@ -562,11 +581,87 @@ model PurchaseItem {
 
   remarks String?
 
-  purchase PurchaseEntry @relation(fields: [purchase_id], references: [purchase_id])
-  product  Product       @relation(fields: [product_id], references: [product_id])
+  /// Snapshot from mapped variant at GRN (for audit).
+  variant_id    String?
+  line_subtotal Float   @default(0)
+  gst_percent   Float   @default(0)
+  tax_amount    Float   @default(0)
+
+  purchase PurchaseEntry  @relation(fields: [purchase_id], references: [purchase_id])
+  product  Product        @relation(fields: [product_id], references: [product_id])
+  variant  ProductVariant? @relation(fields: [variant_id], references: [variant_id], onDelete: SetNull)
+  debit_note_lines DebitNoteLineItem[]
 
   @@index([purchase_id])
+  @@index([variant_id])
   @@map("purchase_items")
+}
+
+// ==================== DEBIT NOTES (WH → Vendor) ====================
+
+model DebitNote {
+  debit_note_id     String @id @default(cuid())
+  debit_note_number String @unique
+
+  original_purchase_id String
+  warehouse_id         String
+  vendor_id            String
+
+  type         DebitNoteType
+  subtotal     Float
+  gst_amount   Float
+  debit_amount Float
+
+  /// When true, stock was deducted from warehouse (defective return to vendor).
+  return_stock Boolean @default(false)
+  status       DebitNoteStatus @default(ISSUED)
+
+  created_by_user_id String
+  remarks            String?
+
+  original_purchase PurchaseEntry @relation(fields: [original_purchase_id], references: [purchase_id], onDelete: Restrict)
+  warehouse         Warehouse     @relation(fields: [warehouse_id], references: [warehouse_id], onDelete: Restrict)
+  vendor            Vendor        @relation(fields: [vendor_id], references: [vendor_id], onDelete: Restrict)
+  created_by        User          @relation("DebitNoteCreatedBy", fields: [created_by_user_id], references: [user_id])
+
+  lines DebitNoteLineItem[]
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([warehouse_id, created_at])
+  @@index([vendor_id, created_at])
+  @@index([original_purchase_id])
+  @@index([status])
+  @@map("debit_notes")
+}
+
+model DebitNoteLineItem {
+  line_id        String @id @default(cuid())
+  debit_note_id  String
+  purchase_item_id String
+  variant_id     String
+  product_id     String
+
+  quantity    Int
+  unit_cost   Float
+  gst_percent Float
+  line_subtotal Float
+  tax_amount    Float
+  line_total    Float
+
+  /// Snapshot for stock deduction (matches purchase GRN batch).
+  batch_number String?
+
+  debit_note    DebitNote      @relation(fields: [debit_note_id], references: [debit_note_id], onDelete: Cascade)
+  purchase_item PurchaseItem   @relation(fields: [purchase_item_id], references: [purchase_item_id], onDelete: Restrict)
+  variant       ProductVariant @relation("DebitNoteLineVariant", fields: [variant_id], references: [variant_id])
+  product       Product        @relation("DebitNoteLineProduct", fields: [product_id], references: [product_id])
+
+  @@index([debit_note_id])
+  @@index([purchase_item_id])
+  @@index([variant_id])
+  @@map("debit_note_line_items")
 }
 
 // ==================== STOCK LEDGER ====================
@@ -589,6 +684,10 @@ model StockLedger {
 
   batch_number String?
   expiry_date  DateTime?
+
+  /// Landed unit cost at movement time (purchase_price + expenses snapshot).
+  unit_cost  Float?
+  line_value Float?
 
   created_by String
   remarks    String?
@@ -882,6 +981,7 @@ model User {
   bill_payments_collected   BillPayment[]   @relation("BillPaymentCollector")
   credit_notes_created      CreditNote[]    @relation("CreditNoteCreatedBy")
   credit_notes_refunded     CreditNote[]    @relation("CreditNoteRefundedBy")
+  debit_notes_created       DebitNote[]     @relation("DebitNoteCreatedBy")
   credit_note_redemptions   CreditNoteRedemption[] @relation("CreditNoteRedemptionBy")
   refresh_tokens            RefreshToken[]
   inward_receipts_created   InwardReceipt[] @relation("InwardCreatedBy")
@@ -1001,6 +1101,10 @@ model BulkTransferRequestItem {
 
   received_quantity Int @default(0)
 
+  /// Snapshotted at dispatch from variant landed cost.
+  unit_cost_snapshot  Float?
+  line_value_snapshot Float?
+
   bulk_request BulkTransferRequest @relation(fields: [bulk_request_id], references: [bulk_request_id], onDelete: Cascade)
   variant      ProductVariant      @relation(fields: [variant_id], references: [variant_id])
 
@@ -1050,6 +1154,10 @@ model TransferRequest {
   cancelled_by  String?
   cancelled_at  DateTime?
   cancel_reason String?
+
+  /// Snapshotted at dispatch (unit landed cost × dispatch qty).
+  unit_cost_snapshot  Float?
+  line_value_snapshot Float?
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt

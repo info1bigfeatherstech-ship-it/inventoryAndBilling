@@ -26,6 +26,7 @@ const {
   IN_FLIGHT_STATUSES,
 } = require('../../utils/transferRequest.utils');
 const { deductWarehouseStock } = require('../../utils/warehouseStock.utils');
+const { snapshotTransferCost } = require('../../utils/transferCost.utils');
 
 const TX_OPTIONS = { isolationLevel: 'Serializable', maxWait: 10000, timeout: 30000 };
 
@@ -61,6 +62,8 @@ const REQUEST_SELECT = {
   cancelled_by: true,
   cancelled_at: true,
   cancel_reason: true,
+  unit_cost_snapshot: true,
+  line_value_snapshot: true,
   created_at: true,
   updated_at: true,
   variant: {
@@ -68,7 +71,7 @@ const REQUEST_SELECT = {
       variant_id: true,
       product_code: true,
       sku: true,
-      product: { select: { product_id: true, name: true, warehouse_id: true } },
+      product: { select: { product_id: true, name: true, warehouse_id: true, hsn_code: true } },
     },
   },
   from_warehouse: { select: { warehouse_id: true, warehouse_code: true, warehouse_name: true } },
@@ -116,7 +119,19 @@ const loadVariantForTransfer = async (variantId) => {
       product_id: true,
       is_active: true,
       low_stock_threshold: true,
-      product: { select: { warehouse_id: true, is_active: true } },
+      purchase_price: true,
+      expenses: true,
+      sku: true,
+      product_code: true,
+      product: {
+        select: {
+          warehouse_id: true,
+          is_active: true,
+          name: true,
+          hsn_code: true,
+          expenses: true,
+        },
+      },
     },
   });
 
@@ -275,6 +290,14 @@ const movementTypeForRequest = (requestType) => {
   return 'SHOP_TO_SHOP';
 };
 
+const ledgerCostFromRequest = (request) => {
+  if (request.unit_cost_snapshot == null) return {};
+  return {
+    unitCost: request.unit_cost_snapshot,
+    lineValue: request.line_value_snapshot ?? null,
+  };
+};
+
 const performDispatchStock = async (tx, request, variant) => {
   const batchNumber = normalizeBatch(request.batch_number);
   const qty = request.quantity;
@@ -288,6 +311,7 @@ const performDispatchStock = async (tx, request, variant) => {
     batchNumber: batchNumber || null,
     createdBy: request.dispatched_by,
     remarks: request.request_remarks,
+    ...ledgerCostFromRequest(request),
   };
 
   if (request.request_type === 'WH_TO_WH') {
@@ -640,6 +664,8 @@ const TransferRequestService = {
 
         await validateStockBeforeDispatch(tx, locked);
 
+        const costSnap = snapshotTransferCost(variant, locked.quantity);
+
         await tx.transferRequest.update({
           where: { request_id: requestId },
           data: {
@@ -648,10 +674,17 @@ const TransferRequestService = {
             dispatched_at: new Date(),
             tracking_number: data.tracking_number?.trim() || null,
             expected_delivery: data.expected_delivery ? new Date(data.expected_delivery) : null,
+            unit_cost_snapshot: costSnap.unit_cost,
+            line_value_snapshot: costSnap.line_value,
           },
         });
 
-        const dispatchRequest = { ...locked, dispatched_by: user.userId };
+        const dispatchRequest = {
+          ...locked,
+          dispatched_by: user.userId,
+          unit_cost_snapshot: costSnap.unit_cost,
+          line_value_snapshot: costSnap.line_value,
+        };
         const stockResult = await performDispatchStock(tx, dispatchRequest, variant);
 
         const updated = await tx.transferRequest.findUnique({

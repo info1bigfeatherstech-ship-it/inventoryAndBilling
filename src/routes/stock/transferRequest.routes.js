@@ -72,6 +72,14 @@ router.post(
 );
 
 router.get(
+  '/:requestId/challan/pdf',
+  authorizeRoles(...READ_ROLES),
+  requestIdParam,
+  validateRequest,
+  TransferRequestController.downloadChallanPdf
+);
+
+router.get(
   '/:requestId',
   authorizeRoles(...READ_ROLES),
   requestIdParam,

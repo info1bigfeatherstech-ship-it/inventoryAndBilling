@@ -34,6 +34,7 @@ Obtain token via `POST /api/v1/auth/login`. Refresh via cookie + `POST /api/v1/a
 | Products | [product-routes.md](./product-routes.md) — **FE/QA guide** (variants, images, multipart) | `/api/v1/products` |
 | Product stock | [product-stock-routes.md](./product-stock-routes.md) | `/api/v1/product-stocks` |
 | Stock movement | [stock-movement-routes.md](./stock-movement-routes.md) | `/api/v1/shops`, `/shop-stocks`, `/stock` |
+| ERP gaps & roadmap | [erp-implementation-checklist.md](./erp-implementation-checklist.md) | — |
 | Media / env | [media-and-env.md](./media-and-env.md) | — |
 
 ## Role summary (warehouse app)

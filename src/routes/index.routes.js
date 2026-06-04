@@ -24,6 +24,7 @@ const purchaseEntryRoutes = require('./purchase/purchaseEntry.routes');
 const customerRoutes = require('./customer/customer.routes');
 const billingRoutes = require('./billing/billing.routes');
 const creditNoteRoutes = require('./creditNote/creditNote.routes');
+const debitNoteRoutes = require('./debitNote/debitNote.routes');
 
 // API info route
 router.get('/', (req, res) => {
@@ -58,6 +59,7 @@ router.get('/', (req, res) => {
       customers: 'GET /api/v1/customers',
       bills: 'POST /api/v1/bills',
       creditNotes: 'POST /api/v1/credit-notes',
+      debitNotes: 'POST /api/v1/debit-notes',
     },
     requestId: req.id,
   });
@@ -96,6 +98,7 @@ v1Router.use('/purchase-entries', purchaseEntryRoutes);
 v1Router.use('/customers', customerRoutes);
 v1Router.use('/bills', billingRoutes);
 v1Router.use('/credit-notes', creditNoteRoutes);
+v1Router.use('/debit-notes', debitNoteRoutes);
 // Mount versioned routes
 router.use('/v1', v1Router);
 

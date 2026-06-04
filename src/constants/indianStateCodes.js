@@ -19,7 +19,7 @@ const INDIAN_GST_STATE_CODES = [
   { code: '15', name: 'Mizoram' },
   { code: '16', name: 'Tripura' },
   { code: '17', name: 'Meghalaya' },
-  { code: '18', name: 'Assam' },
+  { code: '18', name: 'Assam' },         
   { code: '19', name: 'West Bengal' },
   { code: '20', name: 'Jharkhand' },
   { code: '21', name: 'Odisha' },

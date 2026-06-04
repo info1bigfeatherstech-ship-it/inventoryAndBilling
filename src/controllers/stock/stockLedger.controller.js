@@ -113,6 +113,13 @@ const StockLedgerController = {
       meta: paginatedMeta({ page, limit, total }),
     });
   }),
+
+  exportCsv: asyncHandler(async (req, res) => {
+    const { csv, filename } = await StockLedgerService.exportLedgerCsv(req.query, req.user);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.send(csv);
+  }),
 };
 
 module.exports = StockLedgerController;

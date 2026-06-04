@@ -314,6 +314,14 @@ const {
   assertWarehouseStockAvailable,
 } = require('../../utils/warehouseStock.utils');
 
+const pickLedgerCost = (params) => {
+  if (params.unitCost == null && params.lineValue == null) return {};
+  return {
+    unitCost: params.unitCost ?? null,
+    lineValue: params.lineValue ?? null,
+  };
+};
+
 /** @deprecated Use assertWarehouseStockAvailable — kept for existing imports */
 const validateWarehouseStock = assertWarehouseStockAvailable;
 
@@ -435,6 +443,7 @@ const dispatchWhToShop = async (tx, params) => {
     batchNumber: batchNumber || null,
     createdBy,
     remarks,
+    ...pickLedgerCost(params),
   });
 };
 
@@ -467,6 +476,7 @@ const receiveWhToShop = async (tx, params) => {
     batchNumber: batchNumber || null,
     createdBy,
     remarks,
+    ...pickLedgerCost(params),
   });
 };
 
@@ -498,6 +508,7 @@ const dispatchWhToWh = async (tx, params) => {
     batchNumber: batchNumber || null,
     createdBy,
     remarks,
+    ...pickLedgerCost(params),
   });
 };
 
@@ -529,6 +540,7 @@ const receiveWhToWh = async (tx, params) => {
     batchNumber: batchNumber || null,
     createdBy,
     remarks,
+    ...pickLedgerCost(params),
   });
 };
 

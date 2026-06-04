@@ -138,8 +138,9 @@
 const prisma = require('../../utils/prisma.utils');
 const { parsePagination } = require('../../utils/pagination.utils');
 const { LEDGER_SELECT } = require('./stockLedger.helpers');
-const { applyLedgerScope } = require("../../utils/stockLedgerAccess.utils");
+const { applyLedgerScope } = require('../../utils/stockLedgerAccess.utils');
 const { AppError } = require('../../middlewares/error.middleware');
+const { ledgerRowsToCsv } = require('../../utils/stockLedgerExport.utils');
 
 const buildLedgerWhere = (filters = {}) => {
   const where = {};
@@ -289,7 +290,47 @@ const StockLedgerService = {
       }),
     ]);
 
-    return { total, page, limit, entries };
+    const ledger = entries.map(formatLedgerRow);
+    return { total, page, limit, entries: ledger };
+  },
+
+  /**
+   * Export ledger rows as CSV (scoped, max 10k rows).
+   */
+  async exportLedgerCsv(filters = {}, user) {
+    const maxExport = 10000;
+    let where = buildLedgerWhere(filters);
+    where = applyLedgerScope(where, user);
+
+    const total = await prisma.stockLedger.count({ where });
+    if (total > maxExport) {
+      throw new AppError(
+        `Export limited to ${maxExport} rows; narrow filters (found ${total})`,
+        400,
+        'EXPORT_TOO_LARGE'
+      );
+    }
+
+    const entries = await prisma.stockLedger.findMany({
+      where,
+      take: maxExport,
+      orderBy: { created_at: 'desc' },
+      select: {
+        ...LEDGER_SELECT,
+        variant: {
+          select: {
+            sku: true,
+            product_code: true,
+            product: { select: { name: true, product_code: true } },
+          },
+        },
+      },
+    });
+
+    const rows = entries.map(formatLedgerRow);
+    const csv = ledgerRowsToCsv(rows);
+    const filename = `stock-ledger-${new Date().toISOString().slice(0, 10)}.csv`;
+    return { csv, filename, row_count: rows.length };
   },
 };
 
