@@ -23,6 +23,11 @@ const {
 } = require('../../utils/cache.utils');
 const logger = require('../../utils/logger.utils');
 const { generateDebitNotePdf } = require('./debitNotePdf.service');
+const {
+  resolvePurchaseItemVariant,
+  assertResolvedVariantForReturn,
+  backfillPurchaseItemVariantIfMissing,
+} = require('../../utils/purchaseItemVariant.utils');
 
 const TX_OPTIONS = { isolationLevel: 'Serializable', maxWait: 10000, timeout: 30000 };
 
@@ -170,21 +175,23 @@ const DebitNoteService = {
     const alreadyReturned = await getReturnedQuantitiesByPurchaseItem(purchaseId);
     const returnable = buildReturnableQuantities(purchase.items, alreadyReturned);
 
-    return {
-      purchase_id: purchase.purchase_id,
-      purchase_number: purchase.purchase_number,
-      vendor_invoice_no: purchase.vendor_invoice_no,
-      warehouse_id: purchase.warehouse_id,
-      vendor_id: purchase.vendor_id,
-      vendor_name: purchase.vendor?.company_name,
-      lines: purchase.items.map((item) => {
+    const lines = await Promise.all(
+      purchase.items.map(async (item) => {
         const cap = returnable.find((r) => r.purchase_item_id === item.purchase_item_id);
+        const variantResolution = await resolvePurchaseItemVariant(prisma, {
+          purchaseItem: item,
+          purchaseId: purchase.purchase_id,
+        });
+
         return {
           purchase_item_id: item.purchase_item_id,
           product_id: item.product_id,
-          variant_id: item.variant_id,
+          variant_id: variantResolution.variant_id,
           product_name: item.product?.name,
-          sku: item.variant?.sku,
+          sku: variantResolution.sku,
+          product_code: variantResolution.product_code,
+          requires_variant_pick: variantResolution.requires_variant_pick,
+          variant_options: variantResolution.variant_options,
           purchased_quantity: item.quantity,
           already_returned: cap?.already_returned ?? 0,
           returnable_quantity: cap?.returnable ?? 0,
@@ -192,7 +199,17 @@ const DebitNoteService = {
           gst_percent: item.gst_percent,
           batch_number: item.batch_number,
         };
-      }),
+      })
+    );
+
+    return {
+      purchase_id: purchase.purchase_id,
+      purchase_number: purchase.purchase_number,
+      vendor_invoice_no: purchase.vendor_invoice_no,
+      warehouse_id: purchase.warehouse_id,
+      vendor_id: purchase.vendor_id,
+      vendor_name: purchase.vendor?.company_name,
+      lines,
     };
   },
 
@@ -243,16 +260,15 @@ const DebitNoteService = {
         );
       }
 
-      if (!purchaseItem.variant_id) {
-        throw new AppError(
-          `Purchase line ${purchaseItem.purchase_item_id} has no variant; cannot process return`,
-          409,
-          'PURCHASE_ITEM_NO_VARIANT'
-        );
+      if (!purchaseItem.product?.is_active) {
+        throw new AppError('Product is inactive', 409, 'PRODUCT_INACTIVE');
       }
-      if (!purchaseItem.variant?.is_active || !purchaseItem.product?.is_active) {
-        throw new AppError('Product or variant is inactive', 409, 'PRODUCT_INACTIVE');
-      }
+
+      const { variant } = await assertResolvedVariantForReturn(prisma, {
+        purchaseItem,
+        purchaseId: purchase.purchase_id,
+        requestedVariantId: reqLine.variant_id || null,
+      });
 
       const unitCost = Number(purchaseItem.purchase_cost);
       const amounts = calculatePurchaseLineTax({
@@ -264,11 +280,12 @@ const DebitNoteService = {
 
       computedLines.push({
         purchase_item_id: purchaseItem.purchase_item_id,
-        variant_id: purchaseItem.variant_id,
+        variant_id: variant.variant_id,
         product_id: purchaseItem.product_id,
         quantity: qty,
         unit_cost: unitCost,
         batch_number: purchaseItem.batch_number ? String(purchaseItem.batch_number).trim() : '',
+        existing_variant_id_on_purchase: purchaseItem.variant_id,
         ...amounts,
         line_total: roundMoney(amounts.line_subtotal + amounts.tax_amount),
       });
@@ -277,6 +294,15 @@ const DebitNoteService = {
     const totals = aggregatePurchaseTotals(computedLines);
 
     const result = await prisma.$transaction(async (tx) => {
+      for (const line of computedLines) {
+        await backfillPurchaseItemVariantIfMissing(
+          tx,
+          line.purchase_item_id,
+          line.variant_id,
+          line.existing_variant_id_on_purchase
+        );
+      }
+
       const dnNumber = await generateDebitNoteNumber(tx);
 
       const debitNote = await tx.debitNote.create({

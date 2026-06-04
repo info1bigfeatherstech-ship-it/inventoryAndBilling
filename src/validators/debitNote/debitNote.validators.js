@@ -12,6 +12,7 @@ const createDebitNoteValidator = [
   body('items').isArray({ min: 1 }),
   body('items.*.purchase_item_id').isString().trim().notEmpty(),
   body('items.*.quantity').isInt({ min: 1 }),
+  body('items.*.variant_id').optional().isString().trim().notEmpty(),
   body('reason').optional().isString().trim().isLength({ max: 500 }),
   body('remarks').optional().isString().trim().isLength({ max: 500 }),
   body('return_stock').optional().isBoolean().toBoolean(),
