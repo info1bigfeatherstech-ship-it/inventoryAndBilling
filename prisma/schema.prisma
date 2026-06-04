@@ -438,6 +438,7 @@ model ProductVariant {
   credit_note_lines   CreditNoteLineItem[]
   debit_note_lines    DebitNoteLineItem[] @relation("DebitNoteLineVariant")
   purchase_items      PurchaseItem[]
+  inward_items_mapped InwardReceiptItem[] @relation("InwardMappedVariant")
 
   @@unique([product_id, sku])
   @@unique([product_id, product_code])
@@ -1249,15 +1250,19 @@ model InwardReceiptItem {
   rack_shelf        String?
   position          String?
   mapped_product_id String?
+  /// SKU-level mapping: which variant receives stock on MAPPED.
+  mapped_variant_id String?
   remarks           String?
 
   inward_receipt InwardReceipt @relation(fields: [inward_id], references: [inward_id], onDelete: Cascade)
   mapped_product Product?      @relation(fields: [mapped_product_id], references: [product_id], onDelete: SetNull)
+  mapped_variant ProductVariant? @relation("InwardMappedVariant", fields: [mapped_variant_id], references: [variant_id], onDelete: SetNull)
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
   @@unique([inward_id, line_no])
   @@index([mapped_product_id])
+  @@index([mapped_variant_id])
   @@map("inward_receipt_items")
 }

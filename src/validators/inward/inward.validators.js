@@ -22,6 +22,7 @@ const inwardItemRules = [
   body('rack_shelf').optional({ nullable: true }).isString().trim().isLength({ max: 100 }),
   body('position').optional({ nullable: true }).isString().trim().isLength({ max: 100 }),
   body('mapped_product_id').optional({ nullable: true }).isString().trim().notEmpty(),
+  body('mapped_variant_id').optional({ nullable: true }).isString().trim().notEmpty(),
   body('remarks').optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
 ];
 
@@ -66,6 +67,7 @@ const bulkAddInwardItemsValidator = [
   body('items.*.position').optional({ nullable: true }).isString().trim().isLength({ max: 100 }),
   body('items.*.variant_text').optional({ nullable: true }).isString().trim().isLength({ max: 200 }),
   body('items.*.mapped_product_id').optional({ nullable: true }).isString().trim().notEmpty(),
+  body('items.*.mapped_variant_id').optional({ nullable: true }).isString().trim().notEmpty(),
   body('items.*.remarks').optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
 ];
 
@@ -83,6 +85,7 @@ const updateInwardItemValidator = [
   body('rack_shelf').optional({ nullable: true }).isString().trim().isLength({ max: 100 }),
   body('position').optional({ nullable: true }).isString().trim().isLength({ max: 100 }),
   body('mapped_product_id').optional({ nullable: true }).isString().trim().notEmpty(),
+  body('mapped_variant_id').optional({ nullable: true }).isString().trim().notEmpty(),
   body('remarks').optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
 ];
 

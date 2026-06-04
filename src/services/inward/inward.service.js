@@ -12,6 +12,11 @@ const {
   assertVendorInvoiceNotDuplicate,
   buildPurchaseLinesFromInwardItems,
 } = require('../../utils/inwardPurchase.utils');
+const {
+  resolveVariantForInwardItem,
+  resolveMappedVariantOnSave,
+  assertAllInwardItemsHaveVariantMapping,
+} = require('../../utils/inwardVariantMapping.utils');
 
 const MUTABLE_STATUSES = new Set(['ARRIVED']);
 
@@ -47,6 +52,7 @@ const ITEM_SELECT = {
   rack_shelf: true,
   position: true,
   mapped_product_id: true,
+  mapped_variant_id: true,
   remarks: true,
   created_at: true,
   updated_at: true,
@@ -138,6 +144,7 @@ const sanitizeItemPayload = (data) => ({
   rack_shelf: data.rack_shelf ?? null,
   position: data.position ?? null,
   mapped_product_id: data.mapped_product_id ?? null,
+  mapped_variant_id: data.mapped_variant_id ?? null,
   remarks: data.remarks ?? null,
 });
 
@@ -146,50 +153,6 @@ const invalidateProductCaches = async (productId, warehouseId) => {
     cacheDel(productDetailCacheKey(productId)),
     cacheDelByPattern(productListCachePattern(warehouseId)),
   ]);
-};
-
-/** Resolve which variant receives stock when an inward line maps to a product. */
-const resolveVariantForInwardItem = async (tx, item) => {
-  const productId = item.mapped_product_id;
-  if (!productId) {
-    throw new AppError('Inward item has no mapped product', 400, 'INWARD_ITEM_NOT_MAPPED');
-  }
-
-  const variantText = item.variant_text ? String(item.variant_text).trim() : '';
-  if (variantText) {
-    const matched = await tx.productVariant.findFirst({
-      where: {
-        product_id: productId,
-        is_active: true,
-        OR: [
-          { product_code: { equals: variantText, mode: 'insensitive' } },
-          { sku: { equals: variantText, mode: 'insensitive' } },
-          { system_barcode: { equals: variantText, mode: 'insensitive' } },
-        ],
-      },
-      select: { variant_id: true, product_id: true, low_stock_threshold: true },
-    });
-    if (matched) return matched;
-  }
-
-  const defaultVariant = await tx.productVariant.findFirst({
-    where: { product_id: productId, is_active: true, is_default: true },
-    orderBy: { sort_order: 'asc' },
-    select: { variant_id: true, product_id: true, low_stock_threshold: true },
-  });
-  if (defaultVariant) return defaultVariant;
-
-  const firstVariant = await tx.productVariant.findFirst({
-    where: { product_id: productId, is_active: true },
-    orderBy: [{ sort_order: 'asc' }, { created_at: 'asc' }],
-    select: { variant_id: true, product_id: true, low_stock_threshold: true },
-  });
-
-  if (!firstVariant) {
-    throw new AppError('Mapped product has no active variant for stock', 409, 'MAPPED_PRODUCT_NO_VARIANT');
-  }
-
-  return firstVariant;
 };
 
 const applyStockFromMappedInward = async (tx, inwardId, warehouseId, actorUserId, purchaseEntryId = null) => {
@@ -202,6 +165,7 @@ const applyStockFromMappedInward = async (tx, inwardId, warehouseId, actorUserId
     where: { inward_id: inwardId, mapped_product_id: { not: null } },
     select: {
       mapped_product_id: true,
+      mapped_variant_id: true,
       item_name: true,
       variant_text: true,
       quantity_received: true,
@@ -429,11 +393,15 @@ const InwardService = {
                 product_id: true,
                 product_code: true,
                 name: true,
-                variants: {
-                  where: { is_default: true },
-                  take: 1,
-                  select: { variant_id: true, system_barcode: true, sku: true },
-                },
+              },
+            },
+            mapped_variant: {
+              select: {
+                variant_id: true,
+                product_code: true,
+                sku: true,
+                system_barcode: true,
+                attributes: true,
               },
             },
           },
@@ -469,11 +437,19 @@ const InwardService = {
 
     return prisma.$transaction(async (tx) => {
       const lineNo = await nextLineNo(tx, inwardId);
+      const payload = sanitizeItemPayload(data);
+      if (payload.mapped_product_id) {
+        payload.mapped_variant_id = await resolveMappedVariantOnSave(tx, {
+          productId: payload.mapped_product_id,
+          variantId: payload.mapped_variant_id,
+          warehouseId: inwardWarehouse?.warehouse_id,
+        });
+      }
       return tx.inwardReceiptItem.create({
         data: {
           inward_id: inwardId,
           line_no: lineNo,
-          ...sanitizeItemPayload(data),
+          ...payload,
         },
         select: ITEM_SELECT,
       });
@@ -545,11 +521,15 @@ const InwardService = {
       throw new AppError('Inward item not found', 404, 'INWARD_ITEM_NOT_FOUND');
     }
 
-    if (Object.prototype.hasOwnProperty.call(data, 'mapped_product_id')) {
-      const inwardWarehouse = await prisma.inwardReceipt.findUnique({
-        where: { inward_id: inwardId },
-        select: { warehouse_id: true },
-      });
+    const inwardWarehouse = await prisma.inwardReceipt.findUnique({
+      where: { inward_id: inwardId },
+      select: { warehouse_id: true },
+    });
+
+    const hasProductUpdate = Object.prototype.hasOwnProperty.call(data, 'mapped_product_id');
+    const hasVariantUpdate = Object.prototype.hasOwnProperty.call(data, 'mapped_variant_id');
+
+    if (hasProductUpdate) {
       await assertMappedProduct(data.mapped_product_id, inwardWarehouse?.warehouse_id);
     }
 
@@ -564,6 +544,7 @@ const InwardService = {
       'rack_shelf',
       'position',
       'mapped_product_id',
+      'mapped_variant_id',
       'remarks',
     ];
     const payload = {};
@@ -574,10 +555,38 @@ const InwardService = {
       throw new AppError('No updatable fields provided', 400, 'EMPTY_UPDATE');
     }
 
-    return prisma.inwardReceiptItem.update({
-      where: { inward_item_id: inwardItemId },
-      data: payload,
-      select: ITEM_SELECT,
+    return prisma.$transaction(async (tx) => {
+      const current = await tx.inwardReceiptItem.findUnique({
+        where: { inward_item_id: inwardItemId },
+        select: { mapped_product_id: true, mapped_variant_id: true },
+      });
+
+      const nextProductId = hasProductUpdate ? data.mapped_product_id : current.mapped_product_id;
+      const clearingProduct = hasProductUpdate && !data.mapped_product_id;
+
+      if (clearingProduct) {
+        payload.mapped_variant_id = null;
+      } else if (nextProductId && (hasProductUpdate || hasVariantUpdate)) {
+        const variantIdToSave = await resolveMappedVariantOnSave(tx, {
+          productId: nextProductId,
+          variantId: hasVariantUpdate ? data.mapped_variant_id : current.mapped_variant_id,
+          warehouseId: inwardWarehouse?.warehouse_id,
+        });
+        payload.mapped_product_id = nextProductId;
+        payload.mapped_variant_id = variantIdToSave;
+      }
+
+      return tx.inwardReceiptItem.update({
+        where: { inward_item_id: inwardItemId },
+        data: payload,
+        select: {
+          ...ITEM_SELECT,
+          mapped_product: { select: { product_id: true, name: true, product_code: true } },
+          mapped_variant: {
+            select: { variant_id: true, sku: true, product_code: true, system_barcode: true },
+          },
+        },
+      });
     });
   },
 
@@ -650,6 +659,10 @@ const InwardService = {
     };
   
     const updated = await prisma.$transaction(async (tx) => {
+      if (status === 'MAPPED') {
+        await assertAllInwardItemsHaveVariantMapping(tx, inwardId);
+      }
+
       const receipt = await tx.inwardReceipt.update({
         where: { inward_id: inwardId },
         data,
@@ -667,6 +680,10 @@ const InwardService = {
           where: { inward_id: inwardId, mapped_product_id: { not: null } },
           select: {
             mapped_product_id: true,
+            mapped_variant_id: true,
+            variant_text: true,
+            item_name: true,
+            inward_item_id: true,
             quantity_received: true,
             purchase_cost: true,
             batch_number: true,

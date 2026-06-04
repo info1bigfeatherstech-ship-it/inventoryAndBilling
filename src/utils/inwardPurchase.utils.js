@@ -1,6 +1,7 @@
 const prisma = require('./prisma.utils');
 const { AppError } = require('../errors/AppError');
 const { calculatePurchaseLineTax, aggregatePurchaseTotals } = require('./purchaseTax.utils');
+const { resolveVariantForInwardItem } = require('./inwardVariantMapping.utils');
 
 /**
  * Block duplicate vendor invoice for the same vendor when completing GRN.
@@ -72,10 +73,17 @@ const buildPurchaseLinesFromInwardItems = async (tx, inwardItems) => {
   for (const item of inwardItems) {
     if (!item.mapped_product_id) continue;
 
-    const variant = await resolveDefaultVariantForProduct(tx, item.mapped_product_id);
+    const resolved = await resolveVariantForInwardItem(tx, item);
+    const variant = await tx.productVariant.findUnique({
+      where: { variant_id: resolved.variant_id },
+      select: {
+        variant_id: true,
+        product: { select: { gst_percent: true, gst_type: true } },
+      },
+    });
     if (!variant) {
       throw new AppError(
-        `Mapped product has no active variant for purchase: ${item.mapped_product_id}`,
+        `Mapped variant not found for purchase: ${item.mapped_product_id}`,
         409,
         'MAPPED_PRODUCT_NO_VARIANT'
       );
