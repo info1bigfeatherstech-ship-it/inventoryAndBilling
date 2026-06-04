@@ -5,6 +5,7 @@ const { parsePagination } = require('../../utils/pagination.utils');
 const { resolveWarehouseId, applyWarehouseScope } = require('../../utils/productAccess.utils');
 const { cacheDel, cacheDelByPattern, productDetailCacheKey, productListCachePattern } = require('../../utils/cache.utils');
 const { createStockLedgerEntry } = require('../stock/stockLedger.helpers');
+const { aggregateStocksByVariant } = require('../../utils/stockAggregate.utils');
 const logger = require('../../utils/logger.utils');
 
 const TX_OPTIONS = { isolationLevel: 'Serializable' };
@@ -35,6 +36,14 @@ const STOCK_SELECT = {
     },
   },
   warehouse: { select: { warehouse_id: true, warehouse_code: true, warehouse_name: true } },
+  last_purchase: {
+    select: {
+      purchase_id: true,
+      purchase_number: true,
+      purchase_date: true,
+      vendor: { select: { vendor_id: true, company_name: true } },
+    },
+  },
 };
 
 const sanitizeStockPayload = (data) => ({
@@ -157,6 +166,34 @@ const ProductStockService = {
   async listStocks(query = {}, user) {
     const { page, limit, skip, take } = parsePagination(query, { page: 1, limit: 50, maxLimit: 100 });
     const where = buildStockWhere(query, user);
+    const view = String(query.view || 'batch').toLowerCase();
+
+    if (view === 'variant') {
+      const rows = await prisma.productStock.findMany({
+        where,
+        take: 5000,
+        orderBy: [{ updated_at: 'desc' }],
+        select: STOCK_SELECT,
+      });
+      const aggregated = aggregateStocksByVariant(rows);
+      const total = aggregated.length;
+      const stats = {
+        sku_count: total,
+        total_units: aggregated.reduce((sum, row) => sum + (Number(row.quantity) || 0), 0),
+        low_stock_count: aggregated.filter(
+          (row) => row.quantity > 0 && row.quantity <= (row.low_stock_threshold ?? 10)
+        ).length,
+        out_of_stock_count: aggregated.filter((row) => row.quantity === 0).length,
+      };
+      return {
+        total,
+        page,
+        limit,
+        stocks: aggregated.slice(skip, skip + take),
+        view: 'variant',
+        stats,
+      };
+    }
 
     const [total, stocks] = await Promise.all([
       prisma.productStock.count({ where }),
@@ -169,7 +206,7 @@ const ProductStockService = {
       }),
     ]);
 
-    return { total, page, limit, stocks };
+    return { total, page, limit, stocks, view: 'batch' };
   },
 
   async getStockById(stockId, user) {

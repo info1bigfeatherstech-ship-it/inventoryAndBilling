@@ -2,6 +2,7 @@ const prisma = require('../../utils/prisma.utils');
 const { AppError } = require('../../middlewares/error.middleware');
 const { parsePagination } = require('../../utils/pagination.utils');
 const { generatePurchaseEntryPdf } = require('./purchaseEntryPdf.service');
+const { buildPurchaseDisplayLines } = require('../../utils/purchaseDisplay.utils');
 
 const PURCHASE_SELECT = {
   purchase_id: true,
@@ -115,11 +116,16 @@ const PurchaseEntryService = {
                 product_id: true,
                 product_code: true,
                 name: true,
-                variants: {
-                  where: { is_default: true },
-                  take: 1,
-                  select: { variant_id: true, sku: true },
-                },
+                hsn_code: true,
+              },
+            },
+            variant: {
+              select: {
+                variant_id: true,
+                sku: true,
+                product_code: true,
+                system_barcode: true,
+                attributes: true,
               },
             },
           },
@@ -136,7 +142,13 @@ const PurchaseEntryService = {
       throw new AppError('Purchase entry not found', 404, 'PURCHASE_NOT_FOUND');
     }
 
-    return purchase;
+    const display = buildPurchaseDisplayLines(purchase.items);
+
+    return {
+      ...purchase,
+      display_lines: display.lines,
+      display_lines_by_variant: display.lines_by_variant,
+    };
   },
 
   /**

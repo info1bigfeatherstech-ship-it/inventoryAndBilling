@@ -35,6 +35,7 @@ const listStockValidator = [
   query('product_id').optional().isString().trim().notEmpty(),
   query('batch_number').optional().isString().trim(),
   query('warehouse_id').optional().isString().trim().notEmpty(),
+  query('view').optional().isIn(['batch', 'variant']),
 ];
 
 const bulkStockUpdateValidator = [

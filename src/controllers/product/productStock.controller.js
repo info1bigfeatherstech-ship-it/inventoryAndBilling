@@ -22,12 +22,15 @@ const ProductStockController = {
   }),
 
   list: asyncHandler(async (req, res) => {
-    const { total, page, limit, stocks } = await ProductStockService.listStocks(req.query, withUserContext(req));
+    const { total, page, limit, stocks, stats } = await ProductStockService.listStocks(req.query, withUserContext(req));
     return successResponse(res, req, {
       statusCode: 200,
       message: 'Stock records fetched successfully',
       data: stocks,
-      meta: paginatedMeta({ page, limit, total }),
+      meta: {
+        ...paginatedMeta({ page, limit, total }),
+        ...(stats ? { stats } : {}),
+      },
     });
   }),
 

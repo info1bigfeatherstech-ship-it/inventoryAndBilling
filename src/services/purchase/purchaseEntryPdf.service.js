@@ -45,11 +45,16 @@ const buildPurchaseEntryPdfBuffer = (purchase) =>
 
       pdf.font('Helvetica');
       let y = tableTop + 14;
-      (purchase.items || []).forEach((item, idx) => {
+      const pdfLines = purchase.display_lines_by_variant?.length
+        ? purchase.display_lines_by_variant
+        : purchase.items || [];
+
+      pdfLines.forEach((item, idx) => {
         x = 40;
         pdf.text(String(idx + 1), x, y, { width: 18 });
         x += 20;
-        pdf.text(item.product?.name || item.product_id, x, y, { width: 120 });
+        const label = item.variant_sku || item.variant?.sku || item.product?.name || item.product_name || item.product_id;
+        pdf.text(String(label), x, y, { width: 120 });
         x += 122;
         pdf.text(String(item.quantity), x, y, { width: 28 });
         x += 30;
