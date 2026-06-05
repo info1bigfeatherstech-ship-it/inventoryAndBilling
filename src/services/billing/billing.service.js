@@ -20,6 +20,9 @@ const {
   aggregateBillTotals,
   splitGstComponents,
   derivePaymentStatus,
+  resolvePlaceOfSupplyStateCode,
+  normalizeProductGstType,
+  stateCodeFromGstin,
 } = require('../../utils/billing.utils');
 const { generateBillNumber } = require('../../utils/billNumber.utils');
 const ShopBankAccountService = require('../shop/shopBankAccount.service');
@@ -61,6 +64,7 @@ const BILL_SELECT = {
   staff_name_snapshot: true,
   created_at: true,
   updated_at: true,
+  place_of_supply_state_code: true,
   shop: {
     select: {
       shop_id: true,
@@ -68,6 +72,7 @@ const BILL_SELECT = {
       shop_name: true,
       address: true,
       city: true,
+      pincode: true,
       state_code: true,
       phone: true,
       email: true,
@@ -80,6 +85,8 @@ const BILL_SELECT = {
       mobile: true,
       loyalty_tier: true,
       gst_number: true,
+      address: true,
+      city: true,
       state_code: true,
     },
   },
@@ -89,8 +96,16 @@ const BILL_SELECT = {
       account_holder_name: true,
       bank_name: true,
       branch_name: true,
+      account_number: true,
       ifsc_code: true,
       upi_id: true,
+    },
+  },
+  gst_config: {
+    select: {
+      gst_config_id: true,
+      gst_number: true,
+      legal_name: true,
     },
   },
   items: {
@@ -100,6 +115,7 @@ const BILL_SELECT = {
       product_id: true,
       quantity: true,
       unit_price: true,
+      mrp_unit_price: true,
       price_type: true,
       gst_percent: true,
       gst_type: true,
@@ -113,6 +129,7 @@ const BILL_SELECT = {
         select: {
           variant_id: true,
           sku: true,
+          mrp: true,
           product_code: true,
           product: { select: { product_id: true, name: true } },
         },
@@ -136,7 +153,16 @@ const BILL_SELECT = {
 const assertShopActive = async (shopId) => {
   const shop = await prisma.shop.findUnique({
     where: { shop_id: shopId },
-    select: { shop_id: true, is_active: true, shop_name: true, city: true, state_code: true },
+    select: {
+      shop_id: true,
+      is_active: true,
+      shop_name: true,
+      address: true,
+      city: true,
+      pincode: true,
+      state_code: true,
+      phone: true,
+    },
   });
   if (!shop) throw new AppError('Shop not found', 404, 'SHOP_NOT_FOUND');
   if (!shop.is_active) throw new AppError('Shop is inactive', 409, 'SHOP_INACTIVE');
@@ -151,6 +177,7 @@ const loadVariantsForBill = async (items) => {
       variant_id: true,
       product_id: true,
       sku: true,
+      mrp: true,
       is_active: true,
       low_stock_threshold: true,
       product: {
@@ -213,6 +240,22 @@ const BillingService = {
         : 0;
       const extraDiscountPercent = Math.min(100, Math.max(0, Number(data.discount) || 0));
 
+      let shopStateCode = shop.state_code;
+      if (!shopStateCode) {
+        const shopGstRow = await prisma.shopGstRegistration.findFirst({
+          where: { shop_id: shopId, is_default: true, is_active: true },
+          select: { gst_number: true },
+        });
+        shopStateCode = stateCodeFromGstin(shopGstRow?.gst_number);
+      }
+
+      const placeOfSupplyStateCode = resolvePlaceOfSupplyStateCode({
+        customerStateCode: customer?.state_code,
+        customerGstin,
+        overrideCode: data.place_of_supply_state_code,
+        shopStateCode,
+      });
+
       const computedLines = data.items.map((item) => {
         const variant = variantMap.get(item.variant_id);
         const qty = Number(item.quantity);
@@ -224,11 +267,16 @@ const BillingService = {
           throw new AppError('unit_price must be >= 0', 400, 'INVALID_UNIT_PRICE');
         }
 
+        const lineGstType =
+          billType === 'GST_INVOICE'
+            ? normalizeProductGstType(variant.product.gst_type)
+            : variant.product.gst_type;
+
         const amounts = calculateLineAmounts({
           quantity: qty,
           unitPrice,
           gstPercent: variant.product.gst_percent,
-          gstType: variant.product.gst_type,
+          gstType: lineGstType,
           billType,
           lineDiscount: Number(item.discount) || 0,
         });
@@ -238,6 +286,7 @@ const BillingService = {
           product_id: variant.product_id,
           quantity: qty,
           unit_price: unitPrice,
+          mrp_unit_price: Number(variant.mrp) || unitPrice,
           price_type: item.price_type || 'SPECIAL',
           gst_percent: variant.product.gst_percent,
           gst_type: amounts.gst_type,
@@ -271,6 +320,24 @@ const BillingService = {
         });
       }
 
+      let gstConfigId = data.gst_config_id ?? null;
+      if (billType === 'GST_INVOICE') {
+        if (!gstConfigId) {
+          const defaultGst = await prisma.shopGstRegistration.findFirst({
+            where: { shop_id: shopId, is_default: true, is_active: true },
+            select: { gst_config_id: true },
+          });
+          if (!defaultGst) {
+            throw new AppError(
+              'Please add shop GSTIN from Shop Settings to generate GST invoices',
+              400,
+              'SHOP_GST_REQUIRED'
+            );
+          }
+          gstConfigId = defaultGst.gst_config_id;
+        }
+      }
+
       const activeStaffCount = await ShopStaffCodeService.countActiveForShop(shopId);
       let staffSnapshot = null;
       if (activeStaffCount > 0) {
@@ -302,7 +369,7 @@ const BillingService = {
             customer_mobile: customer?.mobile ?? data.customer_mobile?.trim() ?? null,
             customer_name: customer?.name ?? data.customer_name?.trim() ?? null,
             customer_gstin: customerGstin,
-            place_of_supply_state_code: null,
+            place_of_supply_state_code: placeOfSupplyStateCode,
             subtotal: totals.subtotal,
             discount: totals.discount,
             taxable_amount: totals.taxable_amount,
@@ -312,7 +379,7 @@ const BillingService = {
             payment_method: null,
             paid_amount: 0,
             balance_amount: totals.total_amount,
-            gst_config_id: data.gst_config_id ?? null,
+            gst_config_id: gstConfigId,
             bank_account_id: data.bank_account_id ?? null,
             sales_channel: data.sales_channel || 'WALK_IN',
             created_by_user_id: user.userId,
@@ -325,6 +392,7 @@ const BillingService = {
                 product_id: line.product_id,
                 quantity: line.quantity,
                 unit_price: line.unit_price,
+                mrp_unit_price: line.mrp_unit_price,
                 price_type: line.price_type,
                 gst_percent: line.gst_percent,
                 gst_type: line.gst_type,

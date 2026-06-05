@@ -20,6 +20,59 @@ const PRODUCT_GST_TYPES = ['CGST_SGST', 'IGST', 'EXEMPT'];
 
 const roundMoney = (value) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 
+const normalizeStateCode = (value) => {
+  if (value == null || String(value).trim() === '') return null;
+  const raw = String(value).trim();
+  if (/^\d{2}$/.test(raw)) return raw;
+  const fromGstin = raw.length >= 2 ? raw.slice(0, 2) : null;
+  return fromGstin && /^\d{2}$/.test(fromGstin) ? fromGstin : null;
+};
+
+const stateCodeFromGstin = (gstin) => {
+  const g = String(gstin || '').trim().toUpperCase();
+  if (g.length < 2) return null;
+  return normalizeStateCode(g.slice(0, 2));
+};
+
+/**
+ * Place of supply: override → customer state → GSTIN prefix → shop state.
+ */
+const resolvePlaceOfSupplyStateCode = ({
+  customerStateCode,
+  customerGstin,
+  overrideCode,
+  shopStateCode,
+}) => {
+  const fromOverride = normalizeStateCode(overrideCode);
+  if (fromOverride) return fromOverride;
+
+  const fromCustomer = normalizeStateCode(customerStateCode);
+  if (fromCustomer) return fromCustomer;
+
+  const fromGstin = stateCodeFromGstin(customerGstin);
+  if (fromGstin) return fromGstin;
+
+  return normalizeStateCode(shopStateCode);
+};
+
+/**
+ * Intra-state → CGST+SGST; inter-state → IGST (exempt products stay exempt).
+ */
+const resolveSupplyGstType = (productGstType, shopStateCode, placeOfSupplyCode) => {
+  if (normalizeProductGstType(productGstType) === 'EXEMPT') return 'EXEMPT';
+  const shop = normalizeStateCode(shopStateCode);
+  const pos = normalizeStateCode(placeOfSupplyCode);
+  if (!shop || !pos) return 'CGST_SGST';
+  return shop === pos ? 'CGST_SGST' : 'IGST';
+};
+
+const isIntraStateSupply = (shopStateCode, placeOfSupplyCode) => {
+  const shop = normalizeStateCode(shopStateCode);
+  const pos = normalizeStateCode(placeOfSupplyCode);
+  if (!shop || !pos) return true;
+  return shop === pos;
+};
+
 const normalizeProductGstType = (gstType) => {
   const t = String(gstType || 'CGST_SGST').trim().toUpperCase();
   return PRODUCT_GST_TYPES.includes(t) ? t : 'CGST_SGST';
@@ -115,10 +168,11 @@ const calculateLineAmounts = ({
   const taxableAmount = roundMoney(lineSubtotal - discount);
   const productGstType = normalizeProductGstType(gstType);
   const isGstInvoice = billType === 'GST_INVOICE';
+  const isTaxableBill = isGstInvoice;
 
   let taxAmount = 0;
   if (
-    isGstInvoice &&
+    isTaxableBill &&
     taxableAmount > 0 &&
     productGstType !== 'EXEMPT' &&
     Number(gstPercent) > 0
@@ -128,7 +182,7 @@ const calculateLineAmounts = ({
 
   const lineTotal = roundMoney(taxableAmount + taxAmount);
   let tax_mode = 'EXEMPT';
-  if (isGstInvoice && taxAmount > 0) {
+  if (isTaxableBill && taxAmount > 0) {
     tax_mode = productGstType === 'IGST' ? 'IGST' : 'CGST_SGST';
   }
 
@@ -203,19 +257,15 @@ const splitGstComponents = (gstAmount, intraState) => {
   return { cgst: half, sgst: roundMoney(tax - half), igst: 0 };
 };
 
-/** @deprecated Reports only */
-const isIntraStateSupply = (shopStateCode, placeOfSupplyCode) => {
-  const shop = shopStateCode ? String(shopStateCode).trim() : null;
-  const pos = placeOfSupplyCode ? String(placeOfSupplyCode).trim() : shop;
-  if (!shop || !pos) return true;
-  return shop === pos;
-};
-
 module.exports = {
   LOYALTY_TIERS,
   LOYALTY_DISCOUNT_PERCENT,
   PRODUCT_GST_TYPES,
   roundMoney,
+  normalizeStateCode,
+  stateCodeFromGstin,
+  resolvePlaceOfSupplyStateCode,
+  resolveSupplyGstType,
   normalizeProductGstType,
   isCgstSgstProductType,
   splitTaxByProductGstType,

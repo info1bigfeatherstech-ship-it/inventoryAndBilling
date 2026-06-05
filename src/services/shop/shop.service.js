@@ -5,6 +5,7 @@ const { assertShopReadAccess, applyShopListScope } = require('../../utils/shopAc
 const { normalizeStateCode } = require('../../utils/billing.utils');
 const { isValidStateCode } = require('../../constants/indianStateCodes');
 const logger = require('../../utils/logger.utils');
+const { assertValidGstNumber } = require('../../utils/shopBank.utils');
 
 const parseShopStateCode = (value) => {
   if (value == null || String(value).trim() === '') return null;
@@ -21,6 +22,7 @@ const SHOP_SELECT = {
   shop_name: true,
   address: true,
   city: true,
+  pincode: true,
   state_code: true,
   phone: true,
   email: true,
@@ -33,6 +35,65 @@ const SHOP_SELECT = {
 };
 
 const normalizeShopCode = (value) => String(value || '').trim().toUpperCase();
+
+const DEFAULT_GST_SELECT = {
+  where: { is_default: true, is_active: true },
+  take: 1,
+  select: { gst_config_id: true, gst_number: true, legal_name: true },
+};
+
+const attachDefaultGstFields = (shop) => {
+  if (!shop) return shop;
+  const defaultGst = shop.gst_configs?.[0] ?? null;
+  const { gst_configs, ...rest } = shop;
+  return {
+    ...rest,
+    gst_number: defaultGst?.gst_number ?? null,
+    default_gst_config_id: defaultGst?.gst_config_id ?? null,
+  };
+};
+
+const upsertShopDefaultGst = async (shopId, gstNumber, legalName, tx = prisma) => {
+  const gst = assertValidGstNumber(gstNumber);
+  const existing = await tx.shopGstRegistration.findFirst({
+    where: { shop_id: shopId, is_default: true },
+    select: { gst_config_id: true, gst_number: true },
+  });
+
+  if (existing) {
+    if (existing.gst_number !== gst) {
+      const conflict = await tx.shopGstRegistration.findUnique({
+        where: { shop_id_gst_number: { shop_id: shopId, gst_number: gst } },
+        select: { gst_config_id: true },
+      });
+      if (conflict && conflict.gst_config_id !== existing.gst_config_id) {
+        throw new AppError(`GSTIN "${gst}" is already registered for this shop`, 409, 'SHOP_GST_EXISTS');
+      }
+      await tx.shopGstRegistration.update({
+        where: { gst_config_id: existing.gst_config_id },
+        data: { gst_number: gst, legal_name: legalName ?? undefined },
+      });
+    } else if (legalName) {
+      await tx.shopGstRegistration.update({
+        where: { gst_config_id: existing.gst_config_id },
+        data: { legal_name: legalName },
+      });
+    }
+    return existing.gst_config_id;
+  }
+
+  const created = await tx.shopGstRegistration.create({
+    data: {
+      shop_id: shopId,
+      gst_number: gst,
+      legal_name: legalName ?? null,
+      is_default: true,
+      is_active: true,
+    },
+    select: { gst_config_id: true },
+  });
+  return created.gst_config_id;
+};
 
 const buildShopWhere = (filters = {}, user) => {
   const where = {};
@@ -132,6 +193,7 @@ const ShopService = {
         shop_name: String(data.shop_name).trim(),
         address: String(data.address).trim(),
         city: String(data.city).trim(),
+        pincode: data.pincode ? String(data.pincode).trim() : null,
         state_code:
           data.state_code != null && String(data.state_code).trim() !== ''
             ? parseShopStateCode(data.state_code)
@@ -153,8 +215,17 @@ const ShopService = {
     });
     logger.info('User shop_id updated', { user_id: ownerUserId, shop_id: shop.shop_id });
   }
+    if (data.gst_number?.trim()) {
+      await upsertShopDefaultGst(shop.shop_id, data.gst_number, data.shop_name);
+    }
+
     logger.info('Shop created', { shop_id: shop.shop_id, shop_code: shop.shop_code, owner_id: ownerUserId });
-    return shop;
+
+    const withGst = await prisma.shop.findUnique({
+      where: { shop_id: shop.shop_id },
+      select: { ...SHOP_SELECT, gst_configs: DEFAULT_GST_SELECT },
+    });
+    return attachDefaultGstFields(withGst);
   },
 
   async listShops(query = {}, user) {
@@ -168,11 +239,11 @@ const ShopService = {
         skip,
         take,
         orderBy: [{ is_active: 'desc' }, { shop_name: 'asc' }],
-        select: SHOP_SELECT,
+        select: { ...SHOP_SELECT, gst_configs: DEFAULT_GST_SELECT },
       }),
     ]);
 
-    return { total, page, limit, shops };
+    return { total, page, limit, shops: shops.map(attachDefaultGstFields) };
   },
 
   async getShopById(shopId, user) {
@@ -194,11 +265,12 @@ const ShopService = {
             quantity_in_transit: true,
           },
         },
+        gst_configs: DEFAULT_GST_SELECT,
       },
     });
 
     if (!shop) throw new AppError('Shop not found', 404, 'SHOP_NOT_FOUND');
-    return shop;
+    return attachDefaultGstFields(shop);
   },
   async getShopByOwnerId(ownerUserId) {
     const shop = await prisma.shop.findUnique({
@@ -217,6 +289,7 @@ const ShopService = {
             quantity_in_transit: true,
           },
         },
+        gst_configs: DEFAULT_GST_SELECT,
       },
     });
   
@@ -224,7 +297,7 @@ const ShopService = {
       throw new AppError('No shop found for this owner', 404, 'SHOP_NOT_FOUND');
     }
   
-    return shop;
+    return attachDefaultGstFields(shop);
   },
 
   async updateShop(shopId, data) {
@@ -236,7 +309,19 @@ const ShopService = {
   
     const payload = {};
     // ⭐ ADD 'owner_user_id' and 'sales_channels' to allowed fields
-    const allowed = ['shop_name', 'address', 'city', 'state_code', 'phone', 'email', 'is_active', 'remarks', 'owner_user_id', 'sales_channels'];
+    const allowed = [
+      'shop_name',
+      'address',
+      'city',
+      'pincode',
+      'state_code',
+      'phone',
+      'email',
+      'is_active',
+      'remarks',
+      'owner_user_id',
+      'sales_channels',
+    ];
   
     for (const key of allowed) {
       if (Object.prototype.hasOwnProperty.call(data, key)) {
@@ -295,11 +380,21 @@ const ShopService = {
       throw new AppError('sales_channels must be an array', 400, 'INVALID_SALES_CHANNELS');
     }
   
-    return prisma.shop.update({
+    const updated = await prisma.shop.update({
       where: { shop_id: shopId },
       data: payload,
       select: SHOP_SELECT,
     });
+
+    if (Object.prototype.hasOwnProperty.call(data, 'gst_number') && data.gst_number?.trim()) {
+      await upsertShopDefaultGst(shopId, data.gst_number, data.shop_name || updated.shop_name);
+    }
+
+    const withGst = await prisma.shop.findUnique({
+      where: { shop_id: shopId },
+      select: { ...SHOP_SELECT, gst_configs: DEFAULT_GST_SELECT },
+    });
+    return attachDefaultGstFields(withGst);
   },
 
   async softDeleteShop(shopId) {

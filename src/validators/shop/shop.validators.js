@@ -3,6 +3,7 @@ const { body, param, query } = require('express-validator');
 const shopIdParam = [param('shopId').isString().trim().notEmpty()];
 
 const SHOP_CODE_RE = /^[A-Z0-9_]{3,20}$/;
+const GSTIN_BODY_RE = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/i;
 
 const createShopValidator = [
   body('shop_code')
@@ -18,6 +19,10 @@ const createShopValidator = [
   body('shop_name').isString().trim().isLength({ min: 2, max: 100 }),
   body('address').isString().trim().isLength({ min: 2, max: 300 }),
   body('city').isString().trim().isLength({ min: 2, max: 50 }),
+  body('pincode')
+    .optional({ nullable: true })
+    .matches(/^\d{6}$/)
+    .withMessage('pincode must be a 6-digit number'),
   body('state_code')
     .optional({ nullable: true })
     .matches(/^\d{2}$/)
@@ -39,6 +44,18 @@ body('sales_channels.*')
   .optional()
   .isIn(['WALK_IN', 'ONLINE', 'WHOLESALE', 'MHM', 'OWB', 'OTHER'])
   .withMessage('Invalid sales channel'),
+  body('gst_number')
+    .optional({ nullable: true })
+    .isString()
+    .trim()
+    .custom((v) => {
+      if (v == null || String(v).trim() === '') return true;
+      const gst = String(v).trim().toUpperCase();
+      if (!GSTIN_BODY_RE.test(gst)) {
+        throw new Error('gst_number must be a valid 15-character GSTIN');
+      }
+      return true;
+    }),
 ];
 
 const updateShopValidator = [
@@ -46,6 +63,7 @@ const updateShopValidator = [
   body('shop_name').optional().isString().trim().isLength({ min: 2, max: 100 }),
   body('address').optional().isString().trim().isLength({ min: 2, max: 300 }),
   body('city').optional().isString().trim().isLength({ min: 2, max: 50 }),
+  body('pincode').optional({ nullable: true }).matches(/^\d{6}$/),
   body('state_code').optional({ nullable: true }).matches(/^\d{2}$/),
   body('phone').optional().isString().trim().matches(/^[0-9]{10}$/),
   body('email').optional({ nullable: true }).isEmail(),
@@ -68,6 +86,18 @@ const updateShopValidator = [
     .optional()
     .isIn(['WALK_IN', 'ONLINE', 'WHOLESALE', 'MHM', 'OWB', 'OTHER'])
     .withMessage('Invalid sales channel'),
+  body('gst_number')
+    .optional({ nullable: true })
+    .isString()
+    .trim()
+    .custom((v) => {
+      if (v == null || String(v).trim() === '') return true;
+      const gst = String(v).trim().toUpperCase();
+      if (!GSTIN_BODY_RE.test(gst)) {
+        throw new Error('gst_number must be a valid 15-character GSTIN');
+      }
+      return true;
+    }),
 ];
 
 const listShopsValidator = [

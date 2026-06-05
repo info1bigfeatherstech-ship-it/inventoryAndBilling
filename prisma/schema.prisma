@@ -57,6 +57,7 @@ enum SalesChannel {
 enum BillType {
   GST_INVOICE
   NON_GST_INVOICE
+  ESTIMATE_INVOICE
 }
 
 enum PaymentMethod {
@@ -219,6 +220,7 @@ model Shop {
   shop_name  String
   address    String
   city       String
+  pincode    String?
   /// 2-digit GST state code for intra/inter-state tax determination.
   state_code String?
   phone      String
@@ -855,6 +857,8 @@ model BillLineItem {
   quantity   Int
   price_type PriceType @default(RETAIL)
   unit_price Float
+  /// MRP at time of sale (from variant.mrp) for invoice display.
+  mrp_unit_price Float?
 
   gst_percent    Float
   gst_type       GSTType @default(CGST_SGST)
