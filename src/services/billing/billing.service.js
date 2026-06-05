@@ -23,6 +23,7 @@ const {
 } = require('../../utils/billing.utils');
 const { generateBillNumber } = require('../../utils/billNumber.utils');
 const ShopBankAccountService = require('../shop/shopBankAccount.service');
+const ShopStaffCodeService = require('../shop/shopStaffCode.service');
 const logger = require('../../utils/logger.utils');
 
 const TX_OPTIONS = { isolationLevel: 'Serializable', maxWait: 10000, timeout: 30000 };
@@ -55,6 +56,9 @@ const BILL_SELECT = {
   cancelled_by_user_id: true,
   cancel_reason: true,
   created_by_user_id: true,
+  staff_code_id: true,
+  staff_code_value: true,
+  staff_name_snapshot: true,
   created_at: true,
   updated_at: true,
   shop: {
@@ -267,6 +271,21 @@ const BillingService = {
         });
       }
 
+      const activeStaffCount = await ShopStaffCodeService.countActiveForShop(shopId);
+      let staffSnapshot = null;
+      if (activeStaffCount > 0) {
+        if (!data.staff_code_id) {
+          throw new AppError(
+            'staff_code_id is required — select billing staff code before creating bill',
+            400,
+            'STAFF_CODE_REQUIRED'
+          );
+        }
+        staffSnapshot = await ShopStaffCodeService.resolveForBilling(data.staff_code_id, shopId);
+      } else if (data.staff_code_id) {
+        staffSnapshot = await ShopStaffCodeService.resolveForBilling(data.staff_code_id, shopId);
+      }
+
       const result = await prisma.$transaction(async (tx) => {
         for (const line of computedLines) {
           await ShopStockService.deductStockForSale(tx, shopId, line.variant_id, line.quantity);
@@ -297,6 +316,9 @@ const BillingService = {
             bank_account_id: data.bank_account_id ?? null,
             sales_channel: data.sales_channel || 'WALK_IN',
             created_by_user_id: user.userId,
+            staff_code_id: staffSnapshot?.staff_code_id ?? null,
+            staff_code_value: staffSnapshot?.staff_code_value ?? null,
+            staff_name_snapshot: staffSnapshot?.staff_name_snapshot ?? null,
             items: {
               create: computedLines.map((line) => ({
                 variant_id: line.variant_id,

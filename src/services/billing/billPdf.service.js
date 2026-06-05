@@ -57,6 +57,13 @@ const buildBillPdfBuffer = (bill) =>
       doc.text(`Invoice No: ${bill.bill_number}`, 40, metaY);
       doc.text(`Date: ${new Date(bill.created_at).toLocaleDateString('en-IN')}`, 40, metaY + 12);
       doc.text(`Bill Type: ${isGstInvoice ? 'GST Tax Invoice' : 'Retail (No GST)'}`, 40, metaY + 24);
+      if (bill.staff_code_value && bill.staff_name_snapshot) {
+        doc.text(
+          `Billing Staff: ${bill.staff_code_value} — ${bill.staff_name_snapshot}`,
+          40,
+          metaY + 36
+        );
+      }
 
       doc.text('Bill To:', 300, metaY, { underline: true });
       doc.text(`M/S: ${bill.customer_name || 'Walk-in Customer'}`, 300, metaY + 12);

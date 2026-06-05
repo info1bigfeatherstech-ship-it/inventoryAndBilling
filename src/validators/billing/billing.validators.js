@@ -30,6 +30,7 @@ const createBillValidator = [
     .isIn(['WALK_IN', 'ONLINE', 'WHOLESALE', 'MHM', 'OWB', 'OTHER']),
   body('gst_config_id').optional({ nullable: true }).isString().trim(),
   body('bank_account_id').optional({ nullable: true }).isString().trim(),
+  body('staff_code_id').optional({ nullable: true }).isString().trim(),
   body('credit_note_ids').optional().isArray(),
   body('credit_note_ids.*').optional().isString().trim().notEmpty(),
 ];

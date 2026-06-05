@@ -252,6 +252,7 @@ model Shop {
   bulk_transfers_from  BulkTransferRequest[] @relation("BulkTransferFromShop")
   bulk_transfers_to    BulkTransferRequest[] @relation("BulkTransferToShop")
   product_levels       ShopProductLevel[]
+  staff_codes          ShopStaffCode[]
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
@@ -259,6 +260,30 @@ model Shop {
   @@index([city])
   @@index([is_active])
   @@map("shops")
+}
+
+/// Counter staff identity for shared billing logins — code is stable; display_name can be reassigned.
+model ShopStaffCode {
+  staff_code_id String @id @default(cuid())
+  shop_id       String
+
+  /// Stable identifier printed on reports, e.g. SC001 (unique per shop).
+  code         String
+  display_name String
+  phone        String?
+
+  is_active Boolean @default(true)
+  remarks   String?
+
+  shop  Shop   @relation(fields: [shop_id], references: [shop_id], onDelete: Restrict)
+  bills Bill[]
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@unique([shop_id, code])
+  @@index([shop_id, is_active])
+  @@map("shop_staff_codes")
 }
 
 /// One row per GSTIN registered to a shop. Tax treatment (IGST vs CGST/SGST) follows
@@ -790,7 +815,13 @@ model Bill {
 
   created_by_user_id String
 
+  /// Snapshot at bill time — preserved when staff code is reassigned to another person.
+  staff_code_id       String?
+  staff_code_value    String?
+  staff_name_snapshot String?
+
   shop         Shop                 @relation(fields: [shop_id], references: [shop_id], onDelete: Restrict)
+  staff_code   ShopStaffCode?       @relation(fields: [staff_code_id], references: [staff_code_id], onDelete: SetNull)
   customer     Customer?            @relation(fields: [customer_id], references: [customer_id], onDelete: SetNull)
   gst_config   ShopGstRegistration? @relation(fields: [gst_config_id], references: [gst_config_id], onDelete: SetNull)
   bank_account ShopBankAccount?     @relation(fields: [bank_account_id], references: [bank_account_id], onDelete: SetNull)
@@ -811,6 +842,7 @@ model Bill {
   @@index([bill_number])
   @@index([is_cancelled])
   @@index([payment_status])
+  @@index([shop_id, staff_code_value, created_at])
   @@map("bills")
 }
 
