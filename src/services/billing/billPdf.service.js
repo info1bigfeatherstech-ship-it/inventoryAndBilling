@@ -51,12 +51,12 @@ const displayVal = (v) => {
 };
 
 /** Bold label + regular value on one line. */
-const drawLabelValue = (doc, x, y, label, value, maxW = 240) => {
-  doc.fontSize(FIELD_SIZE).font('Helvetica-Bold');
+const drawLabelValue = (doc, x, y, label, value, maxW = 240, size = FIELD_SIZE) => {
+  doc.fontSize(size).font('Helvetica-Bold');
   const labelText = `${label} : `;
   const labelW = doc.widthOfString(labelText);
   doc.text(labelText, x, y, { lineBreak: false });
-  doc.font('Helvetica').text(displayVal(value), x + labelW, y, {
+  doc.font('Helvetica').fontSize(size).text(displayVal(value), x + labelW, y, {
     width: Math.max(20, maxW - labelW),
     lineBreak: false,
   });
@@ -151,13 +151,14 @@ const renderGstTaxInvoice = (doc, bill) => {
   y += 16;
 
   // ── GST INVOICE title ──
-  doc.fontSize(13).font('Helvetica-Bold');
+  const gstTitleSize = 11;
+  doc.fontSize(gstTitleSize).font('Helvetica-Bold');
   const gstTitle = 'GST INVOICE';
   const gstTitleW = doc.widthOfString(gstTitle);
   const gstTitleX = M + (W - gstTitleW) / 2;
   doc.text(gstTitle, gstTitleX, y, { lineBreak: false });
-  drawManualUnderline(doc, gstTitleX, y, gstTitle, { size: 13, offset: 14 });
-  y += 20;
+  drawManualUnderline(doc, gstTitleX, y, gstTitle, { size: gstTitleSize, offset: 12 });
+  y += 18;
 
   // ── Shop identity ──
   doc.fontSize(16).font('Helvetica-Bold');
@@ -240,10 +241,19 @@ const renderGstTaxInvoice = (doc, bill) => {
   drawLabelValue(doc, rxPad, ry, 'Transport', '', rxW);
   ry += 11;
 
-  const payBoxH = 18;
+  const payFontSize = 9;
+  const payBoxH = 20;
   const payBoxY = ry + 6;
   strokeRect(doc, rx + 6, payBoxY, colW - 12, payBoxH);
-  drawLabelValue(doc, rx + 10, payBoxY + 5, 'Mode of Payment', bill.payment_method || '', colW - 20);
+  drawLabelValue(
+    doc,
+    rx + 10,
+    payBoxY + 6,
+    'Mode of Payment',
+    bill.payment_method || '',
+    colW - 20,
+    payFontSize,
+  );
 
   y += infoH;
 
