@@ -22,6 +22,7 @@ const {
   derivePaymentStatus,
 } = require('../../utils/billing.utils');
 const { generateBillNumber } = require('../../utils/billNumber.utils');
+const ShopBankAccountService = require('../shop/shopBankAccount.service');
 const logger = require('../../utils/logger.utils');
 
 const TX_OPTIONS = { isolationLevel: 'Serializable', maxWait: 10000, timeout: 30000 };
@@ -76,6 +77,16 @@ const BILL_SELECT = {
       loyalty_tier: true,
       gst_number: true,
       state_code: true,
+    },
+  },
+  bank_account: {
+    select: {
+      bank_account_id: true,
+      account_holder_name: true,
+      bank_name: true,
+      branch_name: true,
+      ifsc_code: true,
+      upi_id: true,
     },
   },
   items: {
@@ -241,6 +252,19 @@ const BillingService = {
       const paymentAmount = data.payment_amount != null ? roundMoney(data.payment_amount) : 0;
       if (paymentAmount > 0 && !data.payment_method) {
         throw new AppError('payment_method is required when payment_amount is provided', 400, 'PAYMENT_METHOD_REQUIRED');
+      }
+
+      if (data.payment_method === 'UPI' && paymentAmount > 0) {
+        if (!data.bank_account_id) {
+          throw new AppError('bank_account_id is required for UPI payments', 400, 'BANK_ACCOUNT_REQUIRED');
+        }
+        await ShopBankAccountService.assertBankAccountForBilling(data.bank_account_id, shopId, {
+          requireUpi: true,
+        });
+      } else if (data.bank_account_id) {
+        await ShopBankAccountService.assertBankAccountForBilling(data.bank_account_id, shopId, {
+          requireUpi: false,
+        });
       }
 
       const result = await prisma.$transaction(async (tx) => {

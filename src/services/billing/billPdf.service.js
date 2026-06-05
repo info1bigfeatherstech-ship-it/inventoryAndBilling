@@ -184,7 +184,27 @@ const buildBillPdfBuffer = (bill) =>
         40,
         doc.y
       );
-      doc.text('This is a computer generated invoice.', { align: 'center' });
+
+      if (bill.payment_method === 'UPI' && bill.bank_account) {
+        const bank = bill.bank_account;
+        let payY = doc.y + 14;
+        doc.fontSize(8).text('Payment Details:', 40, payY, { underline: true });
+        payY += 12;
+        doc.text(`Method: UPI`, 40, payY);
+        payY += 11;
+        doc.text(`Bank: ${bank.bank_name || '-'}`, 40, payY);
+        payY += 11;
+        if (bank.ifsc_code) doc.text(`IFSC: ${bank.ifsc_code}`, 40, payY);
+        payY += 11;
+        if (bank.upi_id) doc.text(`UPI ID: ${bank.upi_id}`, 40, payY);
+        const upiRef = bill.payments?.find((p) => p.reference_no)?.reference_no;
+        if (upiRef) {
+          payY += 11;
+          doc.text(`Transaction Ref: ${upiRef}`, 40, payY);
+        }
+      }
+
+      doc.fontSize(8).text('This is a computer generated invoice.', { align: 'center' });
 
       doc.end();
     } catch (err) {
