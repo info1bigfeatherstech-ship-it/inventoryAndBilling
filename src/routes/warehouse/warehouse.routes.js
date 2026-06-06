@@ -8,6 +8,7 @@ const { validateRequest } = require('../../middlewares/validation.middleware');
 const {
   createWarehouseValidator,
   updateWarehouseValidator,
+  updateMyWarehouseValidator,
   listWarehousesValidator,
   warehouseIdParam,
 } = require('../../validators/warehouse/warehouse.validators');
@@ -25,6 +26,14 @@ router.get(
 );
 
 router.get('/', authorizeRoles(...WAREHOUSE_READ_ROLES), listWarehousesValidator, validateRequest, WarehouseController.list);
+router.get('/me', authorizeRoles('WH_MANAGER'), WarehouseController.getMyWarehouse);
+router.put(
+  '/me',
+  authorizeRoles('WH_MANAGER'),
+  updateMyWarehouseValidator,
+  validateRequest,
+  WarehouseController.updateMyWarehouse
+);
 router.get(
   '/:warehouseId/peer-stock-catalog',
   authorizeRoles('SUPER_ADMIN', 'WH_MANAGER', 'WH_STOCK_LISTER'),

@@ -12,8 +12,68 @@ const {
   resetPasswordValidator,
   listUsersValidator,
 } = require('../../validators/user/user.validators');
+const {
+  listTeamValidator,
+  createTeamMemberValidator,
+  updateTeamMemberValidator,
+  updateTeamMemberStatusValidator,
+  resetTeamMemberPasswordValidator,
+} = require('../../validators/user/team.validators');
+
+const TEAM_MANAGERS = ['SHOP_OWNER', 'WH_MANAGER'];
 
 router.use(requireAuth);
+
+// ── Team management (shop owner / warehouse manager) — must be before /:userId ──
+router.get(
+  '/team/context',
+  authorizeRoles(...TEAM_MANAGERS),
+  UserController.teamContext
+);
+router.get(
+  '/team',
+  authorizeRoles(...TEAM_MANAGERS),
+  listTeamValidator,
+  validateRequest,
+  UserController.teamList
+);
+router.post(
+  '/team',
+  authorizeRoles(...TEAM_MANAGERS),
+  createTeamMemberValidator,
+  validateRequest,
+  UserController.teamCreate
+);
+router.get(
+  '/team/:userId',
+  authorizeRoles(...TEAM_MANAGERS),
+  userIdParam,
+  validateRequest,
+  UserController.teamGetById
+);
+router.put(
+  '/team/:userId',
+  authorizeRoles(...TEAM_MANAGERS),
+  updateTeamMemberValidator,
+  validateRequest,
+  UserController.teamUpdate
+);
+router.patch(
+  '/team/:userId/status',
+  authorizeRoles(...TEAM_MANAGERS),
+  updateTeamMemberStatusValidator,
+  validateRequest,
+  UserController.teamUpdateStatus
+);
+router.post(
+  '/team/:userId/reset-password',
+  authorizeRoles(...TEAM_MANAGERS),
+  resetTeamMemberPasswordValidator,
+  validateRequest,
+  UserController.teamResetPassword
+);
+
+// ── Super admin user administration ──
 router.use(authorizeRoles('SUPER_ADMIN'));
 
 router.post('/', createUserValidator, validateRequest, UserController.create);

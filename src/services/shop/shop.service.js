@@ -397,6 +397,60 @@ const ShopService = {
     return attachDefaultGstFields(withGst);
   },
 
+  async updateMyShop(ownerUserId, data) {
+    const shop = await prisma.shop.findUnique({
+      where: { owner_user_id: ownerUserId },
+      select: { shop_id: true, shop_name: true },
+    });
+    if (!shop) {
+      throw new AppError('No shop found for this owner', 404, 'SHOP_NOT_FOUND');
+    }
+
+    const restricted = [
+      'shop_code',
+      'shop_name',
+      'owner_user_id',
+      'sales_channels',
+      'is_active',
+      'remarks',
+      'state_code',
+    ];
+    for (const key of restricted) {
+      if (Object.prototype.hasOwnProperty.call(data, key)) {
+        throw new AppError(`${key} cannot be updated from shop profile`, 400, 'FIELD_NOT_ALLOWED');
+      }
+    }
+
+    const allowed = ['address', 'city', 'pincode', 'phone', 'email'];
+    const payload = {};
+    for (const key of allowed) {
+      if (Object.prototype.hasOwnProperty.call(data, key)) {
+        payload[key] = data[key];
+      }
+    }
+
+    if (!Object.keys(payload).length && !Object.prototype.hasOwnProperty.call(data, 'gst_number')) {
+      throw new AppError('No updatable fields provided', 400, 'EMPTY_UPDATE');
+    }
+
+    if (payload.email !== undefined && payload.email !== null) {
+      payload.email = String(payload.email).trim().toLowerCase();
+    }
+
+    if (Object.keys(payload).length) {
+      await prisma.shop.update({
+        where: { shop_id: shop.shop_id },
+        data: payload,
+      });
+    }
+
+    if (Object.prototype.hasOwnProperty.call(data, 'gst_number') && data.gst_number?.trim()) {
+      await upsertShopDefaultGst(shop.shop_id, data.gst_number, shop.shop_name);
+    }
+
+    return this.getShopByOwnerId(ownerUserId);
+  },
+
   async softDeleteShop(shopId) {
     const existing = await prisma.shop.findUnique({
       where: { shop_id: shopId },

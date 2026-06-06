@@ -24,16 +24,29 @@ const ShopController = {
     return successResponse(res, req, { statusCode: 200, message: 'Shop fetched successfully', data: shop });
   }),
   getMyShop: asyncHandler(async (req, res) => {
-    // Only SHOP_OWNER role can access this
     if (req.user.role !== 'SHOP_OWNER') {
       throw new AppError('Only shop owners can access this endpoint', 403, 'FORBIDDEN');
     }
-    
+
     const shop = await ShopService.getShopByOwnerId(req.user.userId);
-    
+
     return successResponse(res, req, {
       statusCode: 200,
       message: 'Your shop fetched successfully',
+      data: shop,
+    });
+  }),
+
+  updateMyShop: asyncHandler(async (req, res) => {
+    if (req.user.role !== 'SHOP_OWNER') {
+      throw new AppError('Only shop owners can access this endpoint', 403, 'FORBIDDEN');
+    }
+
+    const shop = await ShopService.updateMyShop(req.user.userId, req.body);
+
+    return successResponse(res, req, {
+      statusCode: 200,
+      message: 'Shop profile updated successfully',
       data: shop,
     });
   }),

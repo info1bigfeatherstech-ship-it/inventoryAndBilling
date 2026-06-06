@@ -1,6 +1,7 @@
 const asyncHandler = require('../../utils/asyncHandler.utils');
 const { successResponse, paginatedMeta } = require('../../utils/response.utils');
 const PurchaseEntryService = require('../../services/purchase/purchaseEntry.service');
+const PurchasePerformanceService = require('../../services/purchase/purchasePerformance.service');
 
 const PurchaseEntryController = {
   /**
@@ -51,6 +52,15 @@ const PurchaseEntryController = {
       statusCode: 200,
       message: 'Purchase summary fetched successfully',
       data: summary,
+    });
+  }),
+
+  performance: asyncHandler(async (req, res) => {
+    const data = await PurchasePerformanceService.getPerformance(req.user, req.query);
+    return successResponse(res, req, {
+      statusCode: 200,
+      message: 'Purchase performance fetched successfully',
+      data,
     });
   }),
 };

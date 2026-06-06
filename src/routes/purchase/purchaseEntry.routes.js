@@ -8,13 +8,27 @@ const {
   purchaseIdParam,
   listPurchaseEntriesValidator,
 } = require('../../validators/purchase/purchaseEntry.validators');
+const { performanceValidator } = require('../../validators/purchase/vendorPayment.validators');
 
 const READ_ROLES = ['SUPER_ADMIN', 'WH_MANAGER', 'WH_STOCK_LISTER'];
 
 router.use(requireAuth);
 
-// List purchase entries
-router.get('/',authorizeRoles(...READ_ROLES),listPurchaseEntriesValidator,validateRequest,PurchaseEntryController.list);
+router.get('/', authorizeRoles(...READ_ROLES), listPurchaseEntriesValidator, validateRequest, PurchaseEntryController.list);
+
+router.get(
+  '/summary/vendor',
+  authorizeRoles('SUPER_ADMIN', 'WH_MANAGER', 'WH_STOCK_LISTER'),
+  PurchaseEntryController.vendorSummary
+);
+
+router.get(
+  '/performance',
+  authorizeRoles(...READ_ROLES),
+  performanceValidator,
+  validateRequest,
+  PurchaseEntryController.performance
+);
 
 router.get(
   '/:purchaseId/pdf',
@@ -24,10 +38,6 @@ router.get(
   PurchaseEntryController.downloadPdf
 );
 
-// Get single purchase entry
 router.get('/:purchaseId', authorizeRoles(...READ_ROLES), purchaseIdParam, validateRequest, PurchaseEntryController.getById);
-
-// Vendor summary (for reports)
-router.get('/summary/vendor', authorizeRoles('SUPER_ADMIN', 'WH_MANAGER'), PurchaseEntryController.vendorSummary);
 
 module.exports = router;

@@ -112,6 +112,23 @@ enum PurchaseEntryStatus {
   CANCELLED
 }
 
+enum WarehouseExpenseCategory {
+  RENT
+  UTILITIES
+  FREIGHT
+  LABOUR
+  TRANSPORT
+  OFFICE
+  REPAIRS
+  OTHER
+}
+
+enum VendorPaymentStatus {
+  PENDING
+  PAID
+  CANCELLED
+}
+
 enum InwardStatus {
   SCHEDULED
   ARRIVED
@@ -173,6 +190,7 @@ model Vendor {
   purchase_entries PurchaseEntry[]
   debit_notes      DebitNote[]
   inward_receipts  InwardReceipt[]
+  vendor_payments  VendorPayment[]
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
@@ -204,6 +222,8 @@ model Warehouse {
   transfers_to         TransferRequest[] @relation("TransferToWarehouse")
   bulk_transfers_from  BulkTransferRequest[] @relation("BulkTransferFromWarehouse")
   bulk_transfers_to    BulkTransferRequest[] @relation("BulkTransferToWarehouse")
+  warehouse_expenses   WarehouseExpense[]
+  vendor_payments      VendorPayment[]
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
@@ -581,15 +601,96 @@ model PurchaseEntry {
   vendor          Vendor          @relation(fields: [vendor_id], references: [vendor_id])
   warehouse       Warehouse       @relation(fields: [warehouse_id], references: [warehouse_id])
   items           PurchaseItem[]
-  debit_notes     DebitNote[]
-  product_stocks  ProductStock[]  @relation("LastPurchase")
-  receivedByUser  User            @relation("PurchaseReceivedBy", fields: [received_by], references: [user_id])
+  debit_notes           DebitNote[]
+  product_stocks        ProductStock[]  @relation("LastPurchase")
+  receivedByUser        User            @relation("PurchaseReceivedBy", fields: [received_by], references: [user_id])
+  payment_allocations   VendorPaymentAllocation[]
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
   @@index([warehouse_id, purchase_date])
   @@map("purchase_entries")
+}
+
+model WarehouseExpense {
+  expense_id     String @id @default(cuid())
+  expense_number String @unique
+
+  warehouse_id String
+  category     WarehouseExpenseCategory
+  description  String
+  amount       Float
+
+  expense_date   DateTime
+  payment_method PaymentMethod?
+  reference_no   String?
+
+  recorded_by_user_id String
+  remarks             String?
+
+  is_cancelled         Boolean   @default(false)
+  cancelled_at         DateTime?
+  cancelled_by_user_id String?
+
+  warehouse    Warehouse @relation(fields: [warehouse_id], references: [warehouse_id], onDelete: Restrict)
+  recorded_by  User      @relation("WarehouseExpenseRecordedBy", fields: [recorded_by_user_id], references: [user_id])
+  cancelled_by User?     @relation("WarehouseExpenseCancelledBy", fields: [cancelled_by_user_id], references: [user_id], onDelete: SetNull)
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([warehouse_id, expense_date])
+  @@index([category])
+  @@map("warehouse_expenses")
+}
+
+model VendorPayment {
+  payment_id     String @id @default(cuid())
+  payment_number String @unique
+
+  vendor_id      String
+  warehouse_id   String
+  amount         Float
+  payment_method PaymentMethod
+  reference_no   String?
+  payment_date   DateTime @default(now())
+  status         VendorPaymentStatus @default(PAID)
+
+  paid_by_user_id String
+  remarks         String?
+
+  is_cancelled         Boolean   @default(false)
+  cancelled_at         DateTime?
+  cancelled_by_user_id String?
+
+  vendor       Vendor    @relation(fields: [vendor_id], references: [vendor_id], onDelete: Restrict)
+  warehouse    Warehouse @relation(fields: [warehouse_id], references: [warehouse_id], onDelete: Restrict)
+  paid_by      User      @relation("VendorPaymentPaidBy", fields: [paid_by_user_id], references: [user_id])
+  cancelled_by User?     @relation("VendorPaymentCancelledBy", fields: [cancelled_by_user_id], references: [user_id], onDelete: SetNull)
+  allocations  VendorPaymentAllocation[]
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([warehouse_id, payment_date])
+  @@index([vendor_id, payment_date])
+  @@index([status])
+  @@map("vendor_payments")
+}
+
+model VendorPaymentAllocation {
+  allocation_id    String @id @default(cuid())
+  payment_id       String
+  purchase_id      String
+  allocated_amount Float
+
+  payment  VendorPayment @relation(fields: [payment_id], references: [payment_id], onDelete: Cascade)
+  purchase PurchaseEntry @relation(fields: [purchase_id], references: [purchase_id], onDelete: Restrict)
+
+  @@unique([payment_id, purchase_id])
+  @@index([purchase_id])
+  @@map("vendor_payment_allocations")
 }
 
 model PurchaseItem {
@@ -1019,6 +1120,10 @@ model User {
   credit_notes_created      CreditNote[]    @relation("CreditNoteCreatedBy")
   credit_notes_refunded     CreditNote[]    @relation("CreditNoteRefundedBy")
   debit_notes_created       DebitNote[]     @relation("DebitNoteCreatedBy")
+  warehouse_expenses_recorded  WarehouseExpense[] @relation("WarehouseExpenseRecordedBy")
+  warehouse_expenses_cancelled WarehouseExpense[] @relation("WarehouseExpenseCancelledBy")
+  vendor_payments_paid         VendorPayment[] @relation("VendorPaymentPaidBy")
+  vendor_payments_cancelled    VendorPayment[] @relation("VendorPaymentCancelledBy")
   credit_note_redemptions   CreditNoteRedemption[] @relation("CreditNoteRedemptionBy")
   refresh_tokens            RefreshToken[]
   inward_receipts_created   InwardReceipt[] @relation("InwardCreatedBy")

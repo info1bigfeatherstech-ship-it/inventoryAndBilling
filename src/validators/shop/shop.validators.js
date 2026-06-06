@@ -100,6 +100,26 @@ const updateShopValidator = [
     }),
 ];
 
+const updateMyShopValidator = [
+  body('address').optional().isString().trim().isLength({ min: 2, max: 300 }),
+  body('city').optional().isString().trim().isLength({ min: 2, max: 50 }),
+  body('pincode').optional({ nullable: true }).matches(/^\d{6}$/),
+  body('phone').optional().isString().trim().matches(/^[0-9]{10}$/),
+  body('email').optional({ nullable: true }).isEmail(),
+  body('gst_number')
+    .optional({ nullable: true })
+    .isString()
+    .trim()
+    .custom((v) => {
+      if (v == null || String(v).trim() === '') return true;
+      const gst = String(v).trim().toUpperCase();
+      if (!GSTIN_BODY_RE.test(gst)) {
+        throw new Error('gst_number must be a valid 15-character GSTIN');
+      }
+      return true;
+    }),
+];
+
 const listShopsValidator = [
   query('page').optional().isInt({ min: 1 }).toInt(),
   query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
@@ -112,5 +132,6 @@ module.exports = {
   shopIdParam,
   createShopValidator,
   updateShopValidator,
+  updateMyShopValidator,
   listShopsValidator,
 };

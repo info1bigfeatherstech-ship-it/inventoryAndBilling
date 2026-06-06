@@ -21,10 +21,13 @@ const shopProductLevelRoutes = require('./stock/shopProductLevel.routes');
 const shopReorderRoutes = require('./stock/shopReorder.routes');
 const stockLedgerRoutes = require('./stock/stockLedger.routes');
 const purchaseEntryRoutes = require('./purchase/purchaseEntry.routes');
+const warehouseExpenseRoutes = require('./purchase/warehouseExpense.routes');
+const vendorPaymentRoutes = require('./purchase/vendorPayment.routes');
 const customerRoutes = require('./customer/customer.routes');
 const billingRoutes = require('./billing/billing.routes');
 const creditNoteRoutes = require('./creditNote/creditNote.routes');
 const debitNoteRoutes = require('./debitNote/debitNote.routes');
+const cashbankRoutes = require('./cashbank/cashbank.routes');
 
 // API info route
 router.get('/', (req, res) => {
@@ -95,10 +98,13 @@ v1Router.use('/shop-product-levels', shopProductLevelRoutes);
 v1Router.use('/shop-reorder-suggestions', shopReorderRoutes);
 v1Router.use('/stock/ledger', stockLedgerRoutes);
 v1Router.use('/purchase-entries', purchaseEntryRoutes);
+v1Router.use('/warehouse-expenses', warehouseExpenseRoutes);
+v1Router.use('/vendor-payments', vendorPaymentRoutes);
 v1Router.use('/customers', customerRoutes);
 v1Router.use('/bills', billingRoutes);
 v1Router.use('/credit-notes', creditNoteRoutes);
 v1Router.use('/debit-notes', debitNoteRoutes);
+v1Router.use('/cashbank', cashbankRoutes);
 // Mount versioned routes
 router.use('/v1', v1Router);
 

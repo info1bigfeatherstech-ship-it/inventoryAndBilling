@@ -234,6 +234,40 @@ const WarehouseService = {
     return warehouse;
   },
 
+  async getMyWarehouse(user) {
+    if (user.role !== 'WH_MANAGER' || !user.warehouseId) {
+      throw new AppError('Only warehouse managers can access this endpoint', 403, 'FORBIDDEN');
+    }
+    return this.getWarehouseById(user.warehouseId, user);
+  },
+
+  async updateMyWarehouse(user, data) {
+    if (user.role !== 'WH_MANAGER' || !user.warehouseId) {
+      throw new AppError('Only warehouse managers can access this endpoint', 403, 'FORBIDDEN');
+    }
+
+    const restricted = ['warehouse_code', 'warehouse_name', 'city', 'is_active', 'remarks'];
+    for (const key of restricted) {
+      if (Object.prototype.hasOwnProperty.call(data, key)) {
+        throw new AppError(`${key} cannot be updated from warehouse profile`, 400, 'FIELD_NOT_ALLOWED');
+      }
+    }
+
+    const payload = {};
+    if (Object.prototype.hasOwnProperty.call(data, 'manager_name')) {
+      payload.manager_name = data.manager_name?.trim() || null;
+    }
+    if (Object.prototype.hasOwnProperty.call(data, 'address')) {
+      payload.address = data.address;
+    }
+
+    if (!Object.keys(payload).length) {
+      throw new AppError('No updatable fields provided', 400, 'EMPTY_UPDATE');
+    }
+
+    return this.updateWarehouse(user.warehouseId, payload);
+  },
+
   async softDeleteWarehouse(warehouseId) {
     const exists = await prisma.warehouse.findUnique({
       where: { warehouse_id: warehouseId },

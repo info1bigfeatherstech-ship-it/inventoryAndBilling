@@ -12,6 +12,7 @@ const {
   shopIdParam,
   createShopValidator,
   updateShopValidator,
+  updateMyShopValidator,
   listShopsValidator,
 } = require('../../validators/shop/shop.validators');
 const {
@@ -38,6 +39,13 @@ const STAFF_WRITE_ROLES = ['SUPER_ADMIN', 'SHOP_OWNER'];
 router.use(requireAuth);
 
 router.get('/me', authorizeRoles('SHOP_OWNER'), ShopController.getMyShop);
+router.put(
+  '/me',
+  authorizeRoles('SHOP_OWNER'),
+  updateMyShopValidator,
+  validateRequest,
+  ShopController.updateMyShop
+);
 
 router.get(
   '/:shopId/bank-accounts',

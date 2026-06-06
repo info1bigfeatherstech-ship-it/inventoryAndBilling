@@ -40,6 +40,24 @@ const WarehouseController = {
     });
   }),
 
+  getMyWarehouse: asyncHandler(async (req, res) => {
+    const warehouse = await WarehouseService.getMyWarehouse(req.user);
+    return successResponse(res, req, {
+      statusCode: 200,
+      message: 'Your warehouse fetched successfully',
+      data: warehouse,
+    });
+  }),
+
+  updateMyWarehouse: asyncHandler(async (req, res) => {
+    const warehouse = await WarehouseService.updateMyWarehouse(req.user, req.body);
+    return successResponse(res, req, {
+      statusCode: 200,
+      message: 'Warehouse profile updated successfully',
+      data: warehouse,
+    });
+  }),
+
   update: asyncHandler(async (req, res) => {
     const warehouse = await WarehouseService.updateWarehouse(req.params.warehouseId, req.body);
     return successResponse(res, req, {

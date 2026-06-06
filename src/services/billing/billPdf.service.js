@@ -195,7 +195,7 @@ const renderGstTaxInvoice = (doc, bill, { isNonGst = false, isEstimate = false }
       { text: displayVal(legalName), bold: false },
     ]);
     y += 12;
-    const addrParts = [shop.address, shop.city].filter(Boolean).join(', ');
+    const addrParts = [shop.address, shop.city, shop.pincode].filter(Boolean).join(', ');
     if (addrParts) {
       doc.fontSize(FIELD_SIZE).font('Helvetica').text(addrParts, M, y, { width: W, align: 'center' });
       y += 11;
@@ -249,8 +249,14 @@ const renderGstTaxInvoice = (doc, bill, { isNonGst = false, isEstimate = false }
     drawLabelValue(doc, lx + 6, ly, 'GSTIN', bill.customer_gstin, colW - 12);
     ly += 11;
   }
-  const custState = displayVal(getStateName(cust.state_code || bill.place_of_supply_state_code));
-  drawLabelValue(doc, lx + 6, ly, 'State', custState, colW - 12);
+  const stateCode = cust.state_code || bill.place_of_supply_state_code;
+  let custState = '';
+  if (stateCode) {
+    const code = String(stateCode).trim().padStart(2, '0').slice(-2);
+    const name = getStateName(code);
+    custState = !isNonGst ? `${name} (${code})` : name;
+  }
+  drawLabelValue(doc, lx + 6, ly, 'State', displayVal(custState), colW - 12);
 
   const rxPad = rx + 6;
   const rxW = colW - 12;

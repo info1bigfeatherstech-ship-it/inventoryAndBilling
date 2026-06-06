@@ -66,6 +66,16 @@ const updateWarehouseValidator = [
   body('remarks').optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
 ];
 
+const updateMyWarehouseValidator = [
+  body('manager_name')
+    .optional({ nullable: true })
+    .isString()
+    .trim()
+    .isLength({ min: 2, max: 100 })
+    .withMessage('manager_name must be 2-100 characters'),
+  body('address').optional().isString().trim().isLength({ min: 3, max: 500 }),
+];
+
 const listWarehousesValidator = [
   query('page').optional().isInt({ min: 1 }).toInt(),
   query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
@@ -78,5 +88,6 @@ module.exports = {
   warehouseIdParam,
   createWarehouseValidator,
   updateWarehouseValidator,
+  updateMyWarehouseValidator,
   listWarehousesValidator,
 };
