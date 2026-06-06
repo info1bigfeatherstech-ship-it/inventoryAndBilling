@@ -187,6 +187,10 @@ const ShopService = {
       ownerUserId = data.owner_user_id;
     }
   
+    if (data.state_code == null || String(data.state_code).trim() === '') {
+      throw new AppError('state_code is required', 400, 'STATE_CODE_REQUIRED');
+    }
+
     const shop = await prisma.shop.create({
       data: {
         shop_code: shopCode,
@@ -194,10 +198,7 @@ const ShopService = {
         address: String(data.address).trim(),
         city: String(data.city).trim(),
         pincode: data.pincode ? String(data.pincode).trim() : null,
-        state_code:
-          data.state_code != null && String(data.state_code).trim() !== ''
-            ? parseShopStateCode(data.state_code)
-            : null,
+        state_code: parseShopStateCode(data.state_code),
         phone: String(data.phone).trim(),
         email: data.email ? String(data.email).trim().toLowerCase() : null,
         owner_user_id: ownerUserId,  // ⭐ ADD THIS

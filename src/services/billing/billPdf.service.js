@@ -5,7 +5,7 @@ const { AppError } = require('../../errors/AppError');
 const {
   buildTaxSummaryFromLines,
   roundMoney,
-  stateCodeFromGstin,
+  normalizeStateCode,
 } = require('../../utils/billing.utils');
 const { getStateName } = require('../../constants/indianStateCodes');
 const { amountInWords } = require('../../utils/amountInWords.utils');
@@ -43,6 +43,13 @@ const fmtMoney = (n) => `Rs. ${fmtNum(n)}`;
 const fmtDate = (d) => new Date(d).toLocaleDateString('en-IN');
 
 const FIELD_SIZE = 8;
+
+/** Stacked row spacing (totals, bank rows, bill-to fields). */
+const ROW_STEP = 13;
+/** Bold section label → body text (amount in words, declaration, GST terms). */
+const SECTION_LABEL_GAP = 12;
+/** Note: → warranty line — slightly more than other sections. */
+const NOTE_LABEL_GAP = 14;
 
 /** Blank fields stay empty — no dash placeholder. */
 const displayVal = (v) => {
@@ -101,6 +108,22 @@ const calcMrpDiscount = (items) => {
 
 const shopGstin = (bill) => bill.gst_config?.gst_number?.trim() || null;
 
+/** State label — GST: "Haryana (06)"; non-GST: "Haryana" only. */
+const formatStateLabel = (code, { withCode = true } = {}) => {
+  const normalized = normalizeStateCode(code);
+  if (!normalized) return '';
+  const name = getStateName(normalized);
+  return withCode ? `${name} (${normalized})` : name;
+};
+
+/** City + state — e.g. "Gurgaon, Haryana (06)" or "Gurgaon, Haryana". */
+const formatCityStateLabel = (city, stateCode, { withCode = true } = {}) => {
+  const cityPart = displayVal(city);
+  const statePart = formatStateLabel(stateCode, { withCode });
+  if (cityPart && statePart) return `${cityPart}, ${statePart}`;
+  return cityPart || statePart;
+};
+
 const getTaxRatePercents = (items, taxMode) => {
   const taxedLine = (items || []).find((i) => i.tax_amount > 0 && Number(i.gst_percent) > 0);
   if (!taxedLine) return { cgstPercent: 0, sgstPercent: 0, igstPercent: 0, totalPercent: 0 };
@@ -112,8 +135,29 @@ const getTaxRatePercents = (items, taxMode) => {
   return { cgstPercent: half, sgstPercent: roundMoney(rate - half), igstPercent: 0, totalPercent: rate };
 };
 
+const GRID_LINE = 0.5;
+
 const strokeRect = (doc, x, y, w, h, color = '#333333') => {
-  doc.save().lineWidth(0.6).strokeColor(color).rect(x, y, w, h).stroke().restore();
+  doc.save().lineWidth(GRID_LINE).strokeColor(color).rect(x, y, w, h).stroke().restore();
+};
+
+/** Single-pass table grid — avoids double-stroked shared cell edges. */
+const strokeTableGrid = (doc, x, y, colWidths, headerH, rowH, dataRowCount) => {
+  const totalW = colWidths.reduce((sum, w) => sum + w, 0);
+  const totalH = headerH + dataRowCount * rowH;
+  doc.save().lineWidth(GRID_LINE).strokeColor('#333333');
+  doc.rect(x, y, totalW, totalH).stroke();
+  doc.moveTo(x, y + headerH).lineTo(x + totalW, y + headerH).stroke();
+  for (let r = 1; r < dataRowCount; r += 1) {
+    const hy = y + headerH + r * rowH;
+    doc.moveTo(x, hy).lineTo(x + totalW, hy).stroke();
+  }
+  let vx = x;
+  for (let i = 0; i < colWidths.length - 1; i += 1) {
+    vx += colWidths[i];
+    doc.moveTo(vx, y).lineTo(vx, y + totalH).stroke();
+  }
+  doc.restore();
 };
 
 const cellText = (doc, text, x, y, w, h, { align = 'left', bold = false, size = 8, pad = 3 } = {}) => {
@@ -139,40 +183,36 @@ const renderGstTaxInvoice = (doc, bill, { isNonGst = false, isEstimate = false }
   const mrpDiscount = calcMrpDiscount(items);
   const gstSplit = buildTaxSummaryFromLines(items);
   const taxRates = getTaxRatePercents(items, gstSplit.tax_mode);
-  const shopStateCode = shop.state_code || stateCodeFromGstin(gst);
-  const posName = displayVal(getStateName(bill.place_of_supply_state_code));
-  const dispatchName = displayVal(getStateName(shopStateCode) || shop.city);
-  const showBankDetails =
-    !isNonGst &&
-    !isEstimate &&
-    Boolean(bill.bank_account) &&
-    ['UPI', 'CARD', 'BANK_TRANSFER'].includes(String(bill.payment_method || '').toUpperCase());
-
-  if (isEstimate) drawWatermark(doc, 'ESTIMATE ONLY');
+  const cust = bill.customer || {};
+  // Dispatch = shop master city + state only (never derive state from GSTIN — avoids Delhi + Haryana mismatch).
+  const shopDispatchCode = normalizeStateCode(shop.state_code);
+  const customerSupplyCode = normalizeStateCode(cust.state_code);
+  const showStateCode = !isNonGst;
+  const posName = displayVal(
+    formatCityStateLabel(cust.city, customerSupplyCode, { withCode: showStateCode })
+  );
+  const dispatchName = displayVal(
+    formatCityStateLabel(shop.city, shopDispatchCode, { withCode: showStateCode })
+  );
+  // GST invoices always show shop bank details (cash / UPI / card / transfer) when configured
+  const showBankDetails = !isNonGst && !isEstimate && Boolean(bill.bank_account);
 
   let y = M;
 
-  // ── Top: GSTIN left (GST only) | Original / Duplicate / Triplicate right ──
+  // ── Top: GSTIN left (GST only) | Original / Duplicate / Triplicate right (GST only) ──
   if (!isNonGst) {
     drawLabelValue(doc, M, y, 'GSTIN', gst, HALF);
+    doc.fontSize(7.5).font('Helvetica').text('Original / Duplicate / Triplicate', M, y, {
+      width: W,
+      align: 'right',
+    });
+    y += 16;
+  } else {
+    y += 4;
   }
-  doc.fontSize(7.5).font('Helvetica').text('Original / Duplicate / Triplicate', M, y, {
-    width: W,
-    align: 'right',
-  });
-  y += 16;
 
-  // ── Document title ──
-  if (isEstimate) {
-    const estTitleSize = 11;
-    doc.fontSize(estTitleSize).font('Helvetica-Bold');
-    const estTitle = 'ESTIMATE';
-    const estTitleW = doc.widthOfString(estTitle);
-    const estTitleX = M + (W - estTitleW) / 2;
-    doc.text(estTitle, estTitleX, y, { lineBreak: false });
-    drawManualUnderline(doc, estTitleX, y, estTitle, { size: estTitleSize, offset: 12 });
-    y += 18;
-  } else if (!isNonGst) {
+  // ── Document title (GST only — fake/non-GST bills have no title) ──
+  if (!isNonGst) {
     const gstTitleSize = 11;
     doc.fontSize(gstTitleSize).font('Helvetica-Bold');
     const gstTitle = 'GST INVOICE';
@@ -183,11 +223,15 @@ const renderGstTaxInvoice = (doc, bill, { isNonGst = false, isEstimate = false }
     y += 18;
   }
 
-  // ── Shop identity (estimate: shop name only — no address / contact / IDs) ──
-  doc.fontSize(16).font('Helvetica-Bold');
-  doc.text(shop.shop_name || 'Shop', M, y, { width: W, align: 'center' });
-  y += isEstimate ? 14 : 18;
-  if (!isEstimate) {
+  // ── Shop identity (fake bill: "Recipient" title only — same style as shop name) ──
+  if (isEstimate) {
+    doc.fontSize(16).font('Helvetica-Bold');
+    doc.text('Receipt', M, y, { width: W, align: 'center' });
+    y += 34;
+  } else {
+    doc.fontSize(16).font('Helvetica-Bold');
+    doc.text(shop.shop_name || 'Shop', M, y, { width: W, align: 'center' });
+    y += 18;
     drawCenteredSegments(doc, y, [
       { text: 'Shop ID : ', bold: true },
       { text: displayVal(shop.shop_code), bold: false },
@@ -228,8 +272,7 @@ const renderGstTaxInvoice = (doc, bill, { isNonGst = false, isEstimate = false }
   doc.text(billToText, billToX, billToY, { lineBreak: false });
   drawManualUnderline(doc, billToX, billToY, billToText);
   doc.text(' :', billToX + doc.widthOfString(billToText), billToY, { lineBreak: false });
-  let ly = y + 16;
-  const cust = bill.customer || {};
+  let ly = y + 19;
   drawLabelValue(doc, lx + 6, ly, 'M/S', displayVal(bill.customer_name) || 'Walk-in Customer', colW - 12);
   ly += 11;
   if (cust.address) {
@@ -237,7 +280,9 @@ const renderGstTaxInvoice = (doc, bill, { isNonGst = false, isEstimate = false }
     doc.text(cust.address, lx + 6, ly, { width: colW - 12 });
     ly += 11;
   }
-  const custCity = [cust.city, getStateName(cust.state_code)].filter(Boolean).join(', ');
+  const custCity = [cust.city, getStateName(cust.state_code), cust.pincode]
+    .filter(Boolean)
+    .join(', ');
   if (custCity) {
     doc.font('Helvetica').fontSize(FIELD_SIZE);
     doc.text(custCity, lx + 6, ly, { width: colW - 12 });
@@ -248,15 +293,15 @@ const renderGstTaxInvoice = (doc, bill, { isNonGst = false, isEstimate = false }
   if (!isNonGst) {
     drawLabelValue(doc, lx + 6, ly, 'GSTIN', bill.customer_gstin, colW - 12);
     ly += 11;
+    const stateCode = cust.state_code || bill.place_of_supply_state_code;
+    let custState = '';
+    if (stateCode) {
+      const code = String(stateCode).trim().padStart(2, '0').slice(-2);
+      const name = getStateName(code);
+      custState = `${name} (${code})`;
+    }
+    drawLabelValue(doc, lx + 6, ly, 'State', displayVal(custState), colW - 12);
   }
-  const stateCode = cust.state_code || bill.place_of_supply_state_code;
-  let custState = '';
-  if (stateCode) {
-    const code = String(stateCode).trim().padStart(2, '0').slice(-2);
-    const name = getStateName(code);
-    custState = !isNonGst ? `${name} (${code})` : name;
-  }
-  drawLabelValue(doc, lx + 6, ly, 'State', displayVal(custState), colW - 12);
 
   const rxPad = rx + 6;
   const rxW = colW - 12;
@@ -267,12 +312,10 @@ const renderGstTaxInvoice = (doc, bill, { isNonGst = false, isEstimate = false }
   ry += 11;
   drawLabelValue(doc, rxPad, ry, 'E-Way Bill No', '', rxW);
   ry += 11;
-  if (!isNonGst) {
-    drawLabelValue(doc, rxPad, ry, 'Place of Supply', posName, rxW);
-    ry += 11;
-    drawLabelValue(doc, rxPad, ry, 'Place of Dispatch', dispatchName, rxW);
-    ry += 11;
-  }
+  drawLabelValue(doc, rxPad, ry, 'Place of Supply', posName, rxW);
+  ry += 11;
+  drawLabelValue(doc, rxPad, ry, 'Place of Dispatch', dispatchName, rxW);
+  ry += 11;
   drawLabelValue(doc, rxPad, ry, 'Transport', '', rxW);
   ry += 11;
 
@@ -313,60 +356,80 @@ const renderGstTaxInvoice = (doc, bill, { isNonGst = false, isEstimate = false }
       ];
   const rowH = 15;
   const headerH = 16;
+  const colWidths = cols.map((c) => c.w);
 
-  let cx = M;
-  for (const col of cols) {
-    strokeRect(doc, cx, y, col.w, headerH);
-    cellText(doc, col.label, cx, y, col.w, headerH, { align: 'center', bold: true, size: 7.5 });
-    cx += col.w;
-  }
-  y += headerH;
-
-  let sr = 0;
-  for (const item of items) {
-    sr += 1;
-    const name = item.variant?.product?.name || item.product?.name || item.variant?.sku || 'Item';
-    const row = isNonGst
-      ? [
-          String(sr),
-          name,
-          String(item.quantity),
-          fmtNum(lineMrp(item)),
-          fmtNum(item.unit_price),
-          fmtNum(lineSpecialTotal(item)),
-        ]
-      : [
-          String(sr),
-          name,
-          displayVal(item.hsn_code),
-          String(item.quantity),
-          fmtNum(lineMrp(item)),
-          fmtNum(item.unit_price),
-          fmtNum(lineSpecialTotal(item)),
-        ];
-    cx = M;
-    cols.forEach((col, i) => {
-      strokeRect(doc, cx, y, col.w, rowH);
-      cellText(doc, row[i], cx, y, col.w, rowH, {
-        align: 'center',
-        bold: i === 1,
-        size: 7.5,
-      });
+  const drawTableHeader = (tableY) => {
+    let cx = M;
+    for (const col of cols) {
+      cellText(doc, col.label, cx, tableY, col.w, headerH, { align: 'center', bold: true, size: 7.5 });
       cx += col.w;
+    }
+  };
+
+  const drawTableRows = (tableY, tableItems) => {
+    let rowY = tableY + headerH;
+    tableItems.forEach((item, idx) => {
+      const name = item.variant?.product?.name || item.product?.name || item.variant?.sku || 'Item';
+      const row = isNonGst
+        ? [
+            String(idx + 1),
+            name,
+            String(item.quantity),
+            fmtNum(lineMrp(item)),
+            fmtNum(item.unit_price),
+            fmtNum(lineSpecialTotal(item)),
+          ]
+        : [
+            String(idx + 1),
+            name,
+            displayVal(item.hsn_code),
+            String(item.quantity),
+            fmtNum(lineMrp(item)),
+            fmtNum(item.unit_price),
+            fmtNum(lineSpecialTotal(item)),
+          ];
+      let cx = M;
+      cols.forEach((col, i) => {
+        cellText(doc, row[i], cx, rowY, col.w, rowH, { align: 'center', bold: false, size: 7.5 });
+        cx += col.w;
+      });
+      rowY += rowH;
     });
-    y += rowH;
-    if (y > 620) {
+    return rowY;
+  };
+
+  const tableStartY = y;
+  const itemsPerPage = Math.max(1, Math.floor((620 - tableStartY - headerH) / rowH));
+  let itemIdx = 0;
+
+  if (!items.length) {
+    strokeTableGrid(doc, M, y, colWidths, headerH, rowH, 0);
+    drawTableHeader(y);
+    y += headerH;
+  }
+
+  while (itemIdx < items.length) {
+    const chunk = items.slice(itemIdx, itemIdx + itemsPerPage);
+    const pageTableY = itemIdx === 0 ? tableStartY : M;
+    strokeTableGrid(doc, M, pageTableY, colWidths, headerH, rowH, chunk.length);
+    drawTableHeader(pageTableY);
+    const afterRowsY = drawTableRows(pageTableY, chunk);
+    y = afterRowsY;
+    itemIdx += chunk.length;
+    if (itemIdx < items.length) {
       doc.addPage();
-      y = M;
     }
   }
 
   // ── Bank Details (left) | Totals (right) ──
-  const finH = 118;
+  const finH = isNonGst ? 68 : 118;
   strokeRect(doc, M, y, W, finH);
-  doc.moveTo(MID, y).lineTo(MID, y + finH).stroke();
+  if (showBankDetails) {
+    doc.save().lineWidth(GRID_LINE).strokeColor('#333333');
+    doc.moveTo(MID, y).lineTo(MID, y + finH).stroke();
+    doc.restore();
+  }
 
-  // Bank details — only when online payment used a selected bank account (e.g. UPI)
   const bankX = M + 4;
   if (showBankDetails) {
     const bank = bill.bank_account;
@@ -388,11 +451,11 @@ const renderGstTaxInvoice = (doc, bill, { isNonGst = false, isEstimate = false }
     }
     for (const [lbl, val] of bankRows) {
       drawLabelValue(doc, bankX, by, lbl, val, HALF - 12);
-      by += 12;
+      by += ROW_STEP;
     }
   }
 
-  // Totals right column — label bold, values regular
+  // Totals — always right column (vertical divider only when bank details shown)
   const tx = MID + 8;
   const tw = HALF - 16;
   let ty = y + 8;
@@ -402,7 +465,7 @@ const renderGstTaxInvoice = (doc, bill, { isNonGst = false, isEstimate = false }
     doc.text(label, tx, ty, { width: 130, align: 'left' });
     doc.font('Helvetica').fontSize(valueSize);
     doc.text(value, tx + 130, ty, { width: tw - 130, align: 'right' });
-    ty += 12;
+    ty += ROW_STEP;
   };
 
   const drawGstAddLine = (taxPart, value) => {
@@ -414,7 +477,7 @@ const renderGstTaxInvoice = (doc, bill, { isNonGst = false, isEstimate = false }
     doc.text(` : ${taxPart}`, tx + addW, ty, { lineBreak: false });
     doc.font('Helvetica').fontSize(FIELD_SIZE);
     doc.text(value, tx + 130, ty, { width: tw - 130, align: 'right' });
-    ty += 12;
+    ty += ROW_STEP;
   };
 
   drawTotalLine('Sub Total', fmtNum(bill.subtotal));
@@ -441,7 +504,7 @@ const renderGstTaxInvoice = (doc, bill, { isNonGst = false, isEstimate = false }
   }
 
   doc.moveTo(tx, ty).lineTo(tx + tw, ty).stroke();
-  ty += 6;
+  ty += 8;
   doc.font('Helvetica-Bold').fontSize(11);
   doc.text('Total Payable Amount', tx, ty, { width: 150, align: 'left' });
   doc.font('Helvetica').fontSize(11);
@@ -450,59 +513,76 @@ const renderGstTaxInvoice = (doc, bill, { isNonGst = false, isEstimate = false }
   y += finH;
 
   // ── Amount in words ──
-  const wordsH = 26;
+  const wordsPadTop = 6;
+  const wordsH = 32;
   strokeRect(doc, M, y, W, wordsH);
-  doc.fontSize(8).font('Helvetica-Bold').text('Total Amount (in words) :', M + 6, y + 4);
+  doc.fontSize(8).font('Helvetica-Bold').text('Total Amount (in words) :', M + 6, y + wordsPadTop);
   doc.font('Helvetica').fontSize(8);
-  doc.text(amountInWords(bill.total_amount), M + 6, y + 14, { width: W - 12 });
+  doc.text(amountInWords(bill.total_amount), M + 6, y + wordsPadTop + SECTION_LABEL_GAP, {
+    width: W - 12,
+    lineGap: 1,
+  });
   y += wordsH;
 
-  // ── Declaration ──
-  const declH = 34;
-  strokeRect(doc, M, y, W, declH);
-  doc.fontSize(8).font('Helvetica-Bold').text('Declaration :', M + 6, y + 4);
-  doc.font('Helvetica').fontSize(7);
-  doc.text(
-    'We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.',
-    M + 6,
-    y + 14,
-    { width: W - 12 }
-  );
-  y += declH;
-
-  // ── Terms | Authorised signatory ──
-  const footH = 72;
-  strokeRect(doc, M, y, W, footH);
-  doc.moveTo(MID, y).lineTo(MID, y + footH).stroke();
-
-  doc.fontSize(7.5).font('Helvetica-Bold').text('Terms & Conditions :', M + 6, y + 5);
-  doc.font('Helvetica').fontSize(7);
-  const terms = [
-    '1. E. & O.E.',
-    '2. Subject to local jurisdiction only.',
-    '3. Keep the bill for warranty or guarantee purpose.',
-  ];
-  let tcy = y + 14;
-  for (const t of terms) {
-    doc.text(t, M + 6, tcy, { width: HALF - 12 });
-    tcy += 9;
-  }
-
   if (!isEstimate) {
-    doc.fontSize(8).font('Helvetica-Bold').text(`For ${shop.shop_name || 'Shop'}`, rx + 6, y + 6);
-  }
-  const stampX = rx + colW - 62;
-  const stampY = y + 18;
-  doc.save().dash(3, { space: 2 }).lineWidth(0.6).strokeColor('#999');
-  doc.rect(stampX, stampY, 48, 36).stroke();
-  doc.undash().restore();
-  doc.fontSize(6.5).font('Helvetica').fillColor('#888');
-  doc.text('Shop Seal / Stamp', stampX, stampY + 14, { width: 48, align: 'center' });
-  doc.fillColor('#000');
-  doc.moveTo(rx + 6, y + footH - 14).lineTo(R - 8, y + footH - 14).stroke();
-  doc.fontSize(7).font('Helvetica-Oblique').text('Authorised Signatory', rx + 6, y + footH - 12);
+    // ── Declaration ──
+    const declPadTop = 6;
+    const declH = 40;
+    strokeRect(doc, M, y, W, declH);
+    doc.fontSize(8).font('Helvetica-Bold').text('Declaration :', M + 6, y + declPadTop);
+    doc.font('Helvetica').fontSize(7);
+    doc.text(
+      'We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.',
+      M + 6,
+      y + declPadTop + SECTION_LABEL_GAP,
+      { width: W - 12, lineGap: 1 }
+    );
+    y += declH;
 
-  y += footH + 8;
+    // ── Terms | Authorised signatory ──
+    const footH = 72;
+    strokeRect(doc, M, y, W, footH);
+    doc.moveTo(MID, y).lineTo(MID, y + footH).stroke();
+
+    const footPadTop = 6;
+    if (isNonGst) {
+      doc.fontSize(7.5).font('Helvetica-Bold').text('Note:', M + 6, y + footPadTop);
+      doc.font('Helvetica').fontSize(7);
+      doc.text('1. Keep the bill for warranty or guarantee purpose.', M + 6, y + footPadTop + NOTE_LABEL_GAP, {
+        width: HALF - 12,
+        lineGap: 1,
+      });
+    } else {
+      doc.fontSize(7.5).font('Helvetica-Bold').text('Terms & Conditions :', M + 6, y + footPadTop);
+      doc.font('Helvetica').fontSize(7);
+      const terms = [
+        '1. E. & O.E.',
+        '2. Subject to local jurisdiction only.',
+        '3. Keep the bill for warranty or guarantee purpose.',
+      ];
+      let tcy = y + footPadTop + SECTION_LABEL_GAP;
+      for (const t of terms) {
+        doc.text(t, M + 6, tcy, { width: HALF - 12, lineGap: 1 });
+        tcy += ROW_STEP;
+      }
+    }
+
+    doc.fontSize(8).font('Helvetica-Bold').text(`For ${shop.shop_name || 'Shop'}`, rx + 6, y + 6);
+    const stampX = rx + colW - 62;
+    const stampY = y + 18;
+    doc.save().dash(3, { space: 2 }).lineWidth(0.6).strokeColor('#999');
+    doc.rect(stampX, stampY, 48, 36).stroke();
+    doc.undash().restore();
+    doc.fontSize(6.5).font('Helvetica').fillColor('#888');
+    doc.text('Shop Seal / Stamp', stampX, stampY + 14, { width: 48, align: 'center' });
+    doc.fillColor('#000');
+    doc.moveTo(rx + 6, y + footH - 14).lineTo(R - 8, y + footH - 14).stroke();
+    doc.fontSize(7).font('Helvetica-Oblique').text('Authorised Signatory', rx + 6, y + footH - 12);
+
+    y += footH + 8;
+  } else {
+    y += 8;
+  }
   doc.fontSize(7).font('Helvetica-Oblique').fillColor('#666');
   doc.text('This is a computer generated invoice.', M, y, { width: W, align: 'center' });
   doc.fillColor('#000').font('Helvetica');

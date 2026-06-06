@@ -24,9 +24,10 @@ const createShopValidator = [
     .matches(/^\d{6}$/)
     .withMessage('pincode must be a 6-digit number'),
   body('state_code')
-    .optional({ nullable: true })
+    .notEmpty()
+    .withMessage('state_code is required')
     .matches(/^\d{2}$/)
-    .withMessage('state_code must be 2 digits (e.g. 27 for Maharashtra)'),
+    .withMessage('state_code must be 2 digits (e.g. 07 for Delhi, 27 for Maharashtra)'),
   body('phone').isString().trim().matches(/^[0-9]{10}$/).withMessage('phone must be a 10-digit number'),
   body('email').optional({ nullable: true }).isEmail(),
   body('owner_user_id')

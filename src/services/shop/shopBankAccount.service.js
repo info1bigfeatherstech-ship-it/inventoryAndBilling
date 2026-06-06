@@ -286,6 +286,33 @@ const ShopBankAccountService = {
   },
 
   /**
+   * Default active bank account for GST invoice PDF (when bill has no linked account).
+   */
+  async resolveDefaultForGstInvoice(shopId, gstConfigId = null) {
+    const row = await prisma.shopBankAccount.findFirst({
+      where: {
+        is_active: true,
+        gst_config: {
+          shop_id: shopId,
+          is_active: true,
+          ...(gstConfigId ? { gst_config_id: gstConfigId } : {}),
+        },
+      },
+      orderBy: [{ is_default: 'desc' }, { created_at: 'asc' }],
+      select: {
+        bank_account_id: true,
+        account_holder_name: true,
+        bank_name: true,
+        branch_name: true,
+        account_number: true,
+        ifsc_code: true,
+        upi_id: true,
+      },
+    });
+    return row || null;
+  },
+
+  /**
    * Validate bank account belongs to shop and is usable for UPI billing.
    */
   async assertBankAccountForBilling(bankAccountId, shopId, { requireUpi = true } = {}) {

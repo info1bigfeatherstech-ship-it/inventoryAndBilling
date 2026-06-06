@@ -852,6 +852,7 @@ model Customer {
   address     String?
   city        String?
   state_code  String?
+  pincode     String?
 
   total_spent   Float     @default(0)
   total_orders  Int       @default(0)

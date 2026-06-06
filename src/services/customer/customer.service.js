@@ -18,6 +18,7 @@ const CUSTOMER_SELECT = {
   address: true,
   city: true,
   state_code: true,
+  pincode: true,
   total_spent: true,
   total_orders: true,
   last_purchase: true,
@@ -66,6 +67,7 @@ const CustomerService = {
           address: data.address?.trim() || null,
           city: data.city?.trim() || null,
           state_code: stateCode,
+          pincode: data.pincode?.trim() || null,
           credit_limit: creditLimit,
           credit_balance: creditLimit ?? 0,
           remarks: data.remarks?.trim() || null,
@@ -196,7 +198,7 @@ const CustomerService = {
     }
 
     const payload = {};
-    const allowed = ['name', 'email', 'gst_number', 'address', 'city', 'remarks', 'is_active'];
+    const allowed = ['name', 'email', 'gst_number', 'address', 'city', 'pincode', 'remarks', 'is_active'];
     for (const key of allowed) {
       if (data[key] !== undefined) payload[key] = data[key];
     }

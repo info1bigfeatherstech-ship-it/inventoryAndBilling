@@ -22,6 +22,7 @@ const {
   derivePaymentStatus,
   resolvePlaceOfSupplyStateCode,
   normalizeProductGstType,
+  normalizeStateCode,
   stateCodeFromGstin,
 } = require('../../utils/billing.utils');
 const { generateBillNumber } = require('../../utils/billNumber.utils');
@@ -88,6 +89,7 @@ const BILL_SELECT = {
       address: true,
       city: true,
       state_code: true,
+      pincode: true,
     },
   },
   bank_account: {
@@ -240,13 +242,16 @@ const BillingService = {
         : 0;
       const extraDiscountPercent = Math.min(100, Math.max(0, Number(data.discount) || 0));
 
-      let shopStateCode = shop.state_code;
-      if (!shopStateCode) {
-        const shopGstRow = await prisma.shopGstRegistration.findFirst({
-          where: { shop_id: shopId, is_default: true, is_active: true },
-          select: { gst_number: true },
-        });
-        shopStateCode = stateCodeFromGstin(shopGstRow?.gst_number);
+      const shopStateCode = normalizeStateCode(shop.state_code);
+      if (
+        !shopStateCode &&
+        (billType === 'GST_INVOICE' || billType === 'NON_GST_INVOICE')
+      ) {
+        throw new AppError(
+          'Shop state is not configured. Ask admin to set state on the shop record.',
+          400,
+          'SHOP_STATE_REQUIRED'
+        );
       }
 
       const placeOfSupplyStateCode = resolvePlaceOfSupplyStateCode({
@@ -857,6 +862,15 @@ const BillingService = {
 
   async generatePDF(billId, user, { persist = true } = {}) {
     const bill = await this.getBillById(billId, user);
+
+    if (bill.bill_type === 'GST_INVOICE' && !bill.bank_account) {
+      const defaultBank = await ShopBankAccountService.resolveDefaultForGstInvoice(
+        bill.shop_id,
+        bill.gst_config_id
+      );
+      if (defaultBank) bill.bank_account = defaultBank;
+    }
+
     const pdf = await generateBillPdf(bill, { persist });
 
     if (pdf.pdf_storage_key && persist) {

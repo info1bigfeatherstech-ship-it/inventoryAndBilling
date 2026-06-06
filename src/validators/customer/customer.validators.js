@@ -16,12 +16,32 @@ const createCustomerValidator = [
     .trim()
     .isLength({ min: 15, max: 15 })
     .withMessage('gst_number must be 15 characters when provided'),
-  body('address').optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
-  body('city').optional({ nullable: true }).isString().trim().isLength({ max: 100 }),
+  body('address')
+    .isString()
+    .trim()
+    .notEmpty()
+    .withMessage('address is required')
+    .isLength({ min: 2, max: 500 }),
+  body('city')
+    .isString()
+    .trim()
+    .notEmpty()
+    .withMessage('city is required')
+    .isLength({ min: 2, max: 100 }),
   body('state_code')
-    .optional({ nullable: true })
+    .isString()
+    .trim()
+    .notEmpty()
+    .withMessage('state_code is required')
     .matches(/^\d{2}$/)
     .withMessage('state_code must be 2 digits'),
+  body('pincode')
+    .isString()
+    .trim()
+    .notEmpty()
+    .withMessage('pincode is required')
+    .matches(/^\d{6}$/)
+    .withMessage('pincode must be 6 digits'),
   body('credit_limit').optional({ nullable: true }).isFloat({ min: 0 }),
   body('remarks').optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
 ];
@@ -32,9 +52,36 @@ const updateCustomerValidator = [
   body('name').optional().isString().trim().isLength({ min: 2, max: 100 }),
   body('email').optional({ nullable: true }).isEmail().normalizeEmail(),
   body('gst_number').optional({ nullable: true }).isString().trim().isLength({ min: 15, max: 15 }),
-  body('address').optional({ nullable: true }).isString().trim(),
-  body('city').optional({ nullable: true }).isString().trim(),
-  body('state_code').optional({ nullable: true }).matches(/^\d{2}$/),
+  body('address')
+    .optional()
+    .isString()
+    .trim()
+    .notEmpty()
+    .withMessage('address is required')
+    .isLength({ min: 2, max: 500 }),
+  body('city')
+    .optional()
+    .isString()
+    .trim()
+    .notEmpty()
+    .withMessage('city is required')
+    .isLength({ min: 2, max: 100 }),
+  body('state_code')
+    .optional()
+    .isString()
+    .trim()
+    .notEmpty()
+    .withMessage('state_code is required')
+    .matches(/^\d{2}$/)
+    .withMessage('state_code must be 2 digits'),
+  body('pincode')
+    .optional()
+    .isString()
+    .trim()
+    .notEmpty()
+    .withMessage('pincode is required')
+    .matches(/^\d{6}$/)
+    .withMessage('pincode must be 6 digits'),
   body('credit_limit').optional({ nullable: true }).isFloat({ min: 0 }),
   body('remarks').optional({ nullable: true }).isString().trim(),
   body('is_active').optional().isBoolean(),
