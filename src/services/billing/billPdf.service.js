@@ -123,9 +123,15 @@ const cellText = (doc, text, x, y, w, h, { align = 'left', bold = false, size = 
   doc.text(String(text ?? ''), safeDim(x) + pad, safeDim(y) + pad, { width: cellW, height: cellH, align });
 };
 
-// ─── GST INVOICE — exact template from mockup ───────────────────────────────
+const drawWatermark = (doc, text) => {
+  doc.save().rotate(-35, { origin: [297, 420] });
+  doc.fontSize(52).fillColor('#ccc').opacity(0.22).text(text, 80, 380, { width: 500, align: 'center' });
+  doc.restore().fillColor('#000').opacity(1);
+};
 
-const renderGstTaxInvoice = (doc, bill) => {
+// ─── GST / Non-GST / Estimate — shared template with per-type sections ───────
+
+const renderGstTaxInvoice = (doc, bill, { isNonGst = false, isEstimate = false } = {}) => {
   const shop = bill.shop || {};
   const items = bill.items || [];
   const gst = shopGstin(bill);
@@ -137,52 +143,71 @@ const renderGstTaxInvoice = (doc, bill) => {
   const posName = displayVal(getStateName(bill.place_of_supply_state_code));
   const dispatchName = displayVal(getStateName(shopStateCode) || shop.city);
   const showBankDetails =
+    !isNonGst &&
+    !isEstimate &&
     Boolean(bill.bank_account) &&
     ['UPI', 'CARD', 'BANK_TRANSFER'].includes(String(bill.payment_method || '').toUpperCase());
 
+  if (isEstimate) drawWatermark(doc, 'ESTIMATE ONLY');
+
   let y = M;
 
-  // ── Top: GSTIN left | Original / Duplicate / Triplicate right ──
-  drawLabelValue(doc, M, y, 'GSTIN', gst, HALF);
+  // ── Top: GSTIN left (GST only) | Original / Duplicate / Triplicate right ──
+  if (!isNonGst) {
+    drawLabelValue(doc, M, y, 'GSTIN', gst, HALF);
+  }
   doc.fontSize(7.5).font('Helvetica').text('Original / Duplicate / Triplicate', M, y, {
     width: W,
     align: 'right',
   });
   y += 16;
 
-  // ── GST INVOICE title ──
-  const gstTitleSize = 11;
-  doc.fontSize(gstTitleSize).font('Helvetica-Bold');
-  const gstTitle = 'GST INVOICE';
-  const gstTitleW = doc.widthOfString(gstTitle);
-  const gstTitleX = M + (W - gstTitleW) / 2;
-  doc.text(gstTitle, gstTitleX, y, { lineBreak: false });
-  drawManualUnderline(doc, gstTitleX, y, gstTitle, { size: gstTitleSize, offset: 12 });
-  y += 18;
+  // ── Document title ──
+  if (isEstimate) {
+    const estTitleSize = 11;
+    doc.fontSize(estTitleSize).font('Helvetica-Bold');
+    const estTitle = 'ESTIMATE';
+    const estTitleW = doc.widthOfString(estTitle);
+    const estTitleX = M + (W - estTitleW) / 2;
+    doc.text(estTitle, estTitleX, y, { lineBreak: false });
+    drawManualUnderline(doc, estTitleX, y, estTitle, { size: estTitleSize, offset: 12 });
+    y += 18;
+  } else if (!isNonGst) {
+    const gstTitleSize = 11;
+    doc.fontSize(gstTitleSize).font('Helvetica-Bold');
+    const gstTitle = 'GST INVOICE';
+    const gstTitleW = doc.widthOfString(gstTitle);
+    const gstTitleX = M + (W - gstTitleW) / 2;
+    doc.text(gstTitle, gstTitleX, y, { lineBreak: false });
+    drawManualUnderline(doc, gstTitleX, y, gstTitle, { size: gstTitleSize, offset: 12 });
+    y += 18;
+  }
 
-  // ── Shop identity ──
+  // ── Shop identity (estimate: shop name only — no address / contact / IDs) ──
   doc.fontSize(16).font('Helvetica-Bold');
   doc.text(shop.shop_name || 'Shop', M, y, { width: W, align: 'center' });
-  y += 18;
-  drawCenteredSegments(doc, y, [
-    { text: 'Shop ID : ', bold: true },
-    { text: displayVal(shop.shop_code), bold: false },
-    { text: '  |  Shop Name : ', bold: true },
-    { text: displayVal(legalName), bold: false },
-  ]);
-  y += 12;
-  const addrParts = [shop.address, shop.city].filter(Boolean).join(', ');
-  if (addrParts) {
-    doc.fontSize(FIELD_SIZE).font('Helvetica').text(addrParts, M, y, { width: W, align: 'center' });
-    y += 11;
+  y += isEstimate ? 14 : 18;
+  if (!isEstimate) {
+    drawCenteredSegments(doc, y, [
+      { text: 'Shop ID : ', bold: true },
+      { text: displayVal(shop.shop_code), bold: false },
+      { text: '  |  Shop Name : ', bold: true },
+      { text: displayVal(legalName), bold: false },
+    ]);
+    y += 12;
+    const addrParts = [shop.address, shop.city].filter(Boolean).join(', ');
+    if (addrParts) {
+      doc.fontSize(FIELD_SIZE).font('Helvetica').text(addrParts, M, y, { width: W, align: 'center' });
+      y += 11;
+    }
+    drawCenteredSegments(doc, y, [
+      { text: 'Phone : ', bold: true },
+      { text: displayVal(shop.phone), bold: false },
+      { text: '   |   Email : ', bold: true },
+      { text: displayVal(shop.email), bold: false },
+    ]);
+    y += 12;
   }
-  drawCenteredSegments(doc, y, [
-    { text: 'Phone : ', bold: true },
-    { text: displayVal(shop.phone), bold: false },
-    { text: '   |   Email : ', bold: true },
-    { text: displayVal(shop.email), bold: false },
-  ]);
-  y += 12;
 
   doc.moveTo(M, y).lineTo(R, y).strokeColor('#333').lineWidth(0.75).stroke();
   y += 4;
@@ -220,8 +245,10 @@ const renderGstTaxInvoice = (doc, bill) => {
   }
   drawLabelValue(doc, lx + 6, ly, 'Mobile', bill.customer_mobile, colW - 12);
   ly += 11;
-  drawLabelValue(doc, lx + 6, ly, 'GSTIN', bill.customer_gstin, colW - 12);
-  ly += 11;
+  if (!isNonGst) {
+    drawLabelValue(doc, lx + 6, ly, 'GSTIN', bill.customer_gstin, colW - 12);
+    ly += 11;
+  }
   const custState = displayVal(getStateName(cust.state_code || bill.place_of_supply_state_code));
   drawLabelValue(doc, lx + 6, ly, 'State', custState, colW - 12);
 
@@ -234,10 +261,12 @@ const renderGstTaxInvoice = (doc, bill) => {
   ry += 11;
   drawLabelValue(doc, rxPad, ry, 'E-Way Bill No', '', rxW);
   ry += 11;
-  drawLabelValue(doc, rxPad, ry, 'Place of Supply', posName, rxW);
-  ry += 11;
-  drawLabelValue(doc, rxPad, ry, 'Place of Dispatch', dispatchName, rxW);
-  ry += 11;
+  if (!isNonGst) {
+    drawLabelValue(doc, rxPad, ry, 'Place of Supply', posName, rxW);
+    ry += 11;
+    drawLabelValue(doc, rxPad, ry, 'Place of Dispatch', dispatchName, rxW);
+    ry += 11;
+  }
   drawLabelValue(doc, rxPad, ry, 'Transport', '', rxW);
   ry += 11;
 
@@ -258,15 +287,24 @@ const renderGstTaxInvoice = (doc, bill) => {
   y += infoH;
 
   // ── Product table (full grid borders) ──
-  const cols = [
-    { label: 'S.No.', w: 28 },
-    { label: 'Product Name', w: 168 },
-    { label: 'HSN Code', w: 48 },
-    { label: 'Qty', w: 32 },
-    { label: 'MRP', w: 68 },
-    { label: 'Special Price', w: 76 },
-    { label: 'Total', w: W - 28 - 168 - 48 - 32 - 68 - 76 },
-  ];
+  const cols = isNonGst
+    ? [
+        { label: 'S.No.', w: 28 },
+        { label: 'Product Name', w: 216 },
+        { label: 'Qty', w: 32 },
+        { label: 'MRP', w: 68 },
+        { label: 'Special Price', w: 76 },
+        { label: 'Total', w: W - 28 - 216 - 32 - 68 - 76 },
+      ]
+    : [
+        { label: 'S.No.', w: 28 },
+        { label: 'Product Name', w: 168 },
+        { label: 'HSN Code', w: 48 },
+        { label: 'Qty', w: 32 },
+        { label: 'MRP', w: 68 },
+        { label: 'Special Price', w: 76 },
+        { label: 'Total', w: W - 28 - 168 - 48 - 32 - 68 - 76 },
+      ];
   const rowH = 15;
   const headerH = 16;
 
@@ -282,15 +320,24 @@ const renderGstTaxInvoice = (doc, bill) => {
   for (const item of items) {
     sr += 1;
     const name = item.variant?.product?.name || item.product?.name || item.variant?.sku || 'Item';
-    const row = [
-      String(sr),
-      name,
-      displayVal(item.hsn_code),
-      String(item.quantity),
-      fmtNum(lineMrp(item)),
-      fmtNum(item.unit_price),
-      fmtNum(lineSpecialTotal(item)),
-    ];
+    const row = isNonGst
+      ? [
+          String(sr),
+          name,
+          String(item.quantity),
+          fmtNum(lineMrp(item)),
+          fmtNum(item.unit_price),
+          fmtNum(lineSpecialTotal(item)),
+        ]
+      : [
+          String(sr),
+          name,
+          displayVal(item.hsn_code),
+          String(item.quantity),
+          fmtNum(lineMrp(item)),
+          fmtNum(item.unit_price),
+          fmtNum(lineSpecialTotal(item)),
+        ];
     cx = M;
     cols.forEach((col, i) => {
       strokeRect(doc, cx, y, col.w, rowH);
@@ -366,22 +413,25 @@ const renderGstTaxInvoice = (doc, bill) => {
 
   drawTotalLine('Sub Total', fmtNum(bill.subtotal));
   drawTotalLine('Discount', `- ${fmtNum(mrpDiscount)}`);
-  drawTotalLine('Total Amount', fmtNum(bill.taxable_amount));
 
-  if (gstSplit.tax_mode === 'CGST_SGST') {
-    if (gstSplit.cgst > 0) {
-      drawGstAddLine(`CGST (${taxRates.cgstPercent}%)`, `+ ${fmtNum(gstSplit.cgst)}`);
-    }
-    if (gstSplit.sgst > 0) {
-      drawGstAddLine(`SGST (${taxRates.sgstPercent}%)`, `+ ${fmtNum(gstSplit.sgst)}`);
-    }
-  } else if (gstSplit.igst > 0) {
-    drawGstAddLine(`IGST (${taxRates.igstPercent}%)`, `+ ${fmtNum(gstSplit.igst)}`);
-  }
+  if (!isNonGst) {
+    drawTotalLine('Total Amount', fmtNum(bill.taxable_amount));
 
-  if (bill.gst_amount > 0) {
-    drawTotalLine(`Total Tax Amount (${taxRates.totalPercent}%)`, fmtNum(bill.gst_amount));
-    ty += 2;
+    if (gstSplit.tax_mode === 'CGST_SGST') {
+      if (gstSplit.cgst > 0) {
+        drawGstAddLine(`CGST (${taxRates.cgstPercent}%)`, `+ ${fmtNum(gstSplit.cgst)}`);
+      }
+      if (gstSplit.sgst > 0) {
+        drawGstAddLine(`SGST (${taxRates.sgstPercent}%)`, `+ ${fmtNum(gstSplit.sgst)}`);
+      }
+    } else if (gstSplit.igst > 0) {
+      drawGstAddLine(`IGST (${taxRates.igstPercent}%)`, `+ ${fmtNum(gstSplit.igst)}`);
+    }
+
+    if (bill.gst_amount > 0) {
+      drawTotalLine(`Total Tax Amount (${taxRates.totalPercent}%)`, fmtNum(bill.gst_amount));
+      ty += 2;
+    }
   }
 
   doc.moveTo(tx, ty).lineTo(tx + tw, ty).stroke();
@@ -432,7 +482,9 @@ const renderGstTaxInvoice = (doc, bill) => {
     tcy += 9;
   }
 
-  doc.fontSize(8).font('Helvetica-Bold').text(`For ${shop.shop_name || 'Shop'}`, rx + 6, y + 6);
+  if (!isEstimate) {
+    doc.fontSize(8).font('Helvetica-Bold').text(`For ${shop.shop_name || 'Shop'}`, rx + 6, y + 6);
+  }
   const stampX = rx + colW - 62;
   const stampY = y + 18;
   doc.save().dash(3, { space: 2 }).lineWidth(0.6).strokeColor('#999');
@@ -448,68 +500,6 @@ const renderGstTaxInvoice = (doc, bill) => {
   doc.fontSize(7).font('Helvetica-Oblique').fillColor('#666');
   doc.text('This is a computer generated invoice.', M, y, { width: W, align: 'center' });
   doc.fillColor('#000').font('Helvetica');
-};
-
-// ─── Non-GST / Estimate — keep simpler layout ───────────────────────────────
-
-const billTypeLabel = (billType) => {
-  if (billType === 'ESTIMATE_INVOICE') return 'Estimate Bill';
-  return 'Non-GST Bill';
-};
-
-const drawDashedBox = (doc, x, y, w, h) => {
-  doc.save().dash(4, { space: 3 }).lineWidth(0.75).strokeColor('#bbb').rect(x, y, w, h).stroke().undash().restore();
-};
-
-const drawWatermark = (doc, text) => {
-  doc.save().rotate(-35, { origin: [297, 420] });
-  doc.fontSize(52).fillColor('#ccc').opacity(0.22).text(text, 80, 380, { width: 500, align: 'center' });
-  doc.restore().fillColor('#000').opacity(1);
-};
-
-const renderSimpleInvoice = (doc, bill, { title, watermark = null, withTax = false }) => {
-  if (watermark) drawWatermark(doc, watermark);
-  const shop = bill.shop || {};
-  doc.fontSize(8).text('ORIGINAL FOR RECIPIENT', M, 40, { align: 'right', width: W });
-  doc.fontSize(15).font('Helvetica-Bold');
-  const titleW = doc.widthOfString(title);
-  const titleX = M + (W - titleW) / 2;
-  doc.text(title, titleX, 54, { lineBreak: false });
-  drawManualUnderline(doc, titleX, 54, title, { size: 15, offset: 16 });
-  doc.font('Helvetica').fontSize(10).text(shop.shop_name || 'Shop', M, 76, { width: W, align: 'center' });
-  doc.y = 100;
-
-  const boxTop = doc.y;
-  drawDashedBox(doc, M, boxTop, W / 2 - 5, 70);
-  drawDashedBox(doc, M + W / 2 + 5, boxTop, W / 2 - 5, 70);
-  doc.fontSize(8).font('Helvetica-Bold');
-  doc.text('Bill To', M + 8, boxTop + 6);
-  doc.text('Invoice Details', M + W / 2 + 13, boxTop + 6);
-  doc.font('Helvetica').fontSize(9);
-  doc.text(`M/S: ${bill.customer_name || 'Walk-in'}`, M + 8, boxTop + 20);
-  doc.text(`Mobile: ${bill.customer_mobile || '-'}`, M + 8, boxTop + 34);
-  doc.text(`Invoice No: ${bill.bill_number}`, M + W / 2 + 13, boxTop + 20);
-  doc.text(`Date: ${fmtDate(bill.created_at)}`, M + W / 2 + 13, boxTop + 34);
-  doc.text(`Bill Type: ${billTypeLabel(bill.bill_type)}`, M + W / 2 + 13, boxTop + 48);
-  doc.y = boxTop + 78;
-
-  const items = bill.items || [];
-  let y = doc.y;
-  doc.fontSize(8).font('Helvetica-Bold');
-  doc.text('S.No.  Product  Qty  Total', M, y);
-  y += 14;
-  doc.font('Helvetica');
-  items.forEach((item, i) => {
-    const name = item.variant?.product?.name || item.product?.name || 'Item';
-    doc.text(`${i + 1}  ${name.substring(0, 30)}  ${item.quantity}  ${fmtMoney(lineSpecialTotal(item))}`, M, y);
-    y += 12;
-  });
-  y += 8;
-  doc.text(`Total Payable: ${fmtMoney(bill.total_amount)}`, M, y, { align: 'right', width: W });
-  doc.fontSize(7).font('Helvetica-Oblique').text('This is a computer generated invoice.', M, y + 20, {
-    width: W,
-    align: 'center',
-  });
 };
 
 const ensureCloudinary = () => {
@@ -533,10 +523,12 @@ const buildBillPdfBuffer = (bill) =>
 
       if (bill.bill_type === 'GST_INVOICE') {
         renderGstTaxInvoice(doc, bill);
+      } else if (bill.bill_type === 'NON_GST_INVOICE') {
+        renderGstTaxInvoice(doc, bill, { isNonGst: true });
       } else if (bill.bill_type === 'ESTIMATE_INVOICE') {
-        renderSimpleInvoice(doc, bill, { title: 'ESTIMATE', watermark: 'ESTIMATE ONLY' });
+        renderGstTaxInvoice(doc, bill, { isNonGst: true, isEstimate: true });
       } else {
-        renderSimpleInvoice(doc, bill, { title: 'RETAIL INVOICE' });
+        renderGstTaxInvoice(doc, bill, { isNonGst: true });
       }
 
       doc.end();
