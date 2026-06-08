@@ -26,6 +26,11 @@ const SHOP_STOCK_SELECT = {
       purchase_price: true,
       expenses: true,
       purchase_code: true,
+      images: {
+        orderBy: { sort_order: 'asc' },
+        take: 1,
+        select: { url: true, alt_text: true },
+      },
       product: {
         select: {
           product_id: true,
@@ -35,6 +40,17 @@ const SHOP_STOCK_SELECT = {
           hsn_code: true,
           gst_percent: true,
           gst_type: true,
+          variants: {
+            where: { is_default: true, is_active: true },
+            take: 1,
+            select: {
+              images: {
+                orderBy: { sort_order: 'asc' },
+                take: 1,
+                select: { url: true, alt_text: true },
+              },
+            },
+          },
         },
       },
     },

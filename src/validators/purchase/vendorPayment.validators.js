@@ -19,6 +19,31 @@ const listPaymentsValidator = [
 const payablePurchasesValidator = [
   query('vendor_id').isString().trim().notEmpty(),
   query('warehouse_id').optional().isString().trim(),
+  query('exclude_payment_id').optional().isString().trim(),
+];
+
+const purchaseIdParam = [param('purchaseId').isString().trim().notEmpty()];
+
+const updatePaymentValidator = [
+  ...paymentIdParam,
+  body('amount').isFloat({ min: 0.01 }),
+  body('payment_method').isIn(PAYMENT_METHODS),
+  body('reference_no').optional({ nullable: true }).isString().trim().isLength({ max: 120 }),
+  body('payment_date').optional().isISO8601().toDate(),
+  body('status').isIn(STATUSES),
+  body('remarks').optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
+  body('allocations').isArray({ min: 1 }),
+  body('allocations.*.purchase_id').isString().trim().notEmpty(),
+  body('allocations.*.allocated_amount').isFloat({ min: 0.01 }),
+];
+
+const settlementStatusValidator = [
+  query('page').optional().isInt({ min: 1 }).toInt(),
+  query('limit').optional().isInt({ min: 1, max: 200 }).toInt(),
+  query('warehouse_id').optional().isString().trim(),
+  query('vendor_id').optional().isString().trim(),
+  query('search').optional().isString().trim().isLength({ max: 200 }),
+  query('balance_filter').optional().isIn(['all', 'due', 'cleared', 'has_pending']),
 ];
 
 const createPaymentValidator = [
@@ -28,7 +53,7 @@ const createPaymentValidator = [
   body('payment_method').isIn(PAYMENT_METHODS),
   body('reference_no').optional({ nullable: true }).isString().trim().isLength({ max: 120 }),
   body('payment_date').optional().isISO8601().toDate(),
-  body('status').optional().isIn(STATUSES),
+  body('status').isIn(STATUSES),
   body('remarks').optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
   body('allocations').isArray({ min: 1 }),
   body('allocations.*.purchase_id').isString().trim().notEmpty(),
@@ -49,9 +74,12 @@ const performanceValidator = [
 
 module.exports = {
   paymentIdParam,
+  purchaseIdParam,
   listPaymentsValidator,
   payablePurchasesValidator,
   createPaymentValidator,
+  settlementStatusValidator,
+  updatePaymentValidator,
   updatePaymentStatusValidator,
   performanceValidator,
 };

@@ -123,6 +123,19 @@ enum WarehouseExpenseCategory {
   OTHER
 }
 
+/// Shop petty-cash / operating expenses (repairs, utilities, stationery, etc.).
+enum ShopExpenseCategory {
+  RENT
+  UTILITIES
+  REPAIRS
+  MAINTENANCE
+  TRANSPORT
+  OFFICE
+  STATIONERY
+  MEALS
+  OTHER
+}
+
 enum VendorPaymentStatus {
   PENDING
   PAID
@@ -275,6 +288,7 @@ model Shop {
   bulk_transfers_to    BulkTransferRequest[] @relation("BulkTransferToShop")
   product_levels       ShopProductLevel[]
   staff_codes          ShopStaffCode[]
+  shop_expenses        ShopExpense[]
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
@@ -643,6 +657,38 @@ model WarehouseExpense {
   @@index([warehouse_id, expense_date])
   @@index([category])
   @@map("warehouse_expenses")
+}
+
+model ShopExpense {
+  expense_id     String @id @default(cuid())
+  expense_number String @unique
+
+  shop_id    String
+  category   ShopExpenseCategory
+  description String
+  amount     Float
+
+  expense_date   DateTime
+  payment_method PaymentMethod?
+  reference_no   String?
+
+  recorded_by_user_id String
+  remarks             String?
+
+  is_cancelled         Boolean   @default(false)
+  cancelled_at         DateTime?
+  cancelled_by_user_id String?
+
+  shop         Shop  @relation(fields: [shop_id], references: [shop_id], onDelete: Restrict)
+  recorded_by  User  @relation("ShopExpenseRecordedBy", fields: [recorded_by_user_id], references: [user_id])
+  cancelled_by User? @relation("ShopExpenseCancelledBy", fields: [cancelled_by_user_id], references: [user_id], onDelete: SetNull)
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([shop_id, expense_date])
+  @@index([category])
+  @@map("shop_expenses")
 }
 
 model VendorPayment {
@@ -1123,6 +1169,8 @@ model User {
   debit_notes_created       DebitNote[]     @relation("DebitNoteCreatedBy")
   warehouse_expenses_recorded  WarehouseExpense[] @relation("WarehouseExpenseRecordedBy")
   warehouse_expenses_cancelled WarehouseExpense[] @relation("WarehouseExpenseCancelledBy")
+  shop_expenses_recorded       ShopExpense[]      @relation("ShopExpenseRecordedBy")
+  shop_expenses_cancelled      ShopExpense[]      @relation("ShopExpenseCancelledBy")
   vendor_payments_paid         VendorPayment[] @relation("VendorPaymentPaidBy")
   vendor_payments_cancelled    VendorPayment[] @relation("VendorPaymentCancelledBy")
   credit_note_redemptions   CreditNoteRedemption[] @relation("CreditNoteRedemptionBy")

@@ -22,11 +22,48 @@ const VendorPaymentController = {
     });
   }),
 
+  getById: asyncHandler(async (req, res) => {
+    const payment = await VendorPaymentService.getById(req.user, req.params.paymentId);
+    return successResponse(res, req, {
+      statusCode: 200,
+      message: 'Vendor payment fetched successfully',
+      data: payment,
+    });
+  }),
+
+  getByPurchase: asyncHandler(async (req, res) => {
+    const history = await VendorPaymentService.getPaymentsByPurchase(req.user, req.params.purchaseId);
+    return successResponse(res, req, {
+      statusCode: 200,
+      message: 'Purchase payment history fetched successfully',
+      data: history,
+    });
+  }),
+
+  settlementStatus: asyncHandler(async (req, res) => {
+    const { total, page, limit, bills, summary } = await VendorPaymentService.getSettlementStatus(req.user, req.query);
+    return successResponse(res, req, {
+      statusCode: 200,
+      message: 'Bill payment settlement status fetched successfully',
+      data: bills,
+      meta: { ...paginatedMeta({ page, limit, total }), summary },
+    });
+  }),
+
   create: asyncHandler(async (req, res) => {
     const payment = await VendorPaymentService.create(req.user, req.body);
     return successResponse(res, req, {
       statusCode: 201,
       message: 'Vendor payment recorded successfully',
+      data: payment,
+    });
+  }),
+
+  update: asyncHandler(async (req, res) => {
+    const payment = await VendorPaymentService.update(req.user, req.params.paymentId, req.body);
+    return successResponse(res, req, {
+      statusCode: 200,
+      message: 'Vendor payment updated successfully',
       data: payment,
     });
   }),
