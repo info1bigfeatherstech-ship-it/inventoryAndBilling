@@ -19,6 +19,10 @@ Authorization: Bearer <accessToken>
 
 Obtain token via `POST /api/v1/auth/login`. Refresh via cookie + `POST /api/v1/auth/refresh`.
 
+## Client data templates (for onboarding)
+
+Give clients the **[client-templates/](./client-templates/)** folder — CSV samples + field guides for vendors, warehouses, shops, bulk products, inward, stock, customers, users, and bank accounts.
+
 ## Documentation index
 
 | Module | File | Mount path |

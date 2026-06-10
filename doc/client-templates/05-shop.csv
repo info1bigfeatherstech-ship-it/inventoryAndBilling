@@ -1,0 +1,3 @@
+shop_code,shop_name,address,city,state_code,phone,pincode,email,gst_number,sales_channels,remarks
+SHOP01,Andheri Retail Store,Shop 4 Link Road,Mumbai,27,9876501234,400053,shop@example.com,27AABCU9603R1ZM,"WALK_IN,ONLINE",Main billing counter
+SHOP02,Pune Branch,FC Road Pune,Pune,27,9876505678,411004,,,WALK_IN,

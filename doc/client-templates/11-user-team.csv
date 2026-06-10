@@ -1,0 +1,4 @@
+name,phone,password,role,warehouse_code,shop_code,remarks
+Ramesh Manager,9876511111,Secure@123,WH_MANAGER,WH-MUM-01,,Warehouse manager
+Sita Billing,9876522222,Secure@123,BILLING_STAFF,,SHOP01,Billing counter staff
+Vikram Stock,9876533333,Secure@123,SHOP_STOCK_LISTER,,SHOP01,Shop stock team

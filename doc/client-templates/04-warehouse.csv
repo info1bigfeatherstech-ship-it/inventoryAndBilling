@@ -1,0 +1,3 @@
+warehouse_code,warehouse_name,address,city,manager_name,remarks
+WH-MUM-01,Mumbai Main Warehouse,Plot 12 MIDC Andheri,Mumbai,Ramesh Patel,Primary warehouse
+WH-DEL-01,Delhi Hub Warehouse,Sector 18 Noida,Delhi,,Backup warehouse

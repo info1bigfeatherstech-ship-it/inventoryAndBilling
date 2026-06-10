@@ -1,0 +1,4 @@
+name,title,description,brand_name,product_code,vendor_name,category_name,sub_category_name,mrp,special_price,purchase_price,expenses,hsn_code,gst_percent,gst_type,unit_of_measure,weight,length,width,height,low_stock_threshold,remarks
+Premium Cotton T-Shirt,Premium Cotton T-Shirt - White,100% combed cotton tee,Generic,6767-1,Apple India,Electronics,,1299,999,100,20,6109,12,CGST_SGST,PCS,200,35,25,3,10,Summer collection white
+Premium Cotton T-Shirt,Premium Cotton T-Shirt - Black,100% combed cotton tee,Generic,6767-2,Apple India,Electronics,,1299,999,100,20,6109,12,CGST_SGST,PCS,200,35,25,3,10,Summer collection black
+Slim Fit Jeans,Slim Fit Jeans - Blue,Stretch denim jeans,Generic,8765-1,Samsung India,Apparel,,2499,1999,500,50,6204,18,CGST_SGST,PCS,600,45,35,12,5,Example variant

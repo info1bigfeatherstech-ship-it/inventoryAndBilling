@@ -1,0 +1,5 @@
+name,description,parent_category_name,remarks
+Electronics,Electronic items,,Top level
+Apparel,Clothing and fashion,,Top level
+Mobile Accessories,,Electronics,Sub-category under Electronics
+T-Shirts,,Apparel,

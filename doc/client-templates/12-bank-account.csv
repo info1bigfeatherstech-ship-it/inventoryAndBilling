@@ -1,0 +1,3 @@
+shop_code,account_holder_name,bank_name,account_number,ifsc_code,upi_id,branch_name,is_default,remarks
+SHOP01,BigFeathers Retail Pvt Ltd,HDFC Bank,50100123456789,HDFC0001234,bigfeathers@hdfcbank,Andheri Branch,YES,Primary UPI for billing
+SHOP01,BigFeathers Retail Pvt Ltd,ICICI Bank,60100987654321,ICIC0005678,bigfeathers@icici,,NO,Backup account
