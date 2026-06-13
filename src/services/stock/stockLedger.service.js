@@ -164,14 +164,32 @@ const buildLedgerWhere = (filters = {}) => {
   return where;
 };
 
+const LEDGER_RELATIONS_SELECT = {
+  variant: {
+    select: {
+      sku: true,
+      product_code: true,
+      product: { select: { name: true, product_code: true } },
+    },
+  },
+  from_warehouse: { select: { warehouse_id: true, warehouse_name: true } },
+  to_warehouse: { select: { warehouse_id: true, warehouse_name: true } },
+  from_shop: { select: { shop_id: true, shop_name: true } },
+  to_shop: { select: { shop_id: true, shop_name: true } },
+};
+
 const formatLedgerRow = (row) => {
-  const { variant, ...rest } = row;
+  const { variant, from_warehouse, to_warehouse, from_shop, to_shop, ...rest } = row;
   return {
     ...rest,
     product_name: variant?.product?.name ?? null,
     product_code: variant?.product?.product_code ?? variant?.product_code ?? null,
     variant_sku: variant?.sku ?? null,
     variant_product_code: variant?.product_code ?? null,
+    from_warehouse_name: from_warehouse?.warehouse_name ?? null,
+    to_warehouse_name: to_warehouse?.warehouse_name ?? null,
+    from_shop_name: from_shop?.shop_name ?? null,
+    to_shop_name: to_shop?.shop_name ?? null,
   };
 };
 
@@ -191,13 +209,7 @@ const StockLedgerService = {
         orderBy: { created_at: 'desc' },
         select: {
           ...LEDGER_SELECT,
-          variant: {
-            select: {
-              sku: true,
-              product_code: true,
-              product: { select: { name: true, product_code: true } },
-            },
-          },
+          ...LEDGER_RELATIONS_SELECT,
         },
       }),
     ]);
@@ -317,13 +329,7 @@ const StockLedgerService = {
       orderBy: { created_at: 'desc' },
       select: {
         ...LEDGER_SELECT,
-        variant: {
-          select: {
-            sku: true,
-            product_code: true,
-            product: { select: { name: true, product_code: true } },
-          },
-        },
+        ...LEDGER_RELATIONS_SELECT,
       },
     });
 

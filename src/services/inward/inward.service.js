@@ -362,7 +362,7 @@ const InwardService = {
         where,
         skip,
         take,
-        orderBy: [{ expected_date: 'asc' }, { created_at: 'desc' }],
+        orderBy: { created_at: 'desc' },
         select: {
           ...INWARD_SELECT,
           vendor: { select: { vendor_id: true, company_name: true } },
