@@ -6,6 +6,11 @@ const { normalizeStateCode } = require('../../utils/billing.utils');
 const { isValidStateCode } = require('../../constants/indianStateCodes');
 const logger = require('../../utils/logger.utils');
 const { assertValidGstNumber } = require('../../utils/shopBank.utils');
+const {
+  syncShopOwnerAssignment,
+  clearShopOwnerAssignment,
+  resolveShopForOwner,
+} = require('../../utils/shopOwnerLink.utils');
 
 const parseShopStateCode = (value) => {
   if (value == null || String(value).trim() === '') return null;
@@ -40,6 +45,23 @@ const DEFAULT_GST_SELECT = {
   where: { is_default: true, is_active: true },
   take: 1,
   select: { gst_config_id: true, gst_number: true, legal_name: true },
+};
+
+const OWNER_SHOP_DETAIL_SELECT = {
+  ...SHOP_SELECT,
+  _count: { select: { shop_stocks: true, users: true } },
+  shop_stocks: {
+    take: 5,
+    orderBy: { updated_at: 'desc' },
+    select: {
+      shop_stock_id: true,
+      variant_id: true,
+      quantity_available: true,
+      quantity_reserved: true,
+      quantity_in_transit: true,
+    },
+  },
+  gst_configs: DEFAULT_GST_SELECT,
 };
 
 const attachDefaultGstFields = (shop) => {
@@ -201,21 +223,16 @@ const ShopService = {
         state_code: parseShopStateCode(data.state_code),
         phone: String(data.phone).trim(),
         email: data.email ? String(data.email).trim().toLowerCase() : null,
-        owner_user_id: ownerUserId,  // ⭐ ADD THIS
-        sales_channels: data.sales_channels || [],  // ⭐ ADD THIS
+        owner_user_id: ownerUserId,
+        sales_channels: data.sales_channels || [],
         remarks: data.remarks ?? null,
       },
       select: SHOP_SELECT,
     });
-  
-    // ⭐ NEW: Automatically update user's shop_id if owner assigned
-  if (ownerUserId) {
-    await prisma.user.update({
-      where: { user_id: ownerUserId },
-      data: { shop_id: shop.shop_id },
-    });
-    logger.info('User shop_id updated', { user_id: ownerUserId, shop_id: shop.shop_id });
-  }
+
+    if (ownerUserId) {
+      await syncShopOwnerAssignment({ userId: ownerUserId, shopId: shop.shop_id });
+    }
     if (data.gst_number?.trim()) {
       await upsertShopDefaultGst(shop.shop_id, data.gst_number, data.shop_name);
     }
@@ -273,38 +290,24 @@ const ShopService = {
     if (!shop) throw new AppError('Shop not found', 404, 'SHOP_NOT_FOUND');
     return attachDefaultGstFields(shop);
   },
-  async getShopByOwnerId(ownerUserId) {
-    const shop = await prisma.shop.findUnique({
-      where: { owner_user_id: ownerUserId },
-      select: {
-        ...SHOP_SELECT,
-        _count: { select: { shop_stocks: true, users: true } },
-        shop_stocks: {
-          take: 5,
-          orderBy: { updated_at: 'desc' },
-          select: {
-            shop_stock_id: true,
-            variant_id: true,
-            quantity_available: true,
-            quantity_reserved: true,
-            quantity_in_transit: true,
-          },
-        },
-        gst_configs: DEFAULT_GST_SELECT,
-      },
+  async getShopByOwnerId(ownerUserId, { userShopId = null, repair = false } = {}) {
+    const shop = await resolveShopForOwner(ownerUserId, {
+      userShopId,
+      repair,
+      shopSelect: OWNER_SHOP_DETAIL_SELECT,
     });
-  
+
     if (!shop) {
       throw new AppError('No shop found for this owner', 404, 'SHOP_NOT_FOUND');
     }
-  
+
     return attachDefaultGstFields(shop);
   },
 
   async updateShop(shopId, data) {
     const existing = await prisma.shop.findUnique({
       where: { shop_id: shopId },
-      select: { shop_id: true, shop_code: true },
+      select: { shop_id: true, shop_code: true, owner_user_id: true },
     });
     if (!existing) throw new AppError('Shop not found', 404, 'SHOP_NOT_FOUND');
   
@@ -387,6 +390,30 @@ const ShopService = {
       select: SHOP_SELECT,
     });
 
+    if (Object.prototype.hasOwnProperty.call(payload, 'owner_user_id')) {
+      if (payload.owner_user_id === null) {
+        await clearShopOwnerAssignment({
+          shopId,
+          previousOwnerUserId: existing.owner_user_id,
+        });
+      } else {
+        if (existing.owner_user_id && existing.owner_user_id !== payload.owner_user_id) {
+          await prisma.user.updateMany({
+            where: {
+              user_id: existing.owner_user_id,
+              shop_id: shopId,
+              role: 'SHOP_OWNER',
+            },
+            data: { shop_id: null },
+          });
+        }
+        await syncShopOwnerAssignment({
+          userId: payload.owner_user_id,
+          shopId,
+        });
+      }
+    }
+
     if (Object.prototype.hasOwnProperty.call(data, 'gst_number') && data.gst_number?.trim()) {
       await upsertShopDefaultGst(shopId, data.gst_number, data.shop_name || updated.shop_name);
     }
@@ -398,10 +425,11 @@ const ShopService = {
     return attachDefaultGstFields(withGst);
   },
 
-  async updateMyShop(ownerUserId, data) {
-    const shop = await prisma.shop.findUnique({
-      where: { owner_user_id: ownerUserId },
-      select: { shop_id: true, shop_name: true },
+  async updateMyShop(ownerUserId, data, { userShopId = null } = {}) {
+    const shop = await resolveShopForOwner(ownerUserId, {
+      userShopId,
+      repair: true,
+      shopSelect: { shop_id: true, shop_name: true },
     });
     if (!shop) {
       throw new AppError('No shop found for this owner', 404, 'SHOP_NOT_FOUND');
@@ -449,7 +477,7 @@ const ShopService = {
       await upsertShopDefaultGst(shop.shop_id, data.gst_number, shop.shop_name);
     }
 
-    return this.getShopByOwnerId(ownerUserId);
+    return this.getShopByOwnerId(ownerUserId, { userShopId: shop.shop_id, repair: false });
   },
 
   async softDeleteShop(shopId) {

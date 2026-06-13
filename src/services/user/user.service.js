@@ -3,6 +3,7 @@ const prisma = require('../../utils/prisma.utils');
 const { AppError } = require('../../middlewares/error.middleware');
 const { parsePagination } = require('../../utils/pagination.utils');
 const { WAREHOUSE_ROLES, SHOP_ROLES } = require('../../validators/user/user.validators');
+const { syncShopOwnerAssignment } = require('../../utils/shopOwnerLink.utils');
 
 const SALT_ROUNDS = 12;
 
@@ -138,6 +139,17 @@ const enforceUniqueRoleConstraints = async ({ role, warehouseId, shopId, exclude
   }
 };
 
+const applyShopOwnerLink = async ({ userId, role, shopId, previousRole, tx = prisma }) => {
+  if (role === 'SHOP_OWNER') {
+    await syncShopOwnerAssignment({ userId, shopId: shopId || null, tx });
+    return;
+  }
+
+  if (previousRole === 'SHOP_OWNER') {
+    await syncShopOwnerAssignment({ userId, shopId: null, tx });
+  }
+};
+
 const UserService = {
   async createUser(data) {
     const payload = sanitizeCreate(data);
@@ -151,14 +163,27 @@ const UserService = {
 
     const password_hash = await bcrypt.hash(data.password, SALT_ROUNDS);
 
-    const user = await prisma.user.create({
-      data: {
-        ...payload,
-        password_hash,
-        is_active: true,
-      },
-      select: USER_SELECT,
+    const user = await prisma.$transaction(async (tx) => {
+      const created = await tx.user.create({
+        data: {
+          ...payload,
+          password_hash,
+          is_active: true,
+        },
+        select: USER_SELECT,
+      });
+
+      await applyShopOwnerLink({
+        userId: created.user_id,
+        role: created.role,
+        shopId: created.shop_id,
+        previousRole: null,
+        tx,
+      });
+
+      return created;
     });
+
     return user;
   },
 
@@ -228,10 +253,22 @@ const UserService = {
       excludeUserId: existing.user_id,
     });
 
-    const user = await prisma.user.update({
-      where: { user_id: userId },
-      data: payload,
-      select: USER_SELECT,
+    const user = await prisma.$transaction(async (tx) => {
+      const updated = await tx.user.update({
+        where: { user_id: userId },
+        data: payload,
+        select: USER_SELECT,
+      });
+
+      await applyShopOwnerLink({
+        userId: updated.user_id,
+        role,
+        shopId,
+        previousRole: existing.role,
+        tx,
+      });
+
+      return updated;
     });
 
     return user;

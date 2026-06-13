@@ -28,7 +28,10 @@ const ShopController = {
       throw new AppError('Only shop owners can access this endpoint', 403, 'FORBIDDEN');
     }
 
-    const shop = await ShopService.getShopByOwnerId(req.user.userId);
+    const shop = await ShopService.getShopByOwnerId(req.user.userId, {
+      userShopId: req.user.shopId,
+      repair: true,
+    });
 
     return successResponse(res, req, {
       statusCode: 200,
@@ -42,7 +45,9 @@ const ShopController = {
       throw new AppError('Only shop owners can access this endpoint', 403, 'FORBIDDEN');
     }
 
-    const shop = await ShopService.updateMyShop(req.user.userId, req.body);
+    const shop = await ShopService.updateMyShop(req.user.userId, req.body, {
+      userShopId: req.user.shopId,
+    });
 
     return successResponse(res, req, {
       statusCode: 200,
