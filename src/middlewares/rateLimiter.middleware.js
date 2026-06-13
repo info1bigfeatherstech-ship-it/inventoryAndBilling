@@ -5,6 +5,9 @@ const Redis = require('ioredis');
 const config = require('../config/index.config');
 const logger = require('../utils/logger.utils');
 
+/** Redis key namespace — avoids clashing with other apps on shared Redis (e.g. ecommerce). */
+const RL_KEY_PREFIX = 'rl:bizCentro';
+
 let redisClient = null;
 
 const getRedisClient = () => {
@@ -104,38 +107,40 @@ const createRateLimiter = (options = {}) => {
   });
 };
 
-// Pre-configured limiters
+// Pre-configured limiters — only `login` is mounted in app.js for now.
 const limiters = {
+  login: createRateLimiter({
+    max: 5,
+    windowMs: 5 * 60 * 1000,
+    keyPrefix: `${RL_KEY_PREFIX}:login`,
+  }),
+
+  // Reserved for future use (not mounted — billing needs high throughput).
   general: createRateLimiter({
     max: config.RATE_LIMIT_MAX_GENERAL,
-    keyPrefix: 'rl:general',
+    keyPrefix: `${RL_KEY_PREFIX}:general`,
   }),
 
   write: createRateLimiter({
     max: 50,
     windowMs: 15 * 60 * 1000,
-    keyPrefix: 'rl:write',
+    keyPrefix: `${RL_KEY_PREFIX}:write`,
   }),
 
   sensitive: createRateLimiter({
     max: 10,
     windowMs: 15 * 60 * 1000,
-    keyPrefix: 'rl:sensitive',
+    keyPrefix: `${RL_KEY_PREFIX}:sensitive`,
   }),
 
   admin: createRateLimiter({
     max: config.RATE_LIMIT_MAX_ADMIN,
-    keyPrefix: 'rl:admin',
-  }),
-
-  login: createRateLimiter({
-    max: 5,
-    windowMs: 5 * 60 * 1000,
-    keyPrefix: 'rl:login',
+    keyPrefix: `${RL_KEY_PREFIX}:admin`,
   }),
 };
 
 module.exports = {
   limiters,
   createRateLimiter,
+  RL_KEY_PREFIX,
 };

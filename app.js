@@ -3,8 +3,6 @@ const express = require('express');
 const compression = require('compression');
 const cookieParser = require('cookie-parser');
 
-
-const logger = require('./src/utils/logger.utils');
 const prisma = require('./src/utils/prisma.utils');
 
 // Middleware imports
@@ -48,14 +46,9 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
 
-// ============ RATE LIMITING ============
-if (limiters && typeof limiters.general === 'function') {
-  app.use('/api', limiters.general);
-  if (limiters.login) app.use('/api/v1/auth/login', limiters.login);
-  if (limiters.sensitive) app.use('/api/v1/auth/refresh', limiters.sensitive);
-  if (limiters.admin) app.use('/api/admin', limiters.admin);
-} else {
-  logger.warn('Rate limiters not loaded — skipping rate limiting');
+// ============ RATE LIMITING (login only — billing/API uncapped for now) ============
+if (limiters?.login) {
+  app.use('/api/v1/auth/login', limiters.login);
 }
 
 // ============ NO-CACHE FOR HEALTH ENDPOINTS ============
