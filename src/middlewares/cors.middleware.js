@@ -32,7 +32,13 @@ const createCorsMiddleware = () => {
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID', 'Idempotency-Key'],
-    exposedHeaders: ['X-Request-ID', 'X-RateLimit-Limit', 'X-RateLimit-Remaining'],
+    exposedHeaders: [
+      'X-Request-ID',
+      'X-RateLimit-Limit',
+      'X-RateLimit-Remaining',
+      'Content-Disposition',
+      'X-Backup-Filename',
+    ],
     maxAge: 86400, // 24 hours
   });
 };

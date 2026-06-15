@@ -31,6 +31,7 @@ const debitNoteRoutes = require('./debitNote/debitNote.routes');
 const cashbankRoutes = require('./cashbank/cashbank.routes');
 const dashboardRoutes = require('./dashboard/dashboard.routes');
 const syncRoutes = require('./sync/sync.routes');
+const backupRoutes = require('./backup/backup.routes');
 
 // API info route
 router.get('/', (req, res) => {
@@ -111,6 +112,7 @@ v1Router.use('/debit-notes', debitNoteRoutes);
 v1Router.use('/cashbank', cashbankRoutes);
 v1Router.use('/dashboard', dashboardRoutes);
 v1Router.use('/sync', syncRoutes);
+v1Router.use('/backups', backupRoutes);
 // Mount versioned routes
 router.use('/v1', v1Router);
 

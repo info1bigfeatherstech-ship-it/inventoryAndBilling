@@ -11,7 +11,7 @@ const createCustomerValidator = [
   body('name').isString().trim().isLength({ min: 2, max: 100 }),
   body('email').optional({ nullable: true }).isEmail().normalizeEmail(),
   body('gst_number')
-    .optional({ nullable: true })
+    .optional({ values: 'falsy' })
     .isString()
     .trim()
     .isLength({ min: 15, max: 15 })
@@ -51,7 +51,12 @@ const updateCustomerValidator = [
   body('mobile').optional().isString().trim().matches(/^\d{10}$/),
   body('name').optional().isString().trim().isLength({ min: 2, max: 100 }),
   body('email').optional({ nullable: true }).isEmail().normalizeEmail(),
-  body('gst_number').optional({ nullable: true }).isString().trim().isLength({ min: 15, max: 15 }),
+  body('gst_number')
+    .optional({ values: 'falsy' })
+    .isString()
+    .trim()
+    .isLength({ min: 15, max: 15 })
+    .withMessage('gst_number must be 15 characters when provided'),
   body('address')
     .optional()
     .isString()

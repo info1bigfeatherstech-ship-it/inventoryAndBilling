@@ -66,29 +66,19 @@ const createProductValidator = [
   body('description').optional({ nullable: true }).isString().trim().isLength({ max: 2000 }),
   body('title').optional({ nullable: true }).isString().trim().isLength({ max: 200 }),
   body('brand_name').optional({ nullable: true }).isString().trim().isLength({ max: 120 }),
-  body('primary_vendor_id').isString().trim().notEmpty(),
-  body('hsn_code').isString().trim().isLength({ min: 4, max: 20 }),
-  body('gst_percent').isFloat({ min: 0, max: 100 }),
-  body('gst_type').isIn(GST_TYPES),
-  body('unit_of_measure').isString().trim().isLength({ min: 1, max: 40 }),
+  body('primary_vendor_id').optional({ nullable: true, values: 'falsy' }).isString().trim().notEmpty(),
+  body('hsn_code').optional({ values: 'falsy' }).isString().trim().isLength({ max: 20 }),
+  body('gst_percent').optional({ values: 'falsy' }).isFloat({ min: 0, max: 100 }),
+  body('gst_type').optional({ values: 'falsy' }).isIn(GST_TYPES),
+  body('unit_of_measure').optional({ values: 'falsy' }).isString().trim().isLength({ max: 40 }),
   ...variantShippingRules(''),
-  body('category_id').isString().trim().notEmpty(),
-  body('sub_category_id').optional({ nullable: true }).isString().trim().notEmpty(),
+  body('category_id').optional({ nullable: true, values: 'falsy' }).isString().trim().notEmpty(),
+  body('sub_category_id').optional({ nullable: true, values: 'falsy' }).isString().trim().notEmpty(),
   body('remarks').optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
   requirePriceWhenNoVariants('mrp', 'mrp'),
   requirePriceWhenNoVariants('special_price', 'special_price'),
   requirePriceWhenNoVariants('expenses', 'expenses'),
-  body().custom((_, { req }) => {
-    const hasVariants = Array.isArray(req.body.variants) && req.body.variants.length > 0;
-    if (hasVariants) return true;
-    const hasPurchase =
-      (req.body.purchase_price != null && req.body.purchase_price !== '') ||
-      (req.body.purchase_cost != null && req.body.purchase_cost !== '');
-    if (!hasPurchase) {
-      throw new Error('purchase_price (or purchase_cost) is required when variants array is not provided');
-    }
-    return true;
-  }),
+  body('purchase_price').optional({ values: 'falsy' }).isFloat({ min: 0 }),
   body('purchase_cost').optional({ nullable: true }).isFloat({ min: 0 }),
   body('system_barcode').optional().isString().trim().notEmpty(),
   body('vendor_barcode').optional({ nullable: true }).isString().trim(),
@@ -98,7 +88,7 @@ const createProductValidator = [
     .custom((variants) => {
       if (!variants || !variants.length) return true;
       variants.forEach((v, i) => {
-        for (const key of ['mrp', 'special_price', 'purchase_price', 'expenses']) {
+        for (const key of ['mrp', 'special_price', 'expenses']) {
           const hasPurchaseAlias = key === 'purchase_price' && v.purchase_cost != null && v.purchase_cost !== '';
           if ((v[key] === undefined || v[key] === null || v[key] === '') && !hasPurchaseAlias) {
             throw new Error(`variants[${i}].${key} is required — each variant needs its own price`);
@@ -137,13 +127,13 @@ const updateProductValidator = [
   body('description').optional({ nullable: true }).isString().trim().isLength({ max: 2000 }),
   body('title').optional({ nullable: true }).isString().trim().isLength({ max: 200 }),
   body('brand_name').optional({ nullable: true }).isString().trim().isLength({ max: 120 }),
-  body('primary_vendor_id').optional().isString().trim().notEmpty(),
-  body('hsn_code').optional().isString().trim().isLength({ min: 4, max: 20 }),
-  body('gst_percent').optional().isFloat({ min: 0, max: 100 }),
-  body('gst_type').optional().isIn(GST_TYPES),
-  body('unit_of_measure').optional().isString().trim().isLength({ min: 1, max: 40 }),
-  body('category_id').optional().isString().trim().notEmpty(),
-  body('sub_category_id').optional({ nullable: true }).isString().trim().notEmpty(),
+  body('primary_vendor_id').optional({ nullable: true, values: 'falsy' }).isString().trim().notEmpty(),
+  body('hsn_code').optional({ values: 'falsy' }).isString().trim().isLength({ max: 20 }),
+  body('gst_percent').optional({ values: 'falsy' }).isFloat({ min: 0, max: 100 }),
+  body('gst_type').optional({ values: 'falsy' }).isIn(GST_TYPES),
+  body('unit_of_measure').optional({ values: 'falsy' }).isString().trim().isLength({ max: 40 }),
+  body('category_id').optional({ nullable: true, values: 'falsy' }).isString().trim().notEmpty(),
+  body('sub_category_id').optional({ nullable: true, values: 'falsy' }).isString().trim().notEmpty(),
   body('is_active').optional().isBoolean().toBoolean(),
   body('remarks').optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
   ...productPriceRules(''),
@@ -156,16 +146,9 @@ const createVariantValidator = [
   body('vendor_barcode').optional({ nullable: true }).isString().trim(),
   body('mrp').isFloat({ min: 0 }),
   body('special_price').isFloat({ min: 0 }),
-  body('purchase_price').optional().isFloat({ min: 0 }),
+  body('purchase_price').optional({ values: 'falsy' }).isFloat({ min: 0 }),
   body('purchase_cost').optional({ nullable: true }).isFloat({ min: 0 }),
   body('expenses').isFloat({ min: 0 }),
-  body().custom((_, { req }) => {
-    const hasPurchase =
-      (req.body.purchase_price != null && req.body.purchase_price !== '') ||
-      (req.body.purchase_cost != null && req.body.purchase_cost !== '');
-    if (!hasPurchase) throw new Error('purchase_price or purchase_cost is required');
-    return true;
-  }),
   body('weight').isFloat({ min: 0 }),
   body('length').isFloat({ min: 0 }),
   body('width').isFloat({ min: 0 }),

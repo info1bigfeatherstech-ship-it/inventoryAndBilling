@@ -96,8 +96,8 @@ const looksLikeId = (str) => {
 
 // Smart resolver: if input is ID, use directly; if name, resolve
 const resolveVendorSmart = async (input, rowNumber) => {
-  if (!input) {
-    throw new Error(`Row ${rowNumber}: Either vendor_id or vendor_name is required`);
+  if (!input || String(input).trim() === '') {
+    return null;
   }
   
   // If input looks like an ID (CUID/UUID), use as ID
@@ -117,8 +117,11 @@ const resolveVendorSmart = async (input, rowNumber) => {
 };
 
 const resolveCategorySmart = async (categoryInput, subCategoryInput, rowNumber) => {
-  if (!categoryInput) {
-    throw new Error(`Row ${rowNumber}: category_name or category_id is required`);
+  if (!categoryInput || String(categoryInput).trim() === '') {
+    if (subCategoryInput && String(subCategoryInput).trim() !== '') {
+      throw new Error(`Row ${rowNumber}: category_name is required when sub_category_name is provided`);
+    }
+    return { category_id: null, sub_category_id: null };
   }
   
   // If input looks like an ID (CUID/UUID), use as ID
@@ -296,6 +299,40 @@ const PRODUCT_DETAIL_SELECT = {
 };
 
 const normalizeCode = (value) => String(value || '').trim().toUpperCase();
+
+const DEFAULT_GST_TYPE = 'EXEMPT';
+
+const sanitizeOptionalHsn = (value) => {
+  if (value == null || String(value).trim() === '') return '';
+  return normalizeCode(value);
+};
+
+const sanitizeOptionalGstPercent = (value) => {
+  if (value == null || value === '') return 0;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+};
+
+const sanitizeOptionalGstType = (value) => {
+  const allowed = ['CGST_SGST', 'IGST', 'EXEMPT'];
+  if (!value || String(value).trim() === '') return DEFAULT_GST_TYPE;
+  return allowed.includes(value) ? value : DEFAULT_GST_TYPE;
+};
+
+const sanitizeOptionalUnitOfMeasure = (value) => {
+  if (value == null || String(value).trim() === '') return '';
+  return String(value).trim();
+};
+
+const sanitizeOptionalVendorId = (value) => {
+  if (value == null || String(value).trim() === '') return null;
+  return String(value).trim();
+};
+
+const sanitizeOptionalCategoryId = (value) => {
+  if (value == null || String(value).trim() === '') return null;
+  return String(value).trim();
+};
 const normalizeSku = (value) => String(value || '').trim().toUpperCase();
 
 /** Base product code only (7834). Strips accidental serial suffix (7834-1 → 7834). */
@@ -341,6 +378,7 @@ const sanitizeProductPrices = (data) => {
 };
 
 const VARIANT_PRICE_KEYS = ['mrp', 'special_price', 'purchase_price', 'expenses'];
+const VARIANT_REQUIRED_PRICE_KEYS = ['mrp', 'special_price', 'expenses'];
 
 const priceFieldPresent = (obj, key) =>
   obj[key] !== null && obj[key] !== undefined && obj[key] !== '';
@@ -354,10 +392,10 @@ const extractVariantPrices = (variant, indexLabel, { required = false } = {}) =>
   };
 
   if (required) {
-    for (const key of VARIANT_PRICE_KEYS) {
+    for (const key of VARIANT_REQUIRED_PRICE_KEYS) {
       if (prices[key] == null) {
         throw new AppError(
-          `${indexLabel}: ${key} is required — each variant must have its own MRP, special price, purchase price, and expenses.`,
+          `${indexLabel}: ${key} is required — each variant must have its own MRP, special price, and expenses.`,
           400,
           'VARIANT_PRICES_REQUIRED'
         );
@@ -1071,8 +1109,16 @@ const ProductService = {
   async createProduct(data, user, { variantImagesByIndex } = {}) {
     const warehouseId = resolveWarehouseId(user, data.warehouse_id);
     await assertWarehouseActive(warehouseId);
-    await assertVendorActive(data.primary_vendor_id);
-    await assertCategoryValid(data.category_id, data.sub_category_id);
+
+    const vendorId = sanitizeOptionalVendorId(data.primary_vendor_id);
+    const categoryId = sanitizeOptionalCategoryId(data.category_id);
+    const subCategoryId = sanitizeOptionalCategoryId(data.sub_category_id);
+
+    if (vendorId) await assertVendorActive(vendorId);
+    if (categoryId) await assertCategoryValid(categoryId, subCategoryId);
+    if (subCategoryId && !categoryId) {
+      throw new AppError('category_id is required when sub_category_id is provided', 400, 'INVALID_SUB_CATEGORY');
+    }
 
     const baseProductCode = normalizeBaseProductCode(data.product_code);
     if (!baseProductCode) throw new AppError('product_code is required', 400, 'PRODUCT_CODE_REQUIRED');
@@ -1101,28 +1147,28 @@ const ProductService = {
    
    
     const productPayload = {
-      // Relations (connect)
       warehouse: { connect: { warehouse_id: warehouseId } },
-      primary_vendor: { connect: { vendor_id: data.primary_vendor_id } },
-      category: { connect: { category_id: data.category_id } },
-      
-      // Direct fields
       product_code: baseProductCode,
       name: String(data.name).trim(),
       description: data.description ?? null,
       title: data.title ?? null,
       brand_name: data.brand_name ?? null,
-      hsn_code: normalizeCode(data.hsn_code),
-      gst_percent: Number(data.gst_percent),
-      gst_type: data.gst_type,
-      unit_of_measure: String(data.unit_of_measure).trim(),
+      hsn_code: sanitizeOptionalHsn(data.hsn_code),
+      gst_percent: sanitizeOptionalGstPercent(data.gst_percent),
+      gst_type: sanitizeOptionalGstType(data.gst_type),
+      unit_of_measure: sanitizeOptionalUnitOfMeasure(data.unit_of_measure),
       remarks: data.remarks ?? null,
       ...productPrices,
     };
-    
-    // Only add sub_category if provided (not null)
-    if (data.sub_category_id) {
-      productPayload.sub_category = { connect: { category_id: data.sub_category_id } };
+
+    if (vendorId) {
+      productPayload.primary_vendor = { connect: { vendor_id: vendorId } };
+    }
+    if (categoryId) {
+      productPayload.category = { connect: { category_id: categoryId } };
+    }
+    if (subCategoryId) {
+      productPayload.sub_category = { connect: { category_id: subCategoryId } };
     }
 
 
@@ -1292,9 +1338,29 @@ const ProductService = {
     mapIncomingPriceFields(data, productFields);
     delete productFields.purchase_cost;
 
-    if (productFields.hsn_code) productFields.hsn_code = normalizeCode(productFields.hsn_code);
+    if (Object.prototype.hasOwnProperty.call(data, 'hsn_code')) {
+      productFields.hsn_code = sanitizeOptionalHsn(productFields.hsn_code);
+    }
+    if (Object.prototype.hasOwnProperty.call(data, 'gst_percent')) {
+      productFields.gst_percent = sanitizeOptionalGstPercent(productFields.gst_percent);
+    }
+    if (Object.prototype.hasOwnProperty.call(data, 'gst_type')) {
+      productFields.gst_type = sanitizeOptionalGstType(productFields.gst_type);
+    }
+    if (Object.prototype.hasOwnProperty.call(data, 'unit_of_measure')) {
+      productFields.unit_of_measure = sanitizeOptionalUnitOfMeasure(productFields.unit_of_measure);
+    }
     if (productFields.name) productFields.name = String(productFields.name).trim();
-    if (productFields.primary_vendor_id) await assertVendorActive(productFields.primary_vendor_id);
+
+    if (Object.prototype.hasOwnProperty.call(data, 'primary_vendor_id')) {
+      const vendorId = sanitizeOptionalVendorId(data.primary_vendor_id);
+      if (vendorId) {
+        await assertVendorActive(vendorId);
+        productFields.primary_vendor_id = vendorId;
+      } else {
+        productFields.primary_vendor_id = null;
+      }
+    }
 
     const hasPriceField = PRICE_FIELD_KEYS.some((k) => Object.prototype.hasOwnProperty.call(productFields, k));
     if (hasPriceField) {
@@ -1305,17 +1371,26 @@ const ProductService = {
       validateVariantPricing({ ...current, ...productFields }, 'Product');
     }
 
-    const categoryId = productFields.category_id || undefined;
-    const subCategoryId = productFields.sub_category_id !== undefined ? productFields.sub_category_id : undefined;
-    if (categoryId || subCategoryId) {
+    if (Object.prototype.hasOwnProperty.call(data, 'category_id') || Object.prototype.hasOwnProperty.call(data, 'sub_category_id')) {
       const current = await prisma.product.findUnique({
         where: { product_id: productId },
         select: { category_id: true, sub_category_id: true },
       });
-      await assertCategoryValid(
-        categoryId || current.category_id,
-        subCategoryId !== undefined ? subCategoryId : current.sub_category_id
-      );
+      const categoryId = Object.prototype.hasOwnProperty.call(data, 'category_id')
+        ? sanitizeOptionalCategoryId(data.category_id)
+        : current.category_id;
+      const subCategoryId = Object.prototype.hasOwnProperty.call(data, 'sub_category_id')
+        ? sanitizeOptionalCategoryId(data.sub_category_id)
+        : current.sub_category_id;
+
+      if (categoryId) {
+        await assertCategoryValid(categoryId, subCategoryId);
+        productFields.category_id = categoryId;
+        productFields.sub_category_id = subCategoryId;
+      } else {
+        productFields.category_id = null;
+        productFields.sub_category_id = null;
+      }
     }
 
     if (!Object.keys(productFields).length) {
@@ -1909,15 +1984,15 @@ const ProductService = {
       const product = await prisma.product.create({
         data: {
           warehouse: { connect: { warehouse_id: warehouseId } },
-          primary_vendor: { connect: { vendor_id: primary_vendor_id } },
-          category: { connect: { category_id } },
+          ...(primary_vendor_id && { primary_vendor: { connect: { vendor_id: primary_vendor_id } } }),
+          ...(category_id && { category: { connect: { category_id } } }),
           ...(sub_category_id && { sub_category: { connect: { category_id: sub_category_id } } }),
           product_code: variantsData[0].product_code.split('-')[0],
           name: productName,
-          hsn_code: firstRow.hsn_code,
-          gst_percent: Number(firstRow.gst_percent) || 18,
-          gst_type: firstRow.gst_type || 'CGST_SGST',
-          unit_of_measure: firstRow.unit_of_measure || 'PCS',
+          hsn_code: sanitizeOptionalHsn(firstRow.hsn_code),
+          gst_percent: sanitizeOptionalGstPercent(firstRow.gst_percent),
+          gst_type: sanitizeOptionalGstType(firstRow.gst_type),
+          unit_of_measure: sanitizeOptionalUnitOfMeasure(firstRow.unit_of_measure),
           ...firstVariantPrices,
           title: variantsData[0].title,
           description: variantsData[0].description,

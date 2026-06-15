@@ -412,7 +412,7 @@ model Product {
   title        String?
   brand_name   String?
 
-  primary_vendor_id String
+  primary_vendor_id String?
 
   hsn_code    String
   gst_percent Float
@@ -420,7 +420,7 @@ model Product {
 
   unit_of_measure String
 
-  category_id     String
+  category_id     String?
   sub_category_id String?
 
   /// Default prices shared by variants; each variant may override its own prices.
@@ -433,8 +433,8 @@ model Product {
   remarks   String?
 
   warehouse      Warehouse @relation(fields: [warehouse_id], references: [warehouse_id], onDelete: Restrict)
-  primary_vendor Vendor    @relation(fields: [primary_vendor_id], references: [vendor_id])
-  category       Category  @relation("ProductToCategory", fields: [category_id], references: [category_id])
+  primary_vendor Vendor?   @relation(fields: [primary_vendor_id], references: [vendor_id])
+  category       Category? @relation("ProductToCategory", fields: [category_id], references: [category_id])
   sub_category   Category? @relation("ProductToSubCategory", fields: [sub_category_id], references: [category_id])
 
   variants       ProductVariant[]
@@ -1188,6 +1188,11 @@ model User {
   bulk_requests_received      BulkTransferRequest[] @relation("BulkTransferReceiver")
   bulk_requests_cancelled     BulkTransferRequest[] @relation("BulkTransferCanceller")
 
+  google_drive_token   UserGoogleDriveToken?
+  backup_settings      BackupClientSettings?
+  backup_records       BackupRecord[]
+  backup_restore_logs  BackupRestoreLog[]
+
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
@@ -1455,4 +1460,118 @@ model InwardReceiptItem {
   @@index([mapped_product_id])
   @@index([mapped_variant_id])
   @@map("inward_receipt_items")
+}
+
+// ==================== BACKUP & GOOGLE DRIVE ====================
+
+enum BackupType {
+  AUTO
+  MANUAL_COMPUTER
+  MANUAL_DRIVE
+}
+
+enum BackupStatus {
+  IN_PROGRESS
+  SUCCESS
+  FAILED
+}
+
+enum BackupRestoreMode {
+  MERGE
+  REPLACE
+  MISSING_ONLY
+}
+
+enum BackupStorageLocation {
+  LOCAL
+  GOOGLE_DRIVE
+}
+
+model UserGoogleDriveToken {
+  token_id           String   @id @default(cuid())
+  user_id            String   @unique
+  access_token       String
+  refresh_token      String?
+  expires_at         DateTime
+  google_email       String?
+  google_account_id  String?
+  scopes             String?
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
+
+  user User @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@map("user_google_drive_tokens")
+}
+
+model BackupClientSettings {
+  setting_id              String  @id @default(cuid())
+  user_id                 String  @unique
+  auto_backup_enabled     Boolean @default(false)
+  auto_backup_frequency   String  @default("DAILY")
+  auto_backup_time        String  @default("02:00")
+  retention_days          Int     @default(30)
+  auto_delete_old_backups Boolean @default(true)
+  email_on_success        Boolean @default(false)
+  email_on_failure        Boolean @default(true)
+  email_on_late           Boolean @default(false)
+  include_bills           Boolean @default(true)
+  include_customers       Boolean @default(true)
+  include_products        Boolean @default(true)
+  include_stock           Boolean @default(true)
+  include_staff_codes     Boolean @default(true)
+  include_settings        Boolean @default(true)
+  compression_level       String  @default("NORMAL")
+  encrypt_backup          Boolean @default(false)
+  created_at              DateTime @default(now())
+  updated_at              DateTime @updatedAt
+
+  user User @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@map("backup_client_settings")
+}
+
+model BackupRecord {
+  backup_id            String                @id @default(cuid())
+  display_id           String
+  user_id              String
+  backup_type          BackupType
+  status               BackupStatus          @default(IN_PROGRESS)
+  filename             String
+  file_size_bytes      BigInt?
+  duration_ms          Int?
+  storage_location     BackupStorageLocation
+  google_drive_file_id String?
+  scope_role           UserRole
+  scope_json           Json?
+  error_message        String?
+  created_at           DateTime              @default(now())
+  completed_at         DateTime?
+
+  user          User               @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+  restore_logs  BackupRestoreLog[]
+
+  @@unique([user_id, display_id])
+  @@index([user_id, created_at])
+  @@index([user_id, status])
+  @@map("backup_records")
+}
+
+model BackupRestoreLog {
+  restore_id       String            @id @default(cuid())
+  user_id          String
+  backup_id        String?
+  source_filename  String
+  restore_mode     BackupRestoreMode
+  status           BackupStatus      @default(IN_PROGRESS)
+  summary_json     Json?
+  error_message    String?
+  created_at       DateTime          @default(now())
+  completed_at     DateTime?
+
+  user   User          @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+  backup BackupRecord? @relation(fields: [backup_id], references: [backup_id], onDelete: SetNull)
+
+  @@index([user_id, created_at])
+  @@map("backup_restore_logs")
 }

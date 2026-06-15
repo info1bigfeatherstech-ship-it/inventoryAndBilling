@@ -217,6 +217,34 @@ class Config {
     return process.env.LOG_DIR || path.join(__dirname, '../../logs');
   }
 
+  // Google Drive / Backup
+  get GOOGLE_CLIENT_ID() {
+    return process.env.GOOGLE_CLIENT_ID || '';
+  }
+
+  get GOOGLE_CLIENT_SECRET() {
+    return process.env.GOOGLE_CLIENT_SECRET || '';
+  }
+
+  get GOOGLE_REDIRECT_URI() {
+    return process.env.GOOGLE_REDIRECT_URI || '';
+  }
+
+  get FRONTEND_URL() {
+    const explicit = process.env.FRONTEND_URL || '';
+    if (explicit) return explicit.replace(/\/$/, '');
+    const origins = this.ALLOWED_ORIGINS;
+    return origins[0] || 'http://localhost:5173';
+  }
+
+  get BACKUP_MAX_UPLOAD_MB() {
+    return parseInt(process.env.BACKUP_MAX_UPLOAD_MB, 10) || 200;
+  }
+
+  get isGoogleDriveConfigured() {
+    return Boolean(this.GOOGLE_CLIENT_ID && this.GOOGLE_CLIENT_SECRET && this.GOOGLE_REDIRECT_URI);
+  }
+
   // Helpers
   get isProduction() {
     return this.NODE_ENV === 'production';
