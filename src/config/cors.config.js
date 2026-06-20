@@ -37,9 +37,43 @@ function isLoopbackOrigin(origin, serverPort) {
   }
 }
 
+function parseHostname(value) {
+  if (!value) return null;
+  try {
+    return new URL(value).hostname;
+  } catch {
+    return value;
+  }
+}
+
+function isAllowedOrigin(origin, cookieDomain) {
+  if (!origin) return false;
+  if (allowedOrigins.includes(origin)) return true;
+  if (isLoopbackOrigin(origin, config.PORT)) return true;
+
+  try {
+    const { hostname } = new URL(origin);
+    const normalizedCookieDomain = (cookieDomain || '').replace(/^\./, '');
+    if (normalizedCookieDomain && hostname === normalizedCookieDomain) return true;
+    if (normalizedCookieDomain && hostname.endsWith(`.${normalizedCookieDomain}`)) return true;
+
+    for (const allowed of allowedOrigins) {
+      const allowedHost = parseHostname(allowed);
+      if (!allowedHost) continue;
+      if (hostname === allowedHost) return true;
+      if (hostname.endsWith(`.${allowedHost}`)) return true;
+    }
+  } catch {
+    return false;
+  }
+
+  return false;
+}
+
 module.exports = {
   allowedOrigins,
   isPublicPath,
   isOwnerReviewPath,
   isLoopbackOrigin,
+  isAllowedOrigin,
 };
