@@ -16,6 +16,7 @@ const { limiters } = require('./src/middlewares/rateLimiter.middleware');
 // Route imports
 const mainRouter = require('./src/routes/index.routes');
 const healthRoutes = require('./src/routes/health.routes');
+const { allowedOrigins } = require('./src/config/cors.config');
 
 const app = express();
 
@@ -55,6 +56,12 @@ if (limiters?.login) {
 app.use('/health', setNoCacheHeaders);
 app.use('/ready', setNoCacheHeaders);
 app.use('/live', setNoCacheHeaders);
+
+// Log CORS configuration at startup for easier debugging in production
+try {
+  console.info('[Startup] CORS allowed origins:', allowedOrigins);
+  console.info('[Startup] COOKIE_DOMAIN:', require('./src/config/index.config').COOKIE_DOMAIN);
+} catch (e) {}
 
 // ============ HEALTH ROUTES (NO RATE LIMIT) ============
 app.use('/', healthRoutes);
