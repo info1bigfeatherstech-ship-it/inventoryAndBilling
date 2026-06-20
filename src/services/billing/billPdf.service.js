@@ -195,7 +195,7 @@ const renderGstTaxInvoice = (doc, bill, { isNonGst = false, isEstimate = false, 
     formatCityStateLabel(shop.city, shopDispatchCode, { withCode: showStateCode })
   );
   // GST invoices always show shop bank details (cash / UPI / card / transfer) when configured
-  const showBankDetails = !isNonGst && !isEstimate && Boolean(bill.bank_account);
+  const showBankDetails = !isNonGst && !isEstimate && !isNonListed && Boolean(bill.bank_account);
 
   let y = M;
 
@@ -224,17 +224,7 @@ const renderGstTaxInvoice = (doc, bill, { isNonGst = false, isEstimate = false, 
   }
 
   // ── Shop identity (fake bill: "Recipient" title only — same style as shop name) ──
-  if (isNonListed) {
-    // Non-listed bill title
-    doc.fontSize(16).font('Helvetica-Bold');
-    doc.text(shop.shop_name || 'Shop', M, y, { width: W, align: 'center' });
-    y += 18;
-    const nlTitle = 'NON-LISTED BILL';
-    doc.fontSize(10).font('Helvetica-Bold');
-    const nlTitleW = doc.widthOfString(nlTitle);
-    doc.text(nlTitle, M + (W - nlTitleW) / 2, y, { lineBreak: false });
-    y += 18;
-  } else if (isEstimate) {
+  if (isEstimate || isNonListed) {
     doc.fontSize(16).font('Helvetica-Bold');
     doc.text('Receipt', M, y, { width: W, align: 'center' });
     y += 34;
@@ -597,7 +587,7 @@ if (displayLabel) {
   });
   y += wordsH;
 
-  if (!isEstimate) {
+  if (!isEstimate && !isNonListed) {
     // ── Declaration ──
     const declPadTop = 6;
     const declH = 40;

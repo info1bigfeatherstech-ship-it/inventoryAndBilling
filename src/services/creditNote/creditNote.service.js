@@ -532,11 +532,16 @@ const CreditNoteService = {
           is_cancelled: true,
           total_amount: true,
           balance_amount: true,
+          bill_type: true,
         },
       });
       if (!againstBill) throw new AppError('Bill not found', 404, 'BILL_NOT_FOUND');
       await assertBillWriteAccess(againstBill.shop_id, user);
       if (againstBill.is_cancelled) throw new AppError('Cannot redeem against a cancelled bill', 409, 'BILL_CANCELLED');
+
+      if (againstBill.bill_type === 'NON_LISTED_BILL') {
+        throw new AppError('Cannot redeem a credit note against a non-listed bill', 409, 'INVALID_REDEEM_TARGET');
+      }
 
       assertCreditNoteRedeemable(cn, {
         customerId: againstBill.customer_id,

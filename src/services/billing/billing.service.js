@@ -712,11 +712,59 @@ const BillingService = {
         select: BILL_SELECT,
       });
 
-      if (paidAmount > 0 && data.payment_method) {
+      // ── Apply credit notes (same logic as regular bills) ──
+      let creditApplied = 0;
+      let creditAllocations = [];
+      if (creditNoteIds.length) {
+        const redemption = await CreditNoteService.applyCreditNotesOnBill(tx, {
+          creditNoteIds,
+          shopId,
+          billId: bill.bill_id,
+          billTotal: totalAmount,
+          customerId: customer?.customer_id ?? null,
+          customerMobile: customer?.mobile ?? data.customer_mobile?.trim() ?? null,
+          userId: user.userId,
+        });
+        creditApplied = redemption.creditApplied;
+        creditAllocations = redemption.allocations ?? [];
+      }
+
+      const finalTotal = roundMoney(Math.max(0, totalAmount - creditApplied));
+      const finalPaidAmount = paymentAmount > 0 ? Math.min(paymentAmount, finalTotal) : 0;
+      const finalBalanceAmount = roundMoney(finalTotal - finalPaidAmount);
+      const finalPaymentStatus =
+        finalTotal <= 0 ? 'PAID' : derivePaymentStatus(finalTotal, finalPaidAmount);
+
+      const billAfterCredit =
+        creditApplied > 0
+          ? await tx.bill.update({
+              where: { bill_id: bill.bill_id },
+              data: {
+                total_amount: finalTotal,
+                balance_amount: finalBalanceAmount,
+                paid_amount: finalPaidAmount,
+                payment_status: finalPaymentStatus,
+                payment_method: finalPaidAmount > 0 ? data.payment_method || null : null,
+                discount: roundMoney(discountAmount + creditApplied),
+              },
+              select: BILL_SELECT,
+            })
+          : await tx.bill.update({
+              where: { bill_id: bill.bill_id },
+              data: {
+                paid_amount: finalPaidAmount,
+                balance_amount: finalBalanceAmount,
+                payment_status: finalPaymentStatus,
+                payment_method: finalPaidAmount > 0 ? data.payment_method || null : null,
+              },
+              select: BILL_SELECT,
+            });
+
+      if (finalPaidAmount > 0 && data.payment_method) {
         await tx.billPayment.create({
           data: {
-            bill_id: bill.bill_id,
-            amount: paidAmount,
+            bill_id: billAfterCredit.bill_id,
+            amount: finalPaidAmount,
             payment_method: data.payment_method,
             reference_no: data.reference_no?.trim() || null,
             collected_by: user.userId,
@@ -724,11 +772,11 @@ const BillingService = {
         });
       }
 
-      if (customer?.customer_id && totalAmount > 0) {
-        await CustomerService.updateCustomerSpend(customer.customer_id, totalAmount, tx);
+      if (customer?.customer_id && finalTotal > 0) {
+        await CustomerService.updateCustomerSpend(customer.customer_id, finalTotal, tx);
       }
 
-      return { ...bill, credit_applied: 0, credit_notes_applied: [], tax_summary: { tax_mode: 'EXEMPT', is_intra_state: true, cgst: 0, sgst: 0, igst: 0 } };
+      return { ...billAfterCredit, credit_applied: creditApplied, credit_notes_applied: creditAllocations, tax_summary: { tax_mode: 'EXEMPT', is_intra_state: true, cgst: 0, sgst: 0, igst: 0 } };
     }, TX_OPTIONS);
 
     logger.info('NON_LISTED_BILL created', {
@@ -768,6 +816,9 @@ const BillingService = {
     if (filters.payment_status) where.payment_status = filters.payment_status;
     if (filters.is_cancelled != null) {
       where.is_cancelled = filters.is_cancelled === true || filters.is_cancelled === 'true';
+    }
+    if (filters.exclude_non_listed === true || filters.exclude_non_listed === 'true') {
+      where.bill_type = { not: 'NON_LISTED_BILL' };
     }
 
     if (filters.from_date || filters.to_date) {

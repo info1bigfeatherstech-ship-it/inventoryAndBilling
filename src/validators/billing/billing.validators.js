@@ -50,6 +50,7 @@ const listBillsValidator = [
   query('is_cancelled').optional().isBoolean().toBoolean(),
   query('from_date').optional().isISO8601(),
   query('to_date').optional().isISO8601(),
+  query('exclude_non_listed').optional().isBoolean().toBoolean(),
 ];
 
 const addPaymentValidator = [
