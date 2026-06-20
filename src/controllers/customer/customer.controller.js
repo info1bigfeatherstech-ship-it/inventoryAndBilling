@@ -5,10 +5,10 @@ const { successResponse, paginatedMeta } = require('../../utils/response.utils')
 
 const CustomerController = {
   create: asyncHandler(async (req, res) => {
-    const data = await CustomerService.createCustomer(req.body);
+    const data = await CustomerService.createCustomer(req.body, req.user);
     return successResponse(res, req, {
       statusCode: 201,
-      message: 'Customer created successfully',
+      message: 'Customer saved successfully',
       data,
     });
   }),
@@ -24,11 +24,11 @@ const CustomerController = {
   }),
 
   search: asyncHandler(async (req, res) => {
-    const customers = await CustomerService.searchCustomers(req.query);
+    const result = await CustomerService.searchCustomers(req.query);
     return successResponse(res, req, {
       statusCode: 200,
       message: 'Customer search completed',
-      data: customers,
+      data: result,
     });
   }),
 
@@ -54,8 +54,17 @@ const CustomerController = {
     });
   }),
 
+  upgrade: asyncHandler(async (req, res) => {
+    const data = await CustomerService.upgradeCustomerToGst(req.params.customerId, req.body, req.user);
+    return successResponse(res, req, {
+      statusCode: 200,
+      message: 'Customer upgraded to GST successfully',
+      data,
+    });
+  }),
+
   update: asyncHandler(async (req, res) => {
-    const data = await CustomerService.updateCustomer(req.params.customerId, req.body);
+    const data = await CustomerService.updateCustomer(req.params.customerId, req.body, req.user);
     return successResponse(res, req, {
       statusCode: 200,
       message: 'Customer updated successfully',
@@ -71,6 +80,7 @@ const CustomerController = {
       data,
     });
   }),
+
   restore: asyncHandler(async (req, res) => {
     const data = await CustomerService.restoreCustomer(req.params.customerId);
     return successResponse(res, req, {
@@ -79,14 +89,15 @@ const CustomerController = {
       data,
     });
   }),
+
   updateLoyaltyTier: asyncHandler(async (req, res) => {
     const { loyalty_tier } = req.body;
-    
+
     const customer = await CustomerService.updateLoyaltyTierManual(
       req.params.customerId,
       loyalty_tier
     );
-    
+
     return successResponse(res, req, {
       statusCode: 200,
       message: 'Customer loyalty tier updated successfully',

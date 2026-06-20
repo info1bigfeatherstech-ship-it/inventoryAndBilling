@@ -115,6 +115,7 @@ const BILL_SELECT = {
       line_id: true,
       variant_id: true,
       product_id: true,
+      manual_item_name: true,
       quantity: true,
       unit_price: true,
       mrp_unit_price: true,
@@ -219,7 +220,7 @@ const BillingService = {
         throw new AppError('At least one bill item is required', 400, 'ITEMS_REQUIRED');
       }
 
-      const variantMap = await loadVariantsForBill(data.items);
+      const billType = data.bill_type || 'GST_INVOICE';
 
       let customer = null;
       if (data.customer_id) {
@@ -231,12 +232,43 @@ const BillingService = {
         }
       }
 
-      const billType = data.bill_type || 'GST_INVOICE';
+      // ── NON_LISTED_BILL: handle separately (manual items, no inventory) ──
+      if (billType === 'NON_LISTED_BILL') {
+        return await BillingService._createNonListedBill(data, user, shopId, shop, customer);
+      }
 
-      const customerGstin =
-        data.customer_gstin?.trim() ||
-        customer?.gst_number?.trim() ||
-        null;
+      const variantMap = await loadVariantsForBill(data.items);
+
+      let customerGstin = null;
+      let companyNameSnapshot = null;
+
+      if (billType === 'GST_INVOICE') {
+        const gstNum = (data.customer_gstin || data.gst_number || customer?.gst_number || '').trim().toUpperCase();
+        const companyName = (data.company_name || customer?.company_name || '').trim();
+        const address = (data.address || customer?.address || '').trim();
+        const city = (data.city || customer?.city || '').trim();
+        const stateCode = (data.state_code || customer?.state_code || '').trim();
+        const pincode = (data.pincode || customer?.pincode || '').trim();
+
+        if (!companyName) throw new AppError('company_name is required for GST Invoice', 400, 'COMPANY_NAME_REQUIRED');
+        if (!gstNum) throw new AppError('gst_number is required for GST Invoice', 400, 'GST_NUMBER_REQUIRED');
+        if (gstNum.length !== 15) throw new AppError('GST number must be 15 characters', 400, 'INVALID_GST_NUMBER');
+        const { GST_NUMBER_REGEX } = require('../../utils/customer.utils');
+        if (!GST_NUMBER_REGEX.test(gstNum)) {
+          throw new AppError('GST number format is invalid', 400, 'INVALID_GST_NUMBER');
+        }
+
+        if (!address) throw new AppError('address is required for GST Invoice', 400, 'ADDRESS_REQUIRED');
+        if (!city) throw new AppError('city is required for GST Invoice', 400, 'CITY_REQUIRED');
+        if (!stateCode) throw new AppError('state_code is required for GST Invoice', 400, 'STATE_CODE_REQUIRED');
+        if (!/^\d{2}$/.test(stateCode)) throw new AppError('state_code must be 2 digits', 400, 'INVALID_STATE_CODE');
+        if (!pincode) throw new AppError('pincode is required for GST Invoice', 400, 'PINCODE_REQUIRED');
+        if (!/^\d{6}$/.test(pincode)) throw new AppError('pincode must be 6 digits', 400, 'INVALID_PINCODE');
+
+        customerGstin = gstNum;
+        companyNameSnapshot = companyName;
+      }
+
       const loyaltyDiscountPercent = customer
         ? await CustomerService.getCustomerDiscountPercent(customer.customer_id)
         : 0;
@@ -255,7 +287,9 @@ const BillingService = {
       }
 
       const placeOfSupplyStateCode = resolvePlaceOfSupplyStateCode({
-        customerStateCode: customer?.state_code,
+        customerStateCode: billType === 'GST_INVOICE'
+          ? (data.state_code || customer?.state_code)
+          : customer?.state_code,
         customerGstin,
         overrideCode: data.place_of_supply_state_code,
         shopStateCode,
@@ -365,6 +399,28 @@ const BillingService = {
 
         const billNumber = await generateBillNumber(shopId, tx);
 
+        if (billType === 'GST_INVOICE' && customer && (data.save_gst_to_customer === true || data.save_to_customer === true || data.saveToCustomer === true)) {
+          const gstNum = (data.customer_gstin || data.gst_number || customer?.gst_number || '').trim().toUpperCase();
+          const companyName = (data.company_name || customer?.company_name || '').trim();
+          const address = (data.address || customer?.address || '').trim();
+          const city = (data.city || customer?.city || '').trim();
+          const stateCode = (data.state_code || customer?.state_code || '').trim();
+          const pincode = (data.pincode || customer?.pincode || '').trim();
+
+          await tx.customer.update({
+            where: { customer_id: customer.customer_id },
+            data: {
+              is_gst_registered: true,
+              gst_number: gstNum,
+              company_name: companyName,
+              address,
+              city,
+              state_code: normalizeStateCode(stateCode),
+              pincode,
+            },
+          });
+        }
+
         const bill = await tx.bill.create({
           data: {
             bill_number: billNumber,
@@ -372,7 +428,9 @@ const BillingService = {
             customer_id: customer?.customer_id ?? null,
             bill_type: billType,
             customer_mobile: customer?.mobile ?? data.customer_mobile?.trim() ?? null,
-            customer_name: customer?.name ?? data.customer_name?.trim() ?? null,
+            customer_name: billType === 'GST_INVOICE'
+              ? (companyNameSnapshot || customer?.company_name || customer?.name || data.customer_name?.trim() || null)
+              : (customer?.name || data.customer_name?.trim() || null),
             customer_gstin: customerGstin,
             place_of_supply_state_code: placeOfSupplyStateCode,
             subtotal: totals.subtotal,
@@ -529,6 +587,161 @@ const BillingService = {
     }
   },
 
+  /**
+   * Create a NON_LISTED_BILL — manual items only, no inventory link, no stock deduction.
+   */
+  async _createNonListedBill(data, user, shopId, shop, customer) {
+    if (!Array.isArray(data.items) || !data.items.length) {
+      throw new AppError('At least one item is required', 400, 'ITEMS_REQUIRED');
+    }
+
+    // Validate each manual item
+    for (const item of data.items) {
+      const name = (item.item_name || '').trim();
+      if (!name) throw new AppError('item_name is required for each Non-Listed Bill item', 400, 'ITEM_NAME_REQUIRED');
+      const qty = Number(item.quantity);
+      if (!Number.isInteger(qty) || qty <= 0) throw new AppError('quantity must be a positive integer', 400, 'TRANSFER_QUANTITY_INVALID');
+      const price = Number(item.unit_price);
+      if (Number.isNaN(price) || price < 0) throw new AppError('unit_price must be >= 0', 400, 'INVALID_UNIT_PRICE');
+    }
+
+    const extraDiscountPercent = Math.min(100, Math.max(0, Number(data.discount) || 0));
+    const paymentAmount = data.payment_amount != null ? roundMoney(data.payment_amount) : 0;
+
+    if (paymentAmount > 0 && !data.payment_method) {
+      throw new AppError('payment_method is required when payment_amount is provided', 400, 'PAYMENT_METHOD_REQUIRED');
+    }
+
+    const activeStaffCount = await ShopStaffCodeService.countActiveForShop(shopId);
+    let staffSnapshot = null;
+    if (activeStaffCount > 0) {
+      if (!data.staff_code_id) {
+        throw new AppError(
+          'staff_code_id is required — select billing staff code before creating bill',
+          400,
+          'STAFF_CODE_REQUIRED'
+        );
+      }
+      staffSnapshot = await ShopStaffCodeService.resolveForBilling(data.staff_code_id, shopId);
+    } else if (data.staff_code_id) {
+      staffSnapshot = await ShopStaffCodeService.resolveForBilling(data.staff_code_id, shopId);
+    }
+
+    // Build computed lines (no GST, simple subtotals)
+    const computedLines = data.items.map((item) => {
+      const qty = Number(item.quantity);
+      const unitPrice = roundMoney(Number(item.unit_price));
+      const mrpUnitPrice = item.mrp != null ? roundMoney(Number(item.mrp)) : unitPrice;
+      const lineSubtotal = roundMoney(unitPrice * qty);
+      return {
+        manual_item_name: (item.item_name || '').trim(),
+        quantity: qty,
+        unit_price: unitPrice,
+        mrp_unit_price: mrpUnitPrice,
+        price_type: 'SPECIAL',
+        gst_percent: 0,
+        gst_type: 'EXEMPT',
+        hsn_code: '',
+        line_subtotal: lineSubtotal,
+        discount: 0,
+        taxable_amount: lineSubtotal,
+        tax_amount: 0,
+        line_total: lineSubtotal,
+      };
+    });
+
+    // Simple total (no loyalty discount, no GST)
+    const subtotal = roundMoney(computedLines.reduce((s, l) => s + l.line_subtotal, 0));
+    const discountAmount = roundMoney(subtotal * extraDiscountPercent / 100);
+    const taxableAmount = roundMoney(subtotal - discountAmount);
+    const totalAmount = taxableAmount;
+
+    const creditNoteIds = Array.isArray(data.credit_note_ids) ? [...new Set(data.credit_note_ids)] : [];
+    const paidAmount = paymentAmount > 0 ? Math.min(paymentAmount, totalAmount) : 0;
+    const balanceAmount = roundMoney(totalAmount - paidAmount);
+    const paymentStatus = derivePaymentStatus(totalAmount, paidAmount);
+
+    const result = await prisma.$transaction(async (tx) => {
+      const billNumber = await generateBillNumber(shopId, tx);
+
+      const bill = await tx.bill.create({
+        data: {
+          bill_number: billNumber,
+          shop_id: shopId,
+          customer_id: customer?.customer_id ?? null,
+          bill_type: 'NON_LISTED_BILL',
+          customer_mobile: customer?.mobile ?? data.customer_mobile?.trim() ?? null,
+          customer_name: customer?.name ?? data.customer_name?.trim() ?? null,
+          customer_gstin: null,
+          subtotal,
+          discount: discountAmount,
+          taxable_amount: taxableAmount,
+          gst_amount: 0,
+          total_amount: totalAmount,
+          payment_status: paymentStatus,
+          payment_method: paidAmount > 0 ? data.payment_method || null : null,
+          paid_amount: paidAmount,
+          balance_amount: balanceAmount,
+          gst_config_id: null,
+          bank_account_id: data.bank_account_id ?? null,
+          sales_channel: data.sales_channel || 'WALK_IN',
+          created_by_user_id: user.userId,
+          staff_code_id: staffSnapshot?.staff_code_id ?? null,
+          staff_code_value: staffSnapshot?.staff_code_value ?? null,
+          staff_name_snapshot: staffSnapshot?.staff_name_snapshot ?? null,
+          items: {
+            create: computedLines.map((line) => ({
+              variant_id: null,
+              product_id: null,
+              manual_item_name: line.manual_item_name,
+              quantity: line.quantity,
+              unit_price: line.unit_price,
+              mrp_unit_price: line.mrp_unit_price,
+              price_type: line.price_type,
+              gst_percent: line.gst_percent,
+              gst_type: line.gst_type,
+              hsn_code: line.hsn_code,
+              line_subtotal: line.line_subtotal,
+              discount: line.discount,
+              taxable_amount: line.taxable_amount,
+              tax_amount: line.tax_amount,
+              line_total: line.line_total,
+            })),
+          },
+        },
+        select: BILL_SELECT,
+      });
+
+      if (paidAmount > 0 && data.payment_method) {
+        await tx.billPayment.create({
+          data: {
+            bill_id: bill.bill_id,
+            amount: paidAmount,
+            payment_method: data.payment_method,
+            reference_no: data.reference_no?.trim() || null,
+            collected_by: user.userId,
+          },
+        });
+      }
+
+      if (customer?.customer_id && totalAmount > 0) {
+        await CustomerService.updateCustomerSpend(customer.customer_id, totalAmount, tx);
+      }
+
+      return { ...bill, credit_applied: 0, credit_notes_applied: [], tax_summary: { tax_mode: 'EXEMPT', is_intra_state: true, cgst: 0, sgst: 0, igst: 0 } };
+    }, TX_OPTIONS);
+
+    logger.info('NON_LISTED_BILL created', {
+      bill_id: result.bill_id,
+      bill_number: result.bill_number,
+      shop_id: shopId,
+      total: result.total_amount,
+      user_id: user.userId,
+    });
+
+    return result;
+  },
+
   async getBillById(billId, user) {
     const bill = await prisma.bill.findUnique({ where: { bill_id: billId }, select: BILL_SELECT });
     if (!bill) throw new AppError('Bill not found', 404, 'BILL_NOT_FOUND');
@@ -681,26 +894,30 @@ const BillingService = {
 
         if (locked.is_cancelled) throw new AppError('Bill is already cancelled', 409, 'BILL_ALREADY_CANCELLED');
 
-        for (const item of locked.items) {
-          await ShopStockService.restoreStockForSale(
-            tx,
-            locked.shop_id,
-            item.variant_id,
-            item.quantity,
-            item.variant?.low_stock_threshold ?? 5
-          );
+        // NON_LISTED_BILL items have no inventory link — skip stock restore
+        if (locked.bill_type !== 'NON_LISTED_BILL') {
+          for (const item of locked.items) {
+            if (!item.variant_id) continue; // safety guard
+            await ShopStockService.restoreStockForSale(
+              tx,
+              locked.shop_id,
+              item.variant_id,
+              item.quantity,
+              item.variant?.low_stock_threshold ?? 5
+            );
 
-          await createStockLedgerEntry(tx, {
-            productId: item.product_id,
-            variantId: item.variant_id,
-            movementType: 'RETURN',
-            quantity: item.quantity,
-            toShopId: locked.shop_id,
-            referenceId: locked.bill_id,
-            referenceType: 'BILL_CANCELLATION',
-            createdBy: user.userId,
-            remarks: `Bill cancellation — restore ${item.quantity} units of ${item.variant?.product?.name || 'product'}`,
-          });
+            await createStockLedgerEntry(tx, {
+              productId: item.product_id,
+              variantId: item.variant_id,
+              movementType: 'RETURN',
+              quantity: item.quantity,
+              toShopId: locked.shop_id,
+              referenceId: locked.bill_id,
+              referenceType: 'BILL_CANCELLATION',
+              createdBy: user.userId,
+              remarks: `Bill cancellation — restore ${item.quantity} units of ${item.variant?.product?.name || 'product'}`,
+            });
+          }
         }
 
         if (locked.customer_id && locked.total_amount > 0) {

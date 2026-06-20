@@ -2,7 +2,7 @@ const { body, param, query } = require('express-validator');
 
 const PAYMENT_METHODS = ['CASH', 'UPI', 'CARD', 'BANK_TRANSFER', 'CREDIT_ON_ACCOUNT', 'CREDIT_NOTE_REDEMPTION'];
 const PRICE_TYPES = ['MRP', 'SPECIAL', 'RETAIL', 'WHOLESALE', 'ONLINE'];
-const BILL_TYPES = ['GST_INVOICE', 'NON_GST_INVOICE', 'ESTIMATE_INVOICE'];
+const BILL_TYPES = ['GST_INVOICE', 'NON_GST_INVOICE', 'ESTIMATE_INVOICE', 'NON_LISTED_BILL'];
 const PAYMENT_STATUSES = ['PENDING', 'PAID', 'PARTIALLY_PAID', 'REFUNDED', 'CANCELLED'];
 
 const billIdParam = [param('billId').isString().trim().notEmpty()];
@@ -17,11 +17,15 @@ const createBillValidator = [
   body('place_of_supply_state_code').optional({ nullable: true }).matches(/^\d{2}$/),
   body('discount').optional().isFloat({ min: 0, max: 100 }),
   body('items').isArray({ min: 1 }),
-  body('items.*.variant_id').isString().trim().notEmpty(),
+  // Inventory items (GST / NON_GST / ESTIMATE)
+  body('items.*.variant_id').optional({ nullable: true }).isString().trim(),
   body('items.*.quantity').isInt({ min: 1 }),
   body('items.*.unit_price').isFloat({ min: 0 }),
   body('items.*.price_type').optional().isIn(PRICE_TYPES),
   body('items.*.discount').optional().isFloat({ min: 0 }),
+  // Manual item fields (NON_LISTED_BILL only)
+  body('items.*.item_name').optional({ nullable: true }).isString().trim().isLength({ min: 1, max: 200 }),
+  body('items.*.mrp').optional({ nullable: true }).isFloat({ min: 0 }),
   body('payment_method').optional().isIn(PAYMENT_METHODS),
   body('payment_amount').optional().isFloat({ min: 0 }),
   body('reference_no').optional().isString().trim().isLength({ max: 100 }),

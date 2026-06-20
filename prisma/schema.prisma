@@ -58,6 +58,12 @@ enum BillType {
   GST_INVOICE
   NON_GST_INVOICE
   ESTIMATE_INVOICE
+  NON_LISTED_BILL
+}
+
+enum CustomerType {
+  GST
+  WALK_IN
 }
 
 enum PaymentMethod {
@@ -890,15 +896,17 @@ model StockLedger {
 // ==================== CUSTOMER MASTER ====================
 
 model Customer {
-  customer_id String  @id @default(cuid())
-  mobile      String  @unique
-  name        String
-  email       String?
-  gst_number  String?
-  address     String?
-  city        String?
-  state_code  String?
-  pincode     String?
+  customer_id   String       @id @default(cuid())
+  mobile          String       @unique
+  name            String
+  email           String?
+  is_gst_registered Boolean  @default(false)
+  company_name    String?
+  gst_number      String?
+  address         String?
+  city            String?
+  state_code      String?
+  pincode         String?
 
   total_spent   Float     @default(0)
   total_orders  Int       @default(0)
@@ -999,27 +1007,31 @@ model Bill {
 model BillLineItem {
   line_id    String @id @default(cuid())
   bill_id    String
-  variant_id String
-  product_id String
+  /// Null for NON_LISTED_BILL items (manually entered, not linked to inventory)
+  variant_id String?
+  /// Null for NON_LISTED_BILL items
+  product_id String?
+  /// Manually entered product name — set only for NON_LISTED_BILL items
+  manual_item_name String?
 
   quantity   Int
   price_type PriceType @default(RETAIL)
   unit_price Float
-  /// MRP at time of sale (from variant.mrp) for invoice display.
+  /// MRP at time of sale (from variant.mrp or manually entered) for invoice display.
   mrp_unit_price Float?
 
-  gst_percent    Float
+  gst_percent    Float  @default(0)
   gst_type       GSTType @default(CGST_SGST)
-  hsn_code       String
+  hsn_code       String @default("")
   line_subtotal  Float
   discount       Float @default(0)
   taxable_amount Float
   tax_amount     Float
   line_total     Float
 
-  bill    Bill           @relation(fields: [bill_id], references: [bill_id], onDelete: Cascade)
-  variant ProductVariant @relation("BillLineVariant", fields: [variant_id], references: [variant_id])
-  product Product        @relation(fields: [product_id], references: [product_id])
+  bill    Bill            @relation(fields: [bill_id], references: [bill_id], onDelete: Cascade)
+  variant ProductVariant? @relation("BillLineVariant", fields: [variant_id], references: [variant_id])
+  product Product?        @relation(fields: [product_id], references: [product_id])
 
   created_at DateTime @default(now())
 

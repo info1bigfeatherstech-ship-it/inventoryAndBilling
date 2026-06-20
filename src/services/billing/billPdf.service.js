@@ -175,7 +175,7 @@ const drawWatermark = (doc, text) => {
 
 // ─── GST / Non-GST / Estimate — shared template with per-type sections ───────
 
-const renderGstTaxInvoice = (doc, bill, { isNonGst = false, isEstimate = false } = {}) => {
+const renderGstTaxInvoice = (doc, bill, { isNonGst = false, isEstimate = false, isNonListed = false } = {}) => {
   const shop = bill.shop || {};
   const items = bill.items || [];
   const gst = shopGstin(bill);
@@ -224,7 +224,17 @@ const renderGstTaxInvoice = (doc, bill, { isNonGst = false, isEstimate = false }
   }
 
   // ── Shop identity (fake bill: "Recipient" title only — same style as shop name) ──
-  if (isEstimate) {
+  if (isNonListed) {
+    // Non-listed bill title
+    doc.fontSize(16).font('Helvetica-Bold');
+    doc.text(shop.shop_name || 'Shop', M, y, { width: W, align: 'center' });
+    y += 18;
+    const nlTitle = 'NON-LISTED BILL';
+    doc.fontSize(10).font('Helvetica-Bold');
+    const nlTitleW = doc.widthOfString(nlTitle);
+    doc.text(nlTitle, M + (W - nlTitleW) / 2, y, { lineBreak: false });
+    y += 18;
+  } else if (isEstimate) {
     doc.fontSize(16).font('Helvetica-Bold');
     doc.text('Receipt', M, y, { width: W, align: 'center' });
     y += 34;
@@ -273,7 +283,65 @@ const renderGstTaxInvoice = (doc, bill, { isNonGst = false, isEstimate = false }
   drawManualUnderline(doc, billToX, billToY, billToText);
   doc.text(' :', billToX + doc.widthOfString(billToText), billToY, { lineBreak: false });
   let ly = y + 19;
-  drawLabelValue(doc, lx + 6, ly, 'M/S', displayVal(bill.customer_name) || 'Walk-in Customer', colW - 12);
+
+
+  // ==== FIX: M/S Display Logic (Robust) ====
+let customerDisplayName = '';
+let displayLabel = 'Customer';
+
+// Determine bill type and customer type
+const isGstBill = bill.bill_type === 'GST_INVOICE';
+const customer = bill.customer || {};
+const customerType = customer.customer_type || 'WALK_IN';
+
+// 🐛 DEBUG (remove after fixing)
+console.log('🔍 Bill Type:', bill.bill_type);
+console.log('🔍 Customer Type:', customerType);
+console.log('🔍 Company Name:', customer.company_name);
+console.log('🔍 Bill Customer Name:', bill.customer_name);
+
+if (isGstBill) {
+  // GST Bill: Show M/S + Company Name (or fallback)
+  displayLabel = 'M/S';
+  
+  // Priority order:
+  // 1. Customer's company_name (if GST customer)
+  // 2. Bill's customer_name
+  // 3. Fallback
+  if (customer.company_name && customer.company_name.trim()) {
+    customerDisplayName = customer.company_name.trim();
+  } else if (bill.customer_name && bill.customer_name.trim()) {
+    customerDisplayName = bill.customer_name.trim();
+  } else {
+    customerDisplayName = 'Walk-in Customer';
+  }
+} else {
+  // Non-GST / Estimate: Show direct name (no M/S)
+  displayLabel = '';
+  
+  // Priority order:
+  // 1. Bill's customer_name
+  // 2. Customer's name
+  // 3. Fallback
+  if (bill.customer_name && bill.customer_name.trim()) {
+    customerDisplayName = bill.customer_name.trim();
+  } else if (customer.name && customer.name.trim()) {
+    customerDisplayName = customer.name.trim();
+  } else {
+    customerDisplayName = 'Walk-in Customer';
+  }
+}
+
+// Draw the label-value
+if (displayLabel) {
+  drawLabelValue(doc, lx + 6, ly, displayLabel, customerDisplayName, colW - 12);
+} else {
+  // Without "M/S" label — just display name
+  doc.fontSize(FIELD_SIZE).font('Helvetica');
+  doc.text(customerDisplayName, lx + 6, ly, { width: colW - 12 });
+}
+
+  // drawLabelValue(doc, lx + 6, ly, 'M/S', displayVal(bill.customer_name) || 'Walk-in Customer', colW - 12);
   ly += 11;
   if (cust.address) {
     doc.font('Helvetica').fontSize(FIELD_SIZE);
@@ -369,7 +437,12 @@ const renderGstTaxInvoice = (doc, bill, { isNonGst = false, isEstimate = false }
   const drawTableRows = (tableY, tableItems) => {
     let rowY = tableY + headerH;
     tableItems.forEach((item, idx) => {
-      const name = item.variant?.product?.name || item.product?.name || item.variant?.sku || 'Item';
+      // For NON_LISTED_BILL, use manual_item_name; for others, use linked product name
+      const name = item.manual_item_name
+        || item.variant?.product?.name
+        || item.product?.name
+        || item.variant?.sku
+        || 'Item';
       const row = isNonGst
         ? [
             String(idx + 1),
@@ -613,6 +686,9 @@ const buildBillPdfBuffer = (bill) =>
         renderGstTaxInvoice(doc, bill, { isNonGst: true });
       } else if (bill.bill_type === 'ESTIMATE_INVOICE') {
         renderGstTaxInvoice(doc, bill, { isNonGst: true, isEstimate: true });
+      } else if (bill.bill_type === 'NON_LISTED_BILL') {
+        // Non-listed bill: same layout as NON_GST with 'Non-Listed Bill' title
+        renderGstTaxInvoice(doc, bill, { isNonGst: true, isNonListed: true });
       } else {
         renderGstTaxInvoice(doc, bill, { isNonGst: true });
       }

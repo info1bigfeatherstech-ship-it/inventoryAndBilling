@@ -8,6 +8,7 @@ const {
   customerIdParam,
   createCustomerValidator,
   updateCustomerValidator,
+  upgradeCustomerValidator,
   listCustomersValidator,
   searchCustomersValidator,
   updateLoyaltyTier,
@@ -38,6 +39,13 @@ router.patch(
   CustomerController.restore
 );
 router.get('/:customerId', customerIdParam, validateRequest, CustomerController.getById);
+router.put(
+  '/:customerId/upgrade',
+  authorizeRoles(...WRITE_ROLES),
+  upgradeCustomerValidator,
+  validateRequest,
+  CustomerController.upgrade
+);
 router.put('/:customerId', authorizeRoles(...WRITE_ROLES), updateCustomerValidator, validateRequest, CustomerController.update);
 router.delete('/:customerId', authorizeRoles(...WRITE_ROLES), customerIdParam, validateRequest, CustomerController.remove);
 
