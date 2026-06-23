@@ -36,6 +36,7 @@ const SyncController = {
         server_time: new Date().toISOString(),
         push_handlers: {
           customer: handlers.has('customer'),
+          customer_update: handlers.has('customer_update'),
           bill: handlers.has('bill'),
           bill_payment: handlers.has('bill_payment'),
           credit_note: handlers.has('credit_note'),

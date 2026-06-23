@@ -11,6 +11,7 @@ const OFFLINE_SYNC_ROLES = Object.freeze([
 
 const SYNC_ENTITY_TYPES = Object.freeze([
   'customer',
+  'customer_update',
   'bill',
   'bill_payment',
   'credit_note',
