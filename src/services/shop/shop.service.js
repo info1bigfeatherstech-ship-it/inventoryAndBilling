@@ -35,11 +35,19 @@ const SHOP_SELECT = {
   is_active: true,
   remarks: true,
   sales_channels: true,  
+  shop_type: true,
   created_at: true,
   updated_at: true,
 };
 
 const normalizeShopCode = (value) => String(value || '').trim().toUpperCase();
+const normalizeShopType = (value) => {
+  const shopType = String(value || 'OWNER').trim().toUpperCase();
+  if (!['OWNER', 'FRANCHISE'].includes(shopType)) {
+    throw new AppError('shop_type must be OWNER or FRANCHISE', 400, 'INVALID_SHOP_TYPE');
+  }
+  return shopType;
+};
 
 const DEFAULT_GST_SELECT = {
   where: { is_default: true, is_active: true },
@@ -225,6 +233,7 @@ const ShopService = {
         email: data.email ? String(data.email).trim().toLowerCase() : null,
         owner_user_id: ownerUserId,
         sales_channels: data.sales_channels || [],
+        shop_type: normalizeShopType(data.shop_type),
         remarks: data.remarks ?? null,
       },
       select: SHOP_SELECT,
@@ -325,11 +334,18 @@ const ShopService = {
       'remarks',
       'owner_user_id',
       'sales_channels',
+      'shop_type',
     ];
   
     for (const key of allowed) {
       if (Object.prototype.hasOwnProperty.call(data, key)) {
-        payload[key] = key === 'state_code' ? parseShopStateCode(data.state_code) : data[key];
+        if (key === 'state_code') {
+          payload[key] = parseShopStateCode(data.state_code);
+        } else if (key === 'shop_type') {
+          payload[key] = normalizeShopType(data.shop_type);
+        } else {
+          payload[key] = data[key];
+        }
       }
     }
   

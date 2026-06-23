@@ -36,6 +36,10 @@ const createShopValidator = [
     .trim()
     .notEmpty()
     .withMessage('owner_user_id must be a valid user ID if provided'),
+  body('shop_type')
+    .optional()
+    .isIn(['OWNER', 'FRANCHISE'])
+    .withMessage('shop_type must be OWNER or FRANCHISE'),
   body('remarks').optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
   body('sales_channels')
   .optional()
@@ -78,6 +82,10 @@ const updateShopValidator = [
     .trim()
     .notEmpty()
     .withMessage('owner_user_id must be a valid user ID if provided'),
+  body('shop_type')
+    .optional()
+    .isIn(['OWNER', 'FRANCHISE'])
+    .withMessage('shop_type must be OWNER or FRANCHISE'),
   
   body('sales_channels')
     .optional()

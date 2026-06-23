@@ -165,6 +165,7 @@ const assertShopActive = async (shopId) => {
       pincode: true,
       state_code: true,
       phone: true,
+      shop_type: true,
     },
   });
   if (!shop) throw new AppError('Shop not found', 404, 'SHOP_NOT_FOUND');
@@ -221,6 +222,13 @@ const BillingService = {
       }
 
       const billType = data.bill_type || 'GST_INVOICE';
+      if (billType === 'NON_LISTED_BILL' && shop.shop_type === 'FRANCHISE') {
+        throw new AppError(
+          'Non-listed bills are not allowed for franchise shops',
+          403,
+          'NON_LISTED_NOT_ALLOWED_FOR_FRANCHISE'
+        );
+      }
 
       let customer = null;
       if (data.customer_id) {

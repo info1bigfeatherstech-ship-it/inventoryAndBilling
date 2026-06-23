@@ -54,6 +54,11 @@ enum SalesChannel {
   OTHER
 }
 
+enum ShopType {
+  OWNER
+  FRANCHISE
+}
+
 enum BillType {
   GST_INVOICE
   NON_GST_INVOICE
@@ -272,6 +277,7 @@ model Shop {
 
   /// Reporting / bill tagging — empty array = not configured.
   sales_channels SalesChannel[] @default([])
+  shop_type      ShopType @default(OWNER)
 
   is_active Boolean @default(true)
   remarks   String?
