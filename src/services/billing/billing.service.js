@@ -1154,7 +1154,7 @@ const BillingService = {
     };
   },
 
-  async generatePDF(billId, user, { persist = true } = {}) {
+  async generatePDF(billId, user, { persist = true, printFormat = 'A4' } = {}) {
     const bill = await this.getBillById(billId, user);
 
     if (bill.bill_type === 'GST_INVOICE' && !bill.bank_account) {
@@ -1165,7 +1165,7 @@ const BillingService = {
       if (defaultBank) bill.bank_account = defaultBank;
     }
 
-    const pdf = await generateBillPdf(bill, { persist });
+    const pdf = await generateBillPdf(bill, { persist, printFormat });
 
     if (pdf.pdf_storage_key && persist) {
       await prisma.bill.update({
@@ -1177,7 +1177,7 @@ const BillingService = {
     return { bill, pdf };
   },
 
-  async generatePublicPDF(billId) {
+  async generatePublicPDF(billId, { printFormat = 'A4' } = {}) {
     const bill = await prisma.bill.findUnique({ where: { bill_id: billId }, select: BILL_SELECT });
     if (!bill) throw new AppError('Bill not found', 404, 'BILL_NOT_FOUND');
 
@@ -1196,7 +1196,7 @@ const BillingService = {
       if (defaultBank) enrichedBill.bank_account = defaultBank;
     }
 
-    const pdf = await generateBillPdf(enrichedBill, { persist: false });
+    const pdf = await generateBillPdf(enrichedBill, { persist: false, printFormat });
 
     return { bill: enrichedBill, pdf };
   },

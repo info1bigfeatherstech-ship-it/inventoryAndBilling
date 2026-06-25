@@ -80,8 +80,10 @@ const BillingController = {
   }),
 
   downloadPDF: asyncHandler(async (req, res) => {
+    const printFormat = req.query.printFormat || 'A4';
     const { bill, pdf } = await BillingService.generatePDF(req.params.billId, req.user, {
-      persist:false,
+      persist: false,
+      printFormat,
     });
 
     if (req.query.format === 'json') {
@@ -104,6 +106,7 @@ const BillingController = {
 
   getPublicPDF: asyncHandler(async (req, res) => {
     const { token } = req.params;
+    const printFormat = req.query.printFormat || 'A4';
     let decoded;
     try {
       decoded = jwt.verify(token, config.JWT_SECRET);
@@ -115,7 +118,7 @@ const BillingController = {
     }
 
     const { billId } = decoded;
-    const { bill, pdf } = await BillingService.generatePublicPDF(billId);
+    const { bill, pdf } = await BillingService.generatePublicPDF(billId, { printFormat });
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="${bill.bill_number}.pdf"`);

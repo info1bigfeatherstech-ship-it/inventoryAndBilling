@@ -107,6 +107,8 @@ const CUSTOMER_SYNC_SELECT = {
   mobile: true,
   name: true,
   email: true,
+  is_gst_registered: true,
+  company_name: true,
   gst_number: true,
   address: true,
   city: true,

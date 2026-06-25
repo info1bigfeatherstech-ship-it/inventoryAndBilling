@@ -223,6 +223,12 @@ const renderGstTaxInvoice = (doc, bill, { isNonGst = false, isEstimate = false, 
     y += 18;
   }
 
+  // ── Billed By (Staff Code) — shown right after the bill title ──
+  if (bill.staff_code_value) {
+    doc.fontSize(FIELD_SIZE).font('Helvetica').text(`Billed By: ${bill.staff_code_value}`, M, y, { width: W, align: 'center' });
+    y += 12;
+  }
+
   // ── Shop identity (fake bill: "Recipient" title only — same style as shop name) ──
   if (isEstimate || isNonListed) {
     doc.fontSize(16).font('Helvetica-Bold');
@@ -276,60 +282,60 @@ const renderGstTaxInvoice = (doc, bill, { isNonGst = false, isEstimate = false, 
 
 
   // ==== FIX: M/S Display Logic (Robust) ====
-let customerDisplayName = '';
-let displayLabel = 'Customer';
+  let customerDisplayName = '';
+  let displayLabel = 'Customer';
 
-// Determine bill type and customer type
-const isGstBill = bill.bill_type === 'GST_INVOICE';
-const customer = bill.customer || {};
-const customerType = customer.customer_type || 'WALK_IN';
+  // Determine bill type and customer type
+  const isGstBill = bill.bill_type === 'GST_INVOICE';
+  const customer = bill.customer || {};
+  const customerType = customer.customer_type || 'WALK_IN';
 
-// 🐛 DEBUG (remove after fixing)
-console.log('🔍 Bill Type:', bill.bill_type);
-console.log('🔍 Customer Type:', customerType);
-console.log('🔍 Company Name:', customer.company_name);
-console.log('🔍 Bill Customer Name:', bill.customer_name);
+  // 🐛 DEBUG (remove after fixing)
+  console.log('🔍 Bill Type:', bill.bill_type);
+  console.log('🔍 Customer Type:', customerType);
+  console.log('🔍 Company Name:', customer.company_name);
+  console.log('🔍 Bill Customer Name:', bill.customer_name);
 
-if (isGstBill) {
-  // GST Bill: Show M/S + Company Name (or fallback)
-  displayLabel = 'M/S';
-  
-  // Priority order:
-  // 1. Customer's company_name (if GST customer)
-  // 2. Bill's customer_name
-  // 3. Fallback
-  if (customer.company_name && customer.company_name.trim()) {
-    customerDisplayName = customer.company_name.trim();
-  } else if (bill.customer_name && bill.customer_name.trim()) {
-    customerDisplayName = bill.customer_name.trim();
+  if (isGstBill) {
+    // GST Bill: Show M/S + Company Name (or fallback)
+    displayLabel = 'M/S';
+
+    // Priority order:
+    // 1. Customer's company_name (if GST customer)
+    // 2. Bill's customer_name
+    // 3. Fallback
+    if (customer.company_name && customer.company_name.trim()) {
+      customerDisplayName = customer.company_name.trim();
+    } else if (bill.customer_name && bill.customer_name.trim()) {
+      customerDisplayName = bill.customer_name.trim();
+    } else {
+      customerDisplayName = 'Walk-in Customer';
+    }
   } else {
-    customerDisplayName = 'Walk-in Customer';
-  }
-} else {
-  // Non-GST / Estimate: Show direct name (no M/S)
-  displayLabel = '';
-  
-  // Priority order:
-  // 1. Bill's customer_name
-  // 2. Customer's name
-  // 3. Fallback
-  if (bill.customer_name && bill.customer_name.trim()) {
-    customerDisplayName = bill.customer_name.trim();
-  } else if (customer.name && customer.name.trim()) {
-    customerDisplayName = customer.name.trim();
-  } else {
-    customerDisplayName = 'Walk-in Customer';
-  }
-}
+    // Non-GST / Estimate: Show direct name (no M/S)
+    displayLabel = '';
 
-// Draw the label-value
-if (displayLabel) {
-  drawLabelValue(doc, lx + 6, ly, displayLabel, customerDisplayName, colW - 12);
-} else {
-  // Without "M/S" label — just display name
-  doc.fontSize(FIELD_SIZE).font('Helvetica');
-  doc.text(customerDisplayName, lx + 6, ly, { width: colW - 12 });
-}
+    // Priority order:
+    // 1. Bill's customer_name
+    // 2. Customer's name
+    // 3. Fallback
+    if (bill.customer_name && bill.customer_name.trim()) {
+      customerDisplayName = bill.customer_name.trim();
+    } else if (customer.name && customer.name.trim()) {
+      customerDisplayName = customer.name.trim();
+    } else {
+      customerDisplayName = 'Walk-in Customer';
+    }
+  }
+
+  // Draw the label-value
+  if (displayLabel) {
+    drawLabelValue(doc, lx + 6, ly, displayLabel, customerDisplayName, colW - 12);
+  } else {
+    // Without "M/S" label — just display name
+    doc.fontSize(FIELD_SIZE).font('Helvetica');
+    doc.text(customerDisplayName, lx + 6, ly, { width: colW - 12 });
+  }
 
   // drawLabelValue(doc, lx + 6, ly, 'M/S', displayVal(bill.customer_name) || 'Walk-in Customer', colW - 12);
   ly += 11;
@@ -396,22 +402,22 @@ if (displayLabel) {
   // ── Product table (full grid borders) ──
   const cols = isNonGst
     ? [
-        { label: 'S.No.', w: 28 },
-        { label: 'Product Name', w: 216 },
-        { label: 'Qty', w: 32 },
-        { label: 'MRP', w: 68 },
-        { label: 'Special Price', w: 76 },
-        { label: 'Total', w: W - 28 - 216 - 32 - 68 - 76 },
-      ]
+      { label: 'S.No.', w: 28 },
+      { label: 'Product Name', w: 216 },
+      { label: 'Qty', w: 32 },
+      { label: 'MRP', w: 68 },
+      { label: 'Special Price', w: 76 },
+      { label: 'Total', w: W - 28 - 216 - 32 - 68 - 76 },
+    ]
     : [
-        { label: 'S.No.', w: 28 },
-        { label: 'Product Name', w: 168 },
-        { label: 'HSN Code', w: 48 },
-        { label: 'Qty', w: 32 },
-        { label: 'MRP', w: 68 },
-        { label: 'Special Price', w: 76 },
-        { label: 'Total', w: W - 28 - 168 - 48 - 32 - 68 - 76 },
-      ];
+      { label: 'S.No.', w: 28 },
+      { label: 'Product Name', w: 168 },
+      { label: 'HSN Code', w: 48 },
+      { label: 'Qty', w: 32 },
+      { label: 'MRP', w: 68 },
+      { label: 'Special Price', w: 76 },
+      { label: 'Total', w: W - 28 - 168 - 48 - 32 - 68 - 76 },
+    ];
   const rowH = 15;
   const headerH = 16;
   const colWidths = cols.map((c) => c.w);
@@ -435,22 +441,22 @@ if (displayLabel) {
         || 'Item';
       const row = isNonGst
         ? [
-            String(idx + 1),
-            name,
-            String(item.quantity),
-            fmtNum(lineMrp(item)),
-            fmtNum(item.unit_price),
-            fmtNum(lineSpecialTotal(item)),
-          ]
+          String(idx + 1),
+          name,
+          String(item.quantity),
+          fmtNum(lineMrp(item)),
+          fmtNum(item.unit_price),
+          fmtNum(lineSpecialTotal(item)),
+        ]
         : [
-            String(idx + 1),
-            name,
-            displayVal(item.hsn_code),
-            String(item.quantity),
-            fmtNum(lineMrp(item)),
-            fmtNum(item.unit_price),
-            fmtNum(lineSpecialTotal(item)),
-          ];
+          String(idx + 1),
+          name,
+          displayVal(item.hsn_code),
+          String(item.quantity),
+          fmtNum(lineMrp(item)),
+          fmtNum(item.unit_price),
+          fmtNum(lineSpecialTotal(item)),
+        ];
       let cx = M;
       cols.forEach((col, i) => {
         cellText(doc, row[i], cx, rowY, col.w, rowH, { align: 'center', bold: false, size: 7.5 });
@@ -651,6 +657,244 @@ if (displayLabel) {
   doc.fillColor('#000').font('Helvetica');
 };
 
+const calculateThermalHeight = (bill) => {
+  const items = bill.items || [];
+  let baseHeight = 310;
+  if (bill.bill_type === 'GST_INVOICE') {
+    baseHeight += 40;
+  }
+  const itemHeight = items.length * 22;
+  return Math.max(310, baseHeight + itemHeight);
+};
+
+const drawThermalDashedLine = (doc, y) => {
+  doc.save()
+    .lineWidth(0.5)
+    .dash(2, { space: 2 })
+    .strokeColor('#333333')
+    .moveTo(12, y)
+    .lineTo(214.77, y)
+    .stroke()
+    .undash()
+    .restore();
+};
+
+const drawThermalSolidLine = (doc, y) => {
+  doc.save()
+    .lineWidth(0.5)
+    .strokeColor('#333333')
+    .moveTo(12, y)
+    .lineTo(214.77, y)
+    .stroke()
+    .restore();
+};
+
+const drawThermalKeyValue = (doc, label, value, y) => {
+  doc.font('Helvetica').fontSize(8);
+  doc.text(label, 12, y, { width: 100, align: 'left' });
+  doc.text(displayVal(value), 112, y, { width: 102.77, align: 'right' });
+};
+
+const renderThermalReceipt = (doc, bill, { isNonGst = false, isEstimate = false, isNonListed = false } = {}) => {
+  const shop = bill.shop || {};
+  const items = bill.items || [];
+  const gst = shopGstin(bill);
+  const legalName = bill.gst_config?.legal_name?.trim() || shop.shop_name || '';
+  const mrpDiscount = calcMrpDiscount(items);
+  const gstSplit = buildTaxSummaryFromLines(items);
+  const taxRates = getTaxRatePercents(items, gstSplit.tax_mode);
+  const cust = bill.customer || {};
+
+  // M/S Display Logic
+  let customerDisplayName = '';
+  let displayLabel = 'Customer';
+  const isGstBill = bill.bill_type === 'GST_INVOICE';
+
+  if (isGstBill) {
+    displayLabel = 'M/S';
+    if (cust.company_name && cust.company_name.trim()) {
+      customerDisplayName = cust.company_name.trim();
+    } else if (bill.customer_name && bill.customer_name.trim()) {
+      customerDisplayName = bill.customer_name.trim();
+    } else {
+      customerDisplayName = 'Walk-in Customer';
+    }
+  } else {
+    displayLabel = '';
+    if (bill.customer_name && bill.customer_name.trim()) {
+      customerDisplayName = bill.customer_name.trim();
+    } else if (cust.name && cust.name.trim()) {
+      customerDisplayName = cust.name.trim();
+    } else {
+      customerDisplayName = 'Walk-in Customer';
+    }
+  }
+
+  let y = 12;
+
+  // Header Section (Centered)
+  if (isEstimate || isNonListed) {
+    doc.fontSize(12).font('Helvetica-Bold').text('Receipt', 12, y, { width: 202.77, align: 'center' });
+    y += 16;
+    // Billed By right under Receipt title
+    if (bill.staff_code_value) {
+      doc.fontSize(7.5).font('Helvetica').text(`Billed By: ${bill.staff_code_value}`, 12, y, { width: 202.77, align: 'center' });
+      y += 10;
+    }
+  } else {
+    doc.fontSize(12).font('Helvetica-Bold').text(shop.shop_name || 'Shop', 12, y, { width: 202.77, align: 'center' });
+    y += 15;
+
+    // Address parts
+    const addrParts = [shop.address, shop.city, shop.pincode].filter(Boolean).join(', ');
+    if (addrParts) {
+      doc.fontSize(7.5).font('Helvetica').text(addrParts, 12, y, { width: 202.77, align: 'center' });
+      y += 10;
+    }
+
+    // Phone
+    if (shop.phone) {
+      doc.fontSize(7.5).font('Helvetica').text(`Ph: ${shop.phone}`, 12, y, { width: 202.77, align: 'center' });
+      y += 10;
+    }
+
+    // GSTIN
+    if (gst) {
+      doc.fontSize(7.5).font('Helvetica-Bold').text(`GSTIN: ${gst}`, 12, y, { width: 202.77, align: 'center' });
+      y += 11;
+    }
+  }
+
+  drawThermalDashedLine(doc, y);
+  y += 5;
+
+  if (!isEstimate && !isNonListed) {
+    // Title
+    let title = 'INVOICE';
+    if (!isNonGst) title = 'GST INVOICE';
+    doc.fontSize(9).font('Helvetica-Bold').text(title, 12, y, { width: 202.77, align: 'center' });
+    y += 11;
+    // Billed By right under INVOICE / GST INVOICE title
+    if (bill.staff_code_value) {
+      doc.fontSize(7.5).font('Helvetica').text(`Billed By: ${bill.staff_code_value}`, 12, y, { width: 202.77, align: 'center' });
+      y += 10;
+    }
+    drawThermalDashedLine(doc, y);
+    y += 5;
+  }
+
+  // Invoice Details
+  drawThermalKeyValue(doc, 'Invoice No', bill.bill_number, y);
+  y += 10;
+  drawThermalKeyValue(doc, 'Date', fmtDate(bill.created_at), y);
+  y += 10;
+  drawThermalKeyValue(doc, 'Payment', bill.payment_method || 'CASH', y);
+  y += 11;
+
+  drawThermalDashedLine(doc, y);
+  y += 5;
+
+  // Bill To details
+  doc.font('Helvetica-Bold').fontSize(8).text('Bill To:', 12, y);
+  y += 10;
+
+  const formattedCustName = displayLabel ? `${displayLabel}: ${customerDisplayName}` : customerDisplayName;
+  doc.font('Helvetica').fontSize(8).text(formattedCustName, 12, y, { width: 202.77 });
+  y += 10;
+  if (bill.customer_mobile) {
+    doc.text(`Mob: ${bill.customer_mobile}`, 12, y, { width: 202.77 });
+    y += 10;
+  }
+  if (!isNonGst && bill.customer_gstin) {
+    doc.text(`GSTIN: ${bill.customer_gstin}`, 12, y, { width: 202.77 });
+    y += 10;
+  }
+
+  drawThermalDashedLine(doc, y);
+  y += 5;
+
+  // Table Headers
+  doc.font('Helvetica-Bold').fontSize(8);
+  doc.text('Item', 12, y, { width: 80, align: 'left' });
+  doc.text('Qty', 92, y, { width: 20, align: 'center' });
+  doc.text('Spl.Price', 112, y, { width: 50, align: 'right' });
+  doc.text('Total', 162, y, { width: 40, align: 'right' });
+  y += 10;
+
+  drawThermalSolidLine(doc, y);
+  y += 4;
+
+  // Table rows
+  items.forEach((item, idx) => {
+    const name = item.manual_item_name
+      || item.variant?.product?.name
+      || item.product?.name
+      || item.variant?.sku
+      || 'Item';
+
+    doc.font('Helvetica-Bold').fontSize(8).text(name, 12, y, { width: 202.77 });
+    y += 10;
+
+    doc.font('Helvetica').fontSize(7.5);
+    doc.text(`MRP: Rs. ${fmtNum(lineMrp(item))}`, 12, y, { width: 80, align: 'left' });
+    doc.text(String(item.quantity), 92, y, { width: 20, align: 'center' });
+    doc.text(fmtNum(item.unit_price), 112, y, { width: 50, align: 'right' });
+    doc.text(fmtNum(lineSpecialTotal(item)), 162, y, { width: 40, align: 'right' });
+    y += 11;
+  });
+
+  drawThermalDashedLine(doc, y);
+  y += 5;
+
+  // Financial summary
+  const drawSummaryLine = (label, val, isBold = false) => {
+    doc.font(isBold ? 'Helvetica-Bold' : 'Helvetica').fontSize(8);
+    doc.text(label, 12, y, { width: 110, align: 'left' });
+    doc.text(val, 122, y, { width: 80, align: 'right' });
+    y += 10;
+  };
+
+  drawSummaryLine('Subtotal', fmtNum(bill.subtotal));
+  if (mrpDiscount > 0) {
+    drawSummaryLine('Discount', `- ${fmtNum(mrpDiscount)}`);
+  }
+
+  if (!isNonGst) {
+    drawSummaryLine('Taxable Amt', fmtNum(bill.taxable_amount));
+    if (gstSplit.tax_mode === 'CGST_SGST') {
+      if (gstSplit.cgst > 0) {
+        drawSummaryLine(`CGST (${taxRates.cgstPercent}%)`, `+ ${fmtNum(gstSplit.cgst)}`);
+      }
+      if (gstSplit.sgst > 0) {
+        drawSummaryLine(`SGST (${taxRates.sgstPercent}%)`, `+ ${fmtNum(gstSplit.sgst)}`);
+      }
+    } else if (gstSplit.igst > 0) {
+      drawSummaryLine(`IGST (${taxRates.igstPercent}%)`, `+ ${fmtNum(gstSplit.igst)}`);
+    }
+    if (bill.gst_amount > 0) {
+      drawSummaryLine('Total Tax', fmtNum(bill.gst_amount));
+    }
+  }
+
+  drawThermalDashedLine(doc, y);
+  y += 5;
+
+  drawSummaryLine('TOTAL PAYABLE', fmtMoney(bill.total_amount), true);
+
+  drawThermalDashedLine(doc, y);
+  y += 5;
+
+  // Amount in words
+  doc.font('Helvetica-Oblique').fontSize(7.5);
+  doc.text(amountInWords(bill.total_amount), 12, y, { width: 202.77, align: 'center' });
+  y += 15;
+
+  drawThermalDashedLine(doc, y);
+  y += 5;
+
+  doc.font('Helvetica-Oblique').fontSize(7.5).text('Thank you for shopping with us!', 12, y, { width: 202.77, align: 'center' });
+};
+
 const ensureCloudinary = () => {
   const cloudName = trimEnv(config.CLOUDINARY_CLOUD_NAME);
   const apiKey = trimEnv(config.CLOUDINARY_API_KEY);
@@ -661,26 +905,46 @@ const ensureCloudinary = () => {
   cloudinary.config({ cloud_name: cloudName, api_key: apiKey, api_secret: apiSecret, secure: true });
 };
 
-const buildBillPdfBuffer = (bill) =>
+const buildBillPdfBuffer = (bill, printFormat = 'A4') =>
   new Promise((resolve, reject) => {
     try {
-      const doc = new PDFDocument({ margin: M, size: 'A4' });
+      let doc;
+      if (printFormat === '80mm') {
+        const height = calculateThermalHeight(bill);
+        doc = new PDFDocument({ margin: 12, size: [226.77, height] });
+      } else {
+        doc = new PDFDocument({ margin: M, size: 'A4' });
+      }
+
       const chunks = [];
       doc.on('data', (chunk) => chunks.push(chunk));
       doc.on('end', () => resolve(Buffer.concat(chunks)));
       doc.on('error', reject);
 
-      if (bill.bill_type === 'GST_INVOICE') {
-        renderGstTaxInvoice(doc, bill);
-      } else if (bill.bill_type === 'NON_GST_INVOICE') {
-        renderGstTaxInvoice(doc, bill, { isNonGst: true });
-      } else if (bill.bill_type === 'ESTIMATE_INVOICE') {
-        renderGstTaxInvoice(doc, bill, { isNonGst: true, isEstimate: true });
-      } else if (bill.bill_type === 'NON_LISTED_BILL') {
-        // Non-listed bill: same layout as NON_GST with 'Non-Listed Bill' title
-        renderGstTaxInvoice(doc, bill, { isNonGst: true, isNonListed: true });
+      if (printFormat === '80mm') {
+        if (bill.bill_type === 'GST_INVOICE') {
+          renderThermalReceipt(doc, bill);
+        } else if (bill.bill_type === 'NON_GST_INVOICE') {
+          renderThermalReceipt(doc, bill, { isNonGst: true });
+        } else if (bill.bill_type === 'ESTIMATE_INVOICE') {
+          renderThermalReceipt(doc, bill, { isNonGst: true, isEstimate: true });
+        } else if (bill.bill_type === 'NON_LISTED_BILL') {
+          renderThermalReceipt(doc, bill, { isNonGst: true, isNonListed: true });
+        } else {
+          renderThermalReceipt(doc, bill, { isNonGst: true });
+        }
       } else {
-        renderGstTaxInvoice(doc, bill, { isNonGst: true });
+        if (bill.bill_type === 'GST_INVOICE') {
+          renderGstTaxInvoice(doc, bill);
+        } else if (bill.bill_type === 'NON_GST_INVOICE') {
+          renderGstTaxInvoice(doc, bill, { isNonGst: true });
+        } else if (bill.bill_type === 'ESTIMATE_INVOICE') {
+          renderGstTaxInvoice(doc, bill, { isNonGst: true, isEstimate: true });
+        } else if (bill.bill_type === 'NON_LISTED_BILL') {
+          renderGstTaxInvoice(doc, bill, { isNonGst: true, isNonListed: true });
+        } else {
+          renderGstTaxInvoice(doc, bill, { isNonGst: true });
+        }
       }
 
       doc.end();
@@ -709,8 +973,8 @@ const uploadBillPdf = async (buffer, billNumber) => {
   });
 };
 
-const generateBillPdf = async (bill, { persist = true } = {}) => {
-  const buffer = await buildBillPdfBuffer(bill);
+const generateBillPdf = async (bill, { persist = true, printFormat = 'A4' } = {}) => {
+  const buffer = await buildBillPdfBuffer(bill, printFormat);
   if (!persist) return { buffer, contentType: 'application/pdf' };
 };
 
