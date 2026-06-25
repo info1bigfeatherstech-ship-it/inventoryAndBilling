@@ -691,8 +691,20 @@ const drawThermalSolidLine = (doc, y) => {
 
 const drawThermalKeyValue = (doc, label, value, y) => {
   doc.font('Helvetica').fontSize(8);
-  doc.text(label, 12, y, { width: 100, align: 'left' });
-  doc.text(displayVal(value), 112, y, { width: 102.77, align: 'right' });
+  const valText = displayVal(value);
+  
+  // Calculate label width with padding, then assign remaining printable width to value
+  const labelWidth = doc.widthOfString(label) + 6;
+  const valWidth = 202.77 - labelWidth;
+  
+  const labelHeight = doc.heightOfString(label, { width: labelWidth });
+  const valHeight = doc.heightOfString(valText, { width: valWidth });
+  const height = Math.max(labelHeight, valHeight);
+  
+  doc.text(label, 12, y, { width: labelWidth, align: 'left' });
+  doc.text(valText, 12 + labelWidth, y, { width: valWidth, align: 'right' });
+  
+  return height;
 };
 
 const renderThermalReceipt = (doc, bill, { isNonGst = false, isEstimate = false, isNonListed = false } = {}) => {
@@ -784,12 +796,12 @@ const renderThermalReceipt = (doc, bill, { isNonGst = false, isEstimate = false,
   }
 
   // Invoice Details
-  drawThermalKeyValue(doc, 'Invoice No', bill.bill_number, y);
-  y += 10;
-  drawThermalKeyValue(doc, 'Date', fmtDate(bill.created_at), y);
-  y += 10;
-  drawThermalKeyValue(doc, 'Payment', bill.payment_method || 'CASH', y);
-  y += 11;
+  const hInvoiceNo = drawThermalKeyValue(doc, 'Invoice No', bill.bill_number, y);
+  y += hInvoiceNo;
+  const hDate = drawThermalKeyValue(doc, 'Date', fmtDate(bill.created_at), y);
+  y += hDate;
+  const hPayment = drawThermalKeyValue(doc, 'Payment', bill.payment_method || 'CASH', y);
+  y += hPayment;
 
   drawThermalDashedLine(doc, y);
   y += 5;
