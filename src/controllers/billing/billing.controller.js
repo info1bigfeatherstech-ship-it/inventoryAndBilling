@@ -1,6 +1,9 @@
+const jwt = require('jsonwebtoken');
+const config = require('../../config/index.config');
 const asyncHandler = require('../../utils/asyncHandler.utils');
 const BillingService = require('../../services/billing/billing.service');
 const { successResponse, paginatedMeta } = require('../../utils/response.utils');
+const { AppError } = require('../../errors/AppError');
 
 const BillingController = {
   create: asyncHandler(async (req, res) => {
@@ -93,6 +96,26 @@ const BillingController = {
         },
       });
     }
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${bill.bill_number}.pdf"`);
+    return res.send(pdf.buffer);
+  }),
+
+  getPublicPDF: asyncHandler(async (req, res) => {
+    const { token } = req.params;
+    let decoded;
+    try {
+      decoded = jwt.verify(token, config.JWT_SECRET);
+    } catch (error) {
+      if (error.name === 'TokenExpiredError') {
+        throw new AppError('Public invoice link has expired', 410, 'LINK_EXPIRED');
+      }
+      throw new AppError('Invalid public invoice link', 400, 'INVALID_LINK');
+    }
+
+    const { billId } = decoded;
+    const { bill, pdf } = await BillingService.generatePublicPDF(billId);
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="${bill.bill_number}.pdf"`);

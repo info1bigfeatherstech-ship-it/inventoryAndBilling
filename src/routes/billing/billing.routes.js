@@ -15,10 +15,22 @@ const {
   gstReportValidator,
 } = require('../../validators/billing/billing.validators');
 
+const { createRateLimiter, RL_KEY_PREFIX } = require('../../middlewares/rateLimiter.middleware');
+
 const READ_ROLES = ['SUPER_ADMIN', 'SHOP_OWNER', 'SHOP_STOCK_LISTER', 'BILLING_STAFF', 'WH_MANAGER', 'WH_STOCK_LISTER'];
 const WRITE_ROLES = ['SUPER_ADMIN', 'SHOP_OWNER', 'BILLING_STAFF'];
 
 const idem24h = idempotency({ ttlSeconds: 86400 });
+
+// Configure a rate limiter for downloading/viewing the public invoices
+const publicInvoiceLimiter = createRateLimiter({
+  max: 30, // limit to 30 requests
+  windowMs: 15 * 60 * 1000, // per 15 minutes
+  keyPrefix: `${RL_KEY_PREFIX}:public-invoice`,
+});
+
+// Expose public invoice endpoint (unauthenticated)
+router.get('/public/:token', publicInvoiceLimiter, BillingController.getPublicPDF);
 
 router.use(requireAuth);
 

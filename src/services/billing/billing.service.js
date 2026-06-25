@@ -1,4 +1,12 @@
+const jwt = require('jsonwebtoken');
+const config = require('../../config/index.config');
 const prisma = require('../../utils/prisma.utils');
+
+const _generatePublicToken = (billId) => {
+  // FUTURE UPGRADE: To expire the link in X days, change this line to:
+  // return jwt.sign({ billId }, config.JWT_SECRET, { expiresIn: '30d' }); // e.g., '10d', '7d' etc.
+  return jwt.sign({ billId }, config.JWT_SECRET);
+};
 const { AppError } = require('../../errors/AppError');
 const { parsePagination } = require('../../utils/pagination.utils');
 const { createStockLedgerEntry } = require('../stock/stockLedger.helpers');
@@ -588,7 +596,10 @@ const BillingService = {
         user_id: user.userId,
       });
 
-      return result;
+      return {
+        ...result,
+        public_invoice_token: _generatePublicToken(result.bill_id),
+      };
     } catch (err) {
       logger.error('createBill failed', { error: err.message, stack: err.stack, user_id: user.userId });
       throw err;
@@ -795,7 +806,10 @@ const BillingService = {
       user_id: user.userId,
     });
 
-    return result;
+    return {
+      ...result,
+      public_invoice_token: _generatePublicToken(result.bill_id),
+    };
   },
 
   async getBillById(billId, user) {
@@ -806,7 +820,11 @@ const BillingService = {
       bill.bill_type === 'GST_INVOICE'
         ? buildTaxSummaryFromLines(bill.items)
         : { tax_mode: 'EXEMPT', is_intra_state: true, cgst: 0, sgst: 0, igst: 0 };
-    return { ...bill, tax_summary };
+    return {
+      ...bill,
+      tax_summary,
+      public_invoice_token: _generatePublicToken(bill.bill_id),
+    };
   },
 
   async listBills(filters, user) {
@@ -1157,6 +1175,30 @@ const BillingService = {
     }
 
     return { bill, pdf };
+  },
+
+  async generatePublicPDF(billId) {
+    const bill = await prisma.bill.findUnique({ where: { bill_id: billId }, select: BILL_SELECT });
+    if (!bill) throw new AppError('Bill not found', 404, 'BILL_NOT_FOUND');
+
+    const tax_summary =
+      bill.bill_type === 'GST_INVOICE'
+        ? buildTaxSummaryFromLines(bill.items)
+        : { tax_mode: 'EXEMPT', is_intra_state: true, cgst: 0, sgst: 0, igst: 0 };
+        
+    const enrichedBill = { ...bill, tax_summary };
+
+    if (enrichedBill.bill_type === 'GST_INVOICE' && !enrichedBill.bank_account) {
+      const defaultBank = await ShopBankAccountService.resolveDefaultForGstInvoice(
+        enrichedBill.shop_id,
+        enrichedBill.gst_config_id
+      );
+      if (defaultBank) enrichedBill.bank_account = defaultBank;
+    }
+
+    const pdf = await generateBillPdf(enrichedBill, { persist: false });
+
+    return { bill: enrichedBill, pdf };
   },
 };
 
