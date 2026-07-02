@@ -11,8 +11,8 @@ const {
   updateShopExpenseValidator,
 } = require('../../validators/purchase/shopExpense.validators');
 
-const READ_ROLES = ['SUPER_ADMIN', 'SHOP_OWNER', 'SHOP_STOCK_LISTER'];
-const WRITE_ROLES = ['SUPER_ADMIN', 'SHOP_OWNER'];
+const READ_ROLES = ['SUPER_ADMIN', 'SHOP_OWNER', 'SHOP_MANAGER'];
+const WRITE_ROLES = ['SUPER_ADMIN', 'SHOP_OWNER', 'SHOP_MANAGER'];
 
 router.use(requireAuth);
 

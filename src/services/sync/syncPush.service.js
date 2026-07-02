@@ -2,10 +2,12 @@ const crypto = require('crypto');
 const { AppError } = require('../../errors/AppError');
 const { getRedisClient } = require('../../utils/redis.utils');
 const { resolveSyncShopId } = require('./syncAccess.utils');
+const { UserRole } = require('../../constants/userRole.constants');
 const {
   SYNC_ENTITY_TYPES,
   SYNC_IDEMPOTENCY_TTL_SECONDS,
   SYNC_PUSH_RESULT_STATUS,
+  SHOP_MANAGER_BLOCKED_PUSH_ENTITIES,
 } = require('./sync.constants');
 const logger = require('../../utils/logger.utils');
 
@@ -80,6 +82,21 @@ const registerSyncHandler = (entityType, handler) => {
 };
 
 const processOutboxItem = async ({ item, user, shopId, redis, batchContext }) => {
+  if (
+    user.role === UserRole.SHOP_MANAGER &&
+    SHOP_MANAGER_BLOCKED_PUSH_ENTITIES.includes(item.entity_type)
+  ) {
+    return {
+      client_id: item.client_id,
+      entity_type: item.entity_type,
+      status: SYNC_PUSH_RESULT_STATUS.ERROR,
+      error_code: 'OFFLINE_SYNC_ENTITY_FORBIDDEN',
+      message: 'Shop managers cannot sync billing or customer data offline',
+      http_status: 403,
+      error_details: null,
+    };
+  }
+
   const redisKey = buildIdempotencyRedisKey(user.userId, item.client_id);
   const payloadHash = hashPayload(item.payload);
 

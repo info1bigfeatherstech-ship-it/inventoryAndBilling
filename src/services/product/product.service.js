@@ -22,6 +22,25 @@ const { generateSystemBarcode } = require('../../utils/barcode.utils');
 const { withComputedPurchaseCode } = require('../../utils/purchaseCode.utils');
 const { resolveVariantByScanCode } = require('../../utils/variantScan.utils');
 const { assertVariantImageUploads } = require('../../utils/productMultipart.utils');
+const CategoryService = require('../category/category.service');
+const VendorService = require('../vendor/vendor.service');
+const bulkTemplateService = require('./bulkTemplate.service');
+const { normalizeUnitOfMeasure } = require('../../constants/unitOfMeasure.constants');
+const {
+  CATALOG_FIELD_KEYS,
+  PRICE_FIELD_KEYS,
+  priceFieldPresent,
+  resolvePurchasePriceInput,
+  validateVariantPricing,
+  extractCatalogFields,
+  sanitizeProductCatalogFields,
+  mergeVariantCatalogFields,
+  mapIncomingCatalogFields,
+  buildCatalogUpdatePayload,
+  buildCsvVariantCatalog,
+  formatProductForUser,
+  formatProductsForUser,
+} = require('../../utils/productCatalogFields.utils');
 
 
 // ========== CSV BULK UPLOAD HELPERS (Resolve Name → ID) ==========
@@ -186,8 +205,10 @@ const VARIANT_INCLUDE = {
     attributes: true,
     mrp: true,
     special_price: true,
+    wholesale_price: true,
     purchase_price: true,
     expenses: true,
+    warranty: true,
     purchase_code: true,
     weight: true,
     length: true,
@@ -230,8 +251,10 @@ const VARIANT_INCLUDE = {
 const PRODUCT_PRICE_SELECT = {
   mrp: true,
   special_price: true,
+  wholesale_price: true,
   purchase_price: true,
   expenses: true,
+  warranty: true,
 };
 
 const PRODUCT_LIST_SELECT = {
@@ -319,10 +342,7 @@ const sanitizeOptionalGstType = (value) => {
   return allowed.includes(value) ? value : DEFAULT_GST_TYPE;
 };
 
-const sanitizeOptionalUnitOfMeasure = (value) => {
-  if (value == null || String(value).trim() === '') return '';
-  return String(value).trim();
-};
+const sanitizeOptionalUnitOfMeasure = (value) => normalizeUnitOfMeasure(value, { allowEmpty: true });
 
 const sanitizeOptionalVendorId = (value) => {
   if (value == null || String(value).trim() === '') return null;
@@ -352,80 +372,24 @@ const parseVariantSerial = (variantCode, baseProductCode) => {
   return Number.isFinite(n) && n > 0 ? n : null;
 };
 
-const resolvePurchasePriceInput = (obj) => {
-  if (priceFieldPresent(obj, 'purchase_price')) return Number(obj.purchase_price);
-  if (priceFieldPresent(obj, 'purchase_cost')) return Number(obj.purchase_cost);
-  if (priceFieldPresent(obj, 'wholesale_price')) return Number(obj.wholesale_price);
-  return null;
-};
-
 const resolveSpecialPriceInput = (obj) => {
   if (priceFieldPresent(obj, 'special_price')) return Number(obj.special_price);
   if (priceFieldPresent(obj, 'retail_price')) return Number(obj.retail_price);
   return null;
 };
 
-const sanitizeProductPrices = (data) => {
-  const prices = {
-    mrp: data.mrp != null && data.mrp !== '' ? Number(data.mrp) : 0,
-    special_price: data.special_price != null && data.special_price !== '' ? Number(data.special_price) : 0,
-    purchase_price: resolvePurchasePriceInput(data) ?? 0,
-    expenses: data.expenses != null && data.expenses !== '' ? Number(data.expenses) : 0,
-  };
+const sanitizeProductPrices = (data, options = {}) =>
+  sanitizeProductCatalogFields(data, { required: options.required, label: options.label || 'Product' });
 
-  validateVariantPricing(prices, 'Product');
-  return prices;
-};
-
-const VARIANT_PRICE_KEYS = ['mrp', 'special_price', 'purchase_price', 'expenses'];
-const VARIANT_REQUIRED_PRICE_KEYS = ['mrp', 'special_price', 'expenses'];
-
-const priceFieldPresent = (obj, key) =>
-  obj[key] !== null && obj[key] !== undefined && obj[key] !== '';
-
-const extractVariantPrices = (variant, indexLabel, { required = false } = {}) => {
-  const prices = {
-    mrp: priceFieldPresent(variant, 'mrp') ? Number(variant.mrp) : null,
-    special_price: priceFieldPresent(variant, 'special_price') ? Number(variant.special_price) : null,
-    purchase_price: resolvePurchasePriceInput(variant),
-    expenses: priceFieldPresent(variant, 'expenses') ? Number(variant.expenses) : null,
-  };
-
-  if (required) {
-    for (const key of VARIANT_REQUIRED_PRICE_KEYS) {
-      if (prices[key] == null) {
-        throw new AppError(
-          `${indexLabel}: ${key} is required — each variant must have its own MRP, special price, and expenses.`,
-          400,
-          'VARIANT_PRICES_REQUIRED'
-        );
-      }
-    }
-  }
-
-  validateVariantPricing(
-    {
-      mrp: prices.mrp ?? 0,
-      special_price: prices.special_price ?? 0,
-      purchase_price: prices.purchase_price ?? 0,
-      expenses: prices.expenses ?? 0,
-    },
-    indexLabel
-  );
-
-  return prices;
-};
+const extractVariantPrices = (variant, indexLabel, options = {}) =>
+  extractCatalogFields(variant, indexLabel, options);
 
 const buildCsvVariantPrices = (row, rowNumber) => {
-  const indexLabel = `Row ${rowNumber}`;
-  const prices = {
-    mrp: priceFieldPresent(row, 'mrp') ? Number(row.mrp) : 0,
-    special_price: resolveSpecialPriceInput(row) ?? 0,
-    purchase_price: resolvePurchasePriceInput(row) ?? 0,
-    expenses: priceFieldPresent(row, 'expenses') ? Number(row.expenses) : 0,
-  };
-  validateVariantPricing(prices, indexLabel);
-  return withComputedPurchaseCode(prices);
+  const catalog = buildCsvVariantCatalog(row, rowNumber);
+  if (!priceFieldPresent(row, 'special_price') && resolveSpecialPriceInput(row) != null) {
+    catalog.special_price = resolveSpecialPriceInput(row);
+  }
+  return withComputedPurchaseCode(catalog);
 };
 
 const SHIPPING_KEYS = ['weight', 'length', 'width', 'height'];
@@ -533,27 +497,21 @@ const resolveCreatePricingContext = (data) => {
     const productPrices = sanitizeProductPrices({
       mrp: variantOnlyPrices[0].mrp,
       special_price: variantOnlyPrices[0].special_price,
+      wholesale_price: variantOnlyPrices[0].wholesale_price,
       purchase_price: variantOnlyPrices[0].purchase_price,
       expenses: variantOnlyPrices[0].expenses,
+      warranty: variantOnlyPrices[0].warranty,
     });
 
     return { productPrices, eachVariantOwnPrices: true, variantOnlyPrices };
   }
 
-  const productPrices = sanitizeProductPrices(data);
+  const productPrices = sanitizeProductPrices(data, { required: true, label: 'Product' });
   return { productPrices, eachVariantOwnPrices: false, variantOnlyPrices: null };
 };
 
-const mergeVariantPrices = (productPrices, variantInput = {}) => {
-  const has = (key) => priceFieldPresent(variantInput, key);
-
-  return {
-    mrp: has('mrp') ? Number(variantInput.mrp) : productPrices.mrp,
-    special_price: has('special_price') ? Number(variantInput.special_price) : productPrices.special_price,
-    purchase_price: resolvePurchasePriceInput(variantInput) ?? productPrices.purchase_price,
-    expenses: has('expenses') ? Number(variantInput.expenses) : productPrices.expenses,
-  };
-};
+const mergeVariantPrices = (productPrices, variantInput = {}) =>
+  mergeVariantCatalogFields(productPrices, variantInput);
 
 const getNextVariantSerial = async (tx, productId, baseProductCode) => {
   const variants = await tx.productVariant.findMany({
@@ -618,13 +576,31 @@ const parseAttributes = (raw) => {
   return null;
 };
 
-const validateVariantPricing = (variant, indexLabel = '') => {
-  const prefix = indexLabel ? `${indexLabel}: ` : '';
-  if (variant.mrp < 0 || variant.special_price < 0 || variant.purchase_price < 0 || variant.expenses < 0) {
-    throw new AppError(`${prefix}Prices cannot be negative`, 400, 'INVALID_VARIANT_PRICE');
-  }
-  if (variant.special_price > variant.mrp) {
-    throw new AppError(`${prefix}Special price cannot exceed MRP`, 400, 'INVALID_VARIANT_PRICE');
+const mapIncomingPriceFields = (data, target = {}) => mapIncomingCatalogFields(data, target);
+
+const buildPriceUpdatePayload = (current, incoming) =>
+  withComputedPurchaseCode(buildCatalogUpdatePayload(current, incoming));
+
+const syncVariantsFromProductPrices = async (tx, productId, pricePayload) => {
+  const variants = await tx.productVariant.findMany({
+    where: { product_id: productId },
+    select: {
+      variant_id: true,
+      mrp: true,
+      special_price: true,
+      wholesale_price: true,
+      purchase_price: true,
+      expenses: true,
+      warranty: true,
+    },
+  });
+
+  for (const variant of variants) {
+    const priced = buildPriceUpdatePayload(variant, pricePayload);
+    await tx.productVariant.update({
+      where: { variant_id: variant.variant_id },
+      data: priced,
+    });
   }
 };
 
@@ -665,50 +641,6 @@ const assertWarehouseActive = async (warehouseId) => {
   });
   if (!warehouse) throw new AppError('Warehouse not found', 404, 'WAREHOUSE_NOT_FOUND');
   if (!warehouse.is_active) throw new AppError('Warehouse is inactive', 409, 'WAREHOUSE_INACTIVE');
-};
-
-const PRICE_FIELD_KEYS = ['mrp', 'special_price', 'purchase_price', 'expenses'];
-
-const mapIncomingPriceFields = (data, target = {}) => {
-  for (const key of PRICE_FIELD_KEYS) {
-    if (Object.prototype.hasOwnProperty.call(data, key)) target[key] = data[key];
-  }
-  if (Object.prototype.hasOwnProperty.call(data, 'purchase_cost')) {
-    target.purchase_price = data.purchase_cost;
-  }
-  return target;
-};
-
-const buildPriceUpdatePayload = (current, incoming) => {
-  const merged = {
-    mrp: incoming.mrp ?? current.mrp,
-    special_price: incoming.special_price ?? current.special_price,
-    purchase_price: incoming.purchase_price ?? current.purchase_price,
-    expenses: incoming.expenses ?? current.expenses,
-  };
-  validateVariantPricing(merged);
-  return withComputedPurchaseCode(merged);
-};
-
-const syncVariantsFromProductPrices = async (tx, productId, pricePayload) => {
-  const variants = await tx.productVariant.findMany({
-    where: { product_id: productId },
-    select: {
-      variant_id: true,
-      mrp: true,
-      special_price: true,
-      purchase_price: true,
-      expenses: true,
-    },
-  });
-
-  for (const variant of variants) {
-    const priced = buildPriceUpdatePayload(variant, pricePayload);
-    await tx.productVariant.update({
-      where: { variant_id: variant.variant_id },
-      data: priced,
-    });
-  }
 };
 
 const assertNoStockOnListing = (data) => {
@@ -776,11 +708,19 @@ const buildVariantInput = async (tx, variant, {
   productShipping,
   variantOnlyShipping,
   indexLabel,
+  independentVariantPricing = false,
 }) => {
   assertVariantUsesProductBase(variant, baseProductCode, indexLabel);
 
   const variantCode = buildVariantCode(baseProductCode, serial);
-  const prices = variantOnlyPrice ?? mergeVariantPrices(productPrices, variant);
+  let prices;
+  if (variantOnlyPrice) {
+    prices = variantOnlyPrice;
+  } else if (independentVariantPricing) {
+    prices = extractVariantPrices(variant, indexLabel, { required: true });
+  } else {
+    prices = mergeVariantPrices(productPrices, variant);
+  }
   const shipping = variantOnlyShipping ?? mergeVariantShipping(productShipping, variant);
 
   let systemBarcode = variant.system_barcode ? normalizeCode(variant.system_barcode) : null;
@@ -822,6 +762,12 @@ const normalizeVariantsForCreate = async (tx, data, baseProductCode, pricingCont
             system_barcode: data.system_barcode,
             vendor_barcode: data.vendor_barcode,
             attributes: data.attributes,
+            mrp: data.mrp,
+            special_price: data.special_price,
+            wholesale_price: data.wholesale_price,
+            purchase_price: data.purchase_price,
+            expenses: data.expenses,
+            warranty: data.warranty,
             weight: data.weight,
             length: data.length,
             width: data.width,
@@ -845,6 +791,7 @@ const normalizeVariantsForCreate = async (tx, data, baseProductCode, pricingCont
         productShipping,
         variantOnlyShipping: eachVariantOwnShipping ? variantOnlyShipping[index] : null,
         indexLabel: `Variant ${index + 1}`,
+        independentVariantPricing: eachVariantOwnPrices,
       })
     );
   }
@@ -1063,8 +1010,10 @@ const createBulkVariant = async ({ productId, variantData, warehouseId, productN
       sku: `SKU-${variantData.product_code}`,
       mrp: variantData.mrp,
       special_price: variantData.special_price,
+      wholesale_price: variantData.wholesale_price,
       purchase_price: variantData.purchase_price,
       expenses: variantData.expenses,
+      warranty: variantData.warranty ?? null,
       purchase_code: variantData.purchase_code,
       weight: variantData.weight,
       length: variantData.length,
@@ -1092,8 +1041,10 @@ const updateBulkVariantFromCsv = async ({ variantId, variantData }) => {
     data: {
       mrp: variantData.mrp,
       special_price: variantData.special_price,
+      wholesale_price: variantData.wholesale_price,
       purchase_price: variantData.purchase_price,
       expenses: variantData.expenses,
+      warranty: variantData.warranty ?? null,
       purchase_code: variantData.purchase_code,
       weight: variantData.weight,
       length: variantData.length,
@@ -1197,7 +1148,7 @@ const ProductService = {
     }
 
     await invalidateProductCaches(product.product_id, product.warehouse_id);
-    return attachListingMeta(await fetchProductDetail(product.product_id));
+    return await formatProductForUser(attachListingMeta(await fetchProductDetail(product.product_id)), user);
   },
 
   async listProducts(query = {}, user) {
@@ -1215,7 +1166,7 @@ const ProductService = {
       }),
     ]);
 
-    return { total, page, limit, products: products.map(attachListingMeta) };
+    return { total, page, limit, products: await formatProductsForUser(products.map(attachListingMeta), user) };
   },
 
   async getProductById(productId, user, { bypassCache = false } = {}) {
@@ -1225,7 +1176,7 @@ const ProductService = {
       const cached = await cacheGet(cacheKey);
       if (cached) {
         assertProductWarehouseAccess(cached.warehouse_id, user);
-        return attachListingMeta(cached);
+        return await formatProductForUser(attachListingMeta(cached), user);
       }
     }
 
@@ -1235,10 +1186,10 @@ const ProductService = {
     assertProductWarehouseAccess(product.warehouse_id, user);
     const enriched = attachListingMeta(product);
     await cacheSet(cacheKey, enriched);
-    return enriched;
+    return await formatProductForUser(enriched, user);
   },
   
-  async getProductByBarcode(barcode, shopId = null) {
+  async getProductByBarcode(barcode, shopId = null, user = null) {
     const variant = await resolveVariantByScanCode(prisma, barcode, {
       include: {
         product: {
@@ -1275,7 +1226,7 @@ const ProductService = {
       stockAvailable = shopStock?.quantity_available || 0;
     }
 
-    return {
+    const payload = {
       variant_id: variant.variant_id,
       product_id: variant.product_id,
       product_code: variant.product_code,
@@ -1291,11 +1242,15 @@ const ProductService = {
       unit_of_measure: variant.product.unit_of_measure,
       mrp: variant.mrp,
       special_price: variant.special_price,
+      wholesale_price: variant.wholesale_price,
       purchase_price: variant.purchase_price,
       expenses: variant.expenses,
+      warranty: variant.warranty,
       purchase_code: variant.purchase_code,
       stock_available: stockAvailable,
     };
+
+    return await formatProductForUser(payload, user);
   },
 
   async updateProduct(productId, data, user) {
@@ -1325,8 +1280,10 @@ const ProductService = {
       'sub_category_id',
       'mrp',
       'special_price',
+      'wholesale_price',
       'purchase_price',
       'expenses',
+      'warranty',
       'purchase_cost',
       'is_active',
       'remarks',
@@ -1362,11 +1319,20 @@ const ProductService = {
       }
     }
 
-    const hasPriceField = PRICE_FIELD_KEYS.some((k) => Object.prototype.hasOwnProperty.call(productFields, k));
+    const hasPriceField =
+      PRICE_FIELD_KEYS.some((k) => Object.prototype.hasOwnProperty.call(productFields, k)) ||
+      Object.prototype.hasOwnProperty.call(productFields, 'warranty');
     if (hasPriceField) {
       const current = await prisma.product.findUnique({
         where: { product_id: productId },
-        select: { mrp: true, special_price: true, purchase_price: true, expenses: true },
+        select: {
+          mrp: true,
+          special_price: true,
+          wholesale_price: true,
+          purchase_price: true,
+          expenses: true,
+          warranty: true,
+        },
       });
       validateVariantPricing({ ...current, ...productFields }, 'Product');
     }
@@ -1401,7 +1367,7 @@ const ProductService = {
 
     if (data.apply_prices_to_variants === true && hasPriceField) {
       const pricePayload = {};
-      for (const key of PRICE_FIELD_KEYS) {
+      for (const key of CATALOG_FIELD_KEYS) {
         if (Object.prototype.hasOwnProperty.call(productFields, key)) pricePayload[key] = productFields[key];
       }
       if (Object.keys(pricePayload).length) {
@@ -1412,7 +1378,7 @@ const ProductService = {
     }
 
     await invalidateProductCaches(productId, existing.warehouse_id);
-    return attachListingMeta(await fetchProductDetail(productId));
+    return await formatProductForUser(attachListingMeta(await fetchProductDetail(productId)), user);
   },
 
   async updateVariant(productId, variantId, data, user) {
@@ -1424,8 +1390,10 @@ const ProductService = {
         product_code: true,
         mrp: true,
         special_price: true,
+        wholesale_price: true,
         purchase_price: true,
         expenses: true,
+        warranty: true,
       },
     });
     if (!existing) throw new AppError('Product not found', 404, 'PRODUCT_NOT_FOUND');
@@ -1448,8 +1416,10 @@ const ProductService = {
       'attributes',
       'mrp',
       'special_price',
+      'wholesale_price',
       'purchase_price',
       'expenses',
+      'warranty',
       'purchase_cost',
       'weight',
       'length',
@@ -1495,14 +1465,16 @@ const ProductService = {
       throw new AppError('No updatable variant fields provided', 400, 'EMPTY_UPDATE');
     }
 
-    const hasPriceField = PRICE_FIELD_KEYS.some((k) => Object.prototype.hasOwnProperty.call(variantPayload, k));
-    if (hasPriceField) {
+    const hasCatalogField = CATALOG_FIELD_KEYS.some((k) =>
+      Object.prototype.hasOwnProperty.call(variantPayload, k)
+    );
+    if (hasCatalogField) {
       const priced = buildPriceUpdatePayload(current, variantPayload);
-      for (const key of [...PRICE_FIELD_KEYS, 'purchase_code']) {
+      for (const key of [...CATALOG_FIELD_KEYS, 'purchase_code']) {
         variantPayload[key] = priced[key];
       }
     } else {
-      validateVariantPricing({ ...current, ...variantPayload });
+      validateVariantPricing(current);
     }
 
     if (variantPayload.is_default === true) {
@@ -1514,7 +1486,7 @@ const ProductService = {
 
     await prisma.productVariant.update({ where: { variant_id: variantId }, data: variantPayload });
     await invalidateProductCaches(productId, existing.warehouse_id);
-    return attachListingMeta(await fetchProductDetail(productId));
+    return await formatProductForUser(attachListingMeta(await fetchProductDetail(productId)), user);
   },
 
   async createVariant(productId, data, user, { variantImagesByIndex } = {}) {
@@ -1582,7 +1554,7 @@ const ProductService = {
     }
 
     await invalidateProductCaches(productId, existing.warehouse_id);
-    return attachListingMeta(await fetchProductDetail(productId));
+    return await formatProductForUser(attachListingMeta(await fetchProductDetail(productId)), user);
   },
 
   async softDeleteProduct(productId, user) {
@@ -1918,8 +1890,10 @@ const ProductService = {
           purchase_code: v.purchase_code,
           mrp: v.mrp,
           special_price: v.special_price,
+          wholesale_price: v.wholesale_price,
           purchase_price: v.purchase_price,
           expenses: v.expenses,
+          warranty: v.warranty,
         })),
         has_images: variantsData.some((v) => v.imageFolderPath !== null),
         vendor_id: primary_vendor_id,
@@ -1966,8 +1940,10 @@ const ProductService = {
         data: {
           mrp: variantsData[0].mrp,
           special_price: variantsData[0].special_price,
+          wholesale_price: variantsData[0].wholesale_price,
           purchase_price: variantsData[0].purchase_price,
           expenses: variantsData[0].expenses,
+          warranty: variantsData[0].warranty,
         },
       });
       await invalidateProductCaches(existingProduct.product_id, warehouseId);
@@ -1976,8 +1952,10 @@ const ProductService = {
       const firstVariantPrices = {
         mrp: variantsData[0].mrp,
         special_price: variantsData[0].special_price,
+        wholesale_price: variantsData[0].wholesale_price,
         purchase_price: variantsData[0].purchase_price,
         expenses: variantsData[0].expenses,
+        warranty: variantsData[0].warranty,
       };
       validateVariantPricing(firstVariantPrices);
 
@@ -2160,7 +2138,7 @@ async listInactiveProducts(query = {}, user) {
     }),
   ]);
   
-  return { total, page, limit, products: products.map(attachListingMeta) };
+  return { total, page, limit, products: await formatProductsForUser(products.map(attachListingMeta), user) };
 },
 
 
@@ -2201,6 +2179,12 @@ async listInactiveProducts(query = {}, user) {
     });
 
     return { deleted: deleted };
+  },
+
+  async getBulkTemplateBuffer() {
+    const categoryNames = await CategoryService.getActiveCategoryNames();
+    const vendorNames = await VendorService.getActiveVendorNames();
+    return bulkTemplateService.generateBulkProductTemplate({ categoryNames, vendorNames });
   },
 };
 

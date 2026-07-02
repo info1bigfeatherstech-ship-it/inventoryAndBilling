@@ -1,6 +1,11 @@
 const prisma = require('./prisma.utils');
 const { AppError } = require('../errors/AppError');
 const { assertWarehouseStockAvailable } = require('./warehouseStock.utils');
+const {
+  UserRole,
+  isShopOwner,
+  isShopOwnerOrManager,
+} = require('../constants/userRole.constants');
 
 const TERMINAL_STATUSES = new Set(['REJECTED', 'COMPLETED', 'CANCELLED']);
 const PRE_DISPATCH_STATUSES = new Set(['REQUESTED', 'APPROVED']);
@@ -47,6 +52,22 @@ const resolveOwnerShopId = async (user) => {
   return owned?.shop_id ?? user.shopId ?? null;
 };
 
+/**
+ * Resolve the shop id a shop owner or manager acts on behalf of.
+ * Owners may resolve via owned shop; managers use assigned shop_id.
+ * @param {object} user
+ * @returns {Promise<string|null>}
+ */
+const resolveActingShopId = async (user) => {
+  if (isShopOwner(user?.role)) {
+    return resolveOwnerShopId(user);
+  }
+  if (user?.role === UserRole.SHOP_MANAGER) {
+    return user.shopId ?? null;
+  }
+  return user?.shopId ?? null;
+};
+
 const normalizeBatch = (value) => (value != null ? String(value).trim() : '');
 
 const assertPositiveIntQuantity = (quantity, fieldName = 'quantity') => {
@@ -75,7 +96,7 @@ const getInTransitRemaining = (request) => {
 
 /**
  * Hard guard: who may initiate a transfer request by type.
- * WH→Shop and Shop→Shop: destination SHOP_OWNER only.
+ * WH→Shop and Shop→Shop: destination shop owner or manager.
  * WH→WH: destination WH_MANAGER only.
  * @param {string} requestType
  * @param {object} user
@@ -104,9 +125,9 @@ const assertCreateRequestAllowed = (requestType, user) => {
     return;
   }
 
-  if (user.role === 'SHOP_OWNER') {
+  if (isShopOwnerOrManager(user.role)) {
     if (requestType === 'WH_TO_WH') {
-      throw new AppError('Shop owners cannot create warehouse-to-warehouse transfer requests', 403, 'FORBIDDEN');
+      throw new AppError('Shop staff cannot create warehouse-to-warehouse transfer requests', 403, 'FORBIDDEN');
     }
     return;
   }
@@ -149,20 +170,20 @@ const validateRolePermissions = async (action, request, user, context = {}) => {
             'FORBIDDEN'
           );
         }
-        if (user.role === 'SHOP_OWNER') {
-          const shopId = await resolveOwnerShopId(user);
+        if (isShopOwnerOrManager(user.role)) {
+          const shopId = await resolveActingShopId(user);
           if (!shopId || shopId !== toShop) {
             throw new AppError('You can only create stock requests for your own shop', 403, 'SHOP_FORBIDDEN');
           }
           return;
         }
-        throw new AppError('Only shop owners can request stock from a warehouse', 403, 'FORBIDDEN');
+        throw new AppError('Only shop owners or managers can request stock from a warehouse', 403, 'FORBIDDEN');
       }
       if (type === 'SHOP_TO_SHOP') {
-        if (user.role !== 'SHOP_OWNER') {
-          throw new AppError('Only shop owners can create shop-to-shop requests', 403, 'FORBIDDEN');
+        if (!isShopOwnerOrManager(user.role)) {
+          throw new AppError('Only shop owners or managers can create shop-to-shop requests', 403, 'FORBIDDEN');
         }
-        const shopId = await resolveOwnerShopId(user);
+        const shopId = await resolveActingShopId(user);
         if (!shopId || shopId !== toShop) {
           throw new AppError('You can only create requests for your shop as destination', 403, 'SHOP_FORBIDDEN');
         }
@@ -187,12 +208,12 @@ const validateRolePermissions = async (action, request, user, context = {}) => {
         return;
       }
       if (type === 'SHOP_TO_SHOP') {
-        if (user.role !== 'SHOP_OWNER') {
-          throw new AppError('Only shop owners can approve or reject', 403, 'FORBIDDEN');
+        if (!isShopOwnerOrManager(user.role)) {
+          throw new AppError('Only shop owners or managers can approve or reject', 403, 'FORBIDDEN');
         }
-        const shopId = await resolveOwnerShopId(user);
+        const shopId = await resolveActingShopId(user);
         if (!shopId || shopId !== fromShop) {
-          throw new AppError('Only source shop owner can approve or reject', 403, 'SHOP_FORBIDDEN');
+          throw new AppError('Only source shop owner or manager can approve or reject', 403, 'SHOP_FORBIDDEN');
         }
         return;
       }
@@ -210,12 +231,12 @@ const validateRolePermissions = async (action, request, user, context = {}) => {
         return;
       }
       if (type === 'SHOP_TO_SHOP') {
-        if (user.role !== 'SHOP_OWNER') {
-          throw new AppError('Only shop owners can dispatch', 403, 'FORBIDDEN');
+        if (!isShopOwnerOrManager(user.role)) {
+          throw new AppError('Only shop owners or managers can dispatch', 403, 'FORBIDDEN');
         }
-        const shopId = await resolveOwnerShopId(user);
+        const shopId = await resolveActingShopId(user);
         if (!shopId || shopId !== fromShop) {
-          throw new AppError('Only source shop owner can dispatch', 403, 'SHOP_FORBIDDEN');
+          throw new AppError('Only source shop owner or manager can dispatch', 403, 'SHOP_FORBIDDEN');
         }
         return;
       }
@@ -233,12 +254,12 @@ const validateRolePermissions = async (action, request, user, context = {}) => {
         return;
       }
       if (type === 'WH_TO_SHOP' || type === 'SHOP_TO_SHOP') {
-        if (user.role !== 'SHOP_OWNER') {
-          throw new AppError('Only shop owners can receive', 403, 'FORBIDDEN');
+        if (!isShopOwnerOrManager(user.role)) {
+          throw new AppError('Only shop owners or managers can receive', 403, 'FORBIDDEN');
         }
-        const shopId = await resolveOwnerShopId(user);
+        const shopId = await resolveActingShopId(user);
         if (!shopId || shopId !== toShop) {
-          throw new AppError('Only destination shop owner can receive', 403, 'SHOP_FORBIDDEN');
+          throw new AppError('Only destination shop owner or manager can receive', 403, 'SHOP_FORBIDDEN');
         }
         return;
       }
@@ -254,18 +275,18 @@ const validateRolePermissions = async (action, request, user, context = {}) => {
       }
       if (type === 'WH_TO_SHOP') {
         if (user.role === 'WH_MANAGER' && user.warehouseId === fromWh) return;
-        if (user.role === 'SHOP_OWNER') {
-          const shopId = await resolveOwnerShopId(user);
+        if (isShopOwnerOrManager(user.role)) {
+          const shopId = await resolveActingShopId(user);
           if (shopId === toShop) return;
         }
         throw new AppError('Insufficient permissions to cancel', 403, 'FORBIDDEN');
       }
       if (type === 'SHOP_TO_SHOP') {
-        if (user.role === 'SHOP_OWNER') {
-          const shopId = await resolveOwnerShopId(user);
+        if (isShopOwnerOrManager(user.role)) {
+          const shopId = await resolveActingShopId(user);
           if (shopId === fromShop || shopId === toShop) return;
         }
-        throw new AppError('Only source or destination shop owners can cancel', 403, 'FORBIDDEN');
+        throw new AppError('Only source or destination shop owners or managers can cancel', 403, 'FORBIDDEN');
       }
       break;
     }
@@ -297,7 +318,12 @@ const applyTransferListScope = (user, baseWhere = {}) => {
     return baseWhere;
   }
 
-  if (['SHOP_STOCK_LISTER', 'BILLING_STAFF'].includes(user.role)) {
+  if (user.role === UserRole.SHOP_MANAGER && user.shopId) {
+    baseWhere.OR = [{ from_shop_id: user.shopId }, { to_shop_id: user.shopId }];
+    return baseWhere;
+  }
+
+  if (user.role === UserRole.BILLING_STAFF) {
     if (user.shopId) {
       baseWhere.OR = [{ from_shop_id: user.shopId }, { to_shop_id: user.shopId }];
     }
@@ -375,6 +401,7 @@ module.exports = {
   IN_FLIGHT_STATUSES,
   generateRequestNumber,
   resolveOwnerShopId,
+  resolveActingShopId,
   normalizeBatch,
   assertPositiveIntQuantity,
   assertCreateRequestAllowed,

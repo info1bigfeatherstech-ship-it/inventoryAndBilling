@@ -1,7 +1,7 @@
 const { AppError } = require('../middlewares/error.middleware');
 
 const WAREHOUSE_STAFF_ROLES = new Set(['WH_MANAGER', 'WH_STOCK_LISTER']);
-const SHOP_TRANSFER_ROLES = new Set(['SHOP_OWNER', 'SHOP_STOCK_LISTER']);
+const SHOP_TRANSFER_ROLES = new Set(['SHOP_OWNER', 'SHOP_MANAGER']);
 
 const isSuperAdmin = (user) => user?.role === 'SUPER_ADMIN';
 

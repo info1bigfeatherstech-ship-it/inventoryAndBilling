@@ -197,38 +197,82 @@ const calculateLineAmounts = ({
   };
 };
 
-/**
- * Apply bill-level discount (loyalty + extra %) and scale tax proportionally.
- */
-const aggregateBillTotals = (lines, extraDiscountPercent = 0, loyaltyDiscountPercent = 0) => {
+const sumLineAggregates = (lines) => {
   const subtotal = roundMoney(lines.reduce((sum, l) => sum + l.line_subtotal, 0));
   const lineTaxSum = roundMoney(lines.reduce((sum, l) => sum + l.tax_amount, 0));
   const lineTaxableSum = roundMoney(lines.reduce((sum, l) => sum + l.taxable_amount, 0));
+  const grossBeforeExtra = roundMoney(lineTaxableSum + lineTaxSum);
+  return { subtotal, lineTaxSum, lineTaxableSum, grossBeforeExtra };
+};
 
-  const discountPercent = Math.min(
-    100,
-    Math.max(0, Number(extraDiscountPercent) || 0) + (Number(loyaltyDiscountPercent) || 0)
-  );
-  const discount = roundMoney((subtotal * discountPercent) / 100);
-  const taxableAmount = roundMoney(Math.max(0, lineTaxableSum - discount));
+/**
+ * Loyalty tier % on subtotal; scales GST proportionally (pre-extra-discount).
+ */
+const applyLoyaltyDiscount = (
+  { subtotal, lineTaxSum, lineTaxableSum, grossBeforeExtra },
+  loyaltyDiscountPercent = 0
+) => {
+  const loyaltyPercent = Math.min(100, Math.max(0, Number(loyaltyDiscountPercent) || 0));
+  if (loyaltyPercent <= 0) {
+    return {
+      subtotal,
+      taxable_amount: lineTaxableSum,
+      gst_amount: lineTaxSum,
+      gross_before_extra_discount: grossBeforeExtra,
+    };
+  }
 
+  const loyaltyDiscount = roundMoney((subtotal * loyaltyPercent) / 100);
+  const taxableAmount = roundMoney(Math.max(0, lineTaxableSum - loyaltyDiscount));
   let gstAmount = 0;
   if (lineTaxableSum > 0 && taxableAmount > 0) {
     gstAmount = roundMoney((lineTaxSum * taxableAmount) / lineTaxableSum);
-  } else if (lineTaxableSum === 0) {
-    gstAmount = 0;
   }
-
-  const totalAmount = roundMoney(taxableAmount + gstAmount);
 
   return {
     subtotal,
-    discount,
     taxable_amount: taxableAmount,
     gst_amount: gstAmount,
-    total_amount: totalAmount,
+    gross_before_extra_discount: roundMoney(taxableAmount + gstAmount),
   };
 };
+
+/**
+ * Manual counter discount (₹) applied after GST on gross total.
+ * bill.discount stores only this amount — not loyalty or credit notes.
+ */
+const applyExtraDiscountAfterGross = (aggregates, extraDiscountAmount = 0) => {
+  const gross = aggregates.gross_before_extra_discount;
+  const extra = roundMoney(Math.min(Math.max(0, Number(extraDiscountAmount) || 0), gross));
+  const total_amount = roundMoney(Math.max(0, gross - extra));
+
+  return {
+    subtotal: aggregates.subtotal,
+    discount: extra,
+    taxable_amount: aggregates.taxable_amount,
+    gst_amount: aggregates.gst_amount,
+    total_amount,
+  };
+};
+
+/**
+ * Compute bill totals: loyalty % first, then fixed ₹ extra discount after GST.
+ */
+const computeBillTotals = (lines, { loyaltyDiscountPercent = 0, extraDiscountAmount = 0 } = {}) => {
+  const base = sumLineAggregates(lines);
+  const afterLoyalty = applyLoyaltyDiscount(base, loyaltyDiscountPercent);
+  return applyExtraDiscountAfterGross(afterLoyalty, extraDiscountAmount);
+};
+
+const parseExtraDiscountAmount = (data) =>
+  roundMoney(Math.max(0, Number(data?.extra_discount ?? data?.discount) || 0));
+
+/** @deprecated Use computeBillTotals — kept for any legacy callers */
+const aggregateBillTotals = (lines, extraDiscountPercent = 0, loyaltyDiscountPercent = 0) =>
+  computeBillTotals(lines, {
+    loyaltyDiscountPercent,
+    extraDiscountAmount: 0,
+  });
 
 const calculateLoyaltyTier = (totalSpent) => {
   const spent = Number(totalSpent) || 0;
@@ -274,6 +318,8 @@ module.exports = {
   splitLineTaxDisplay,
   buildTaxSummaryFromLines,
   calculateLineAmounts,
+  computeBillTotals,
+  parseExtraDiscountAmount,
   aggregateBillTotals,
   splitGstComponents,
   isIntraStateSupply,

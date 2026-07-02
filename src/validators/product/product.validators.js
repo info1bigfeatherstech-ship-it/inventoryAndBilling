@@ -1,6 +1,22 @@
 const { body, param, query } = require('express-validator');
+const {
+  UNIT_OF_MEASURE_VALUES,
+  normalizeUnitOfMeasure,
+} = require('../../constants/unitOfMeasure.constants');
 
 const GST_TYPES = ['CGST_SGST', 'IGST', 'EXEMPT'];
+
+const unitOfMeasureRule = (field = 'unit_of_measure') =>
+  body(field)
+    .optional({ values: 'falsy' })
+    .customSanitizer((value) => normalizeUnitOfMeasure(value, { allowEmpty: true }))
+    .custom((value) => {
+      if (!value) return true;
+      if (!UNIT_OF_MEASURE_VALUES.includes(value)) {
+        throw new Error(`unit_of_measure must be one of: ${UNIT_OF_MEASURE_VALUES.join(', ')}`);
+      }
+      return true;
+    });
 
 const productIdParam = [
   param('productId').isString().trim().notEmpty().withMessage('productId is required'),
@@ -10,12 +26,21 @@ const variantIdParam = [
   param('variantId').isString().trim().notEmpty().withMessage('variantId is required'),
 ];
 
+const warrantyRule = (prefix = '') =>
+  body(`${prefix}warranty`)
+    .optional({ nullable: true })
+    .isString()
+    .trim()
+    .isLength({ max: 120 });
+
 const productPriceRules = (prefix = '') => [
   body(`${prefix}mrp`).optional().isFloat({ min: 0 }),
   body(`${prefix}special_price`).optional().isFloat({ min: 0 }),
+  body(`${prefix}wholesale_price`).optional().isFloat({ min: 0 }),
   body(`${prefix}purchase_price`).optional().isFloat({ min: 0 }),
   body(`${prefix}purchase_cost`).optional({ nullable: true }).isFloat({ min: 0 }),
   body(`${prefix}expenses`).optional().isFloat({ min: 0 }),
+  warrantyRule(prefix),
 ];
 
 const variantShippingRules = (prefix = '') => [
@@ -44,7 +69,7 @@ const variantBodyRules = (prefix = 'variants.*.') => [
   body(`${prefix}is_active`).optional().isBoolean().toBoolean(),
 ];
 
-const requirePriceWhenNoVariants = (field, label) =>
+const requireFieldWhenNoVariants = (field, label) =>
   body(field)
     .optional({ nullable: true })
     .custom((value, { req }) => {
@@ -53,6 +78,12 @@ const requirePriceWhenNoVariants = (field, label) =>
         throw new Error(`${label} is required when variants array is not provided`);
       }
       if (value !== undefined && value !== null && value !== '') {
+        if (field === 'warranty') {
+          if (String(value).trim().length > 120) {
+            throw new Error(`${label} must be at most 120 characters`);
+          }
+          return true;
+        }
         const n = Number(value);
         if (Number.isNaN(n) || n < 0) throw new Error(`${label} must be a non-negative number`);
       }
@@ -70,15 +101,16 @@ const createProductValidator = [
   body('hsn_code').optional({ values: 'falsy' }).isString().trim().isLength({ max: 20 }),
   body('gst_percent').optional({ values: 'falsy' }).isFloat({ min: 0, max: 100 }),
   body('gst_type').optional({ values: 'falsy' }).isIn(GST_TYPES),
-  body('unit_of_measure').optional({ values: 'falsy' }).isString().trim().isLength({ max: 40 }),
+  unitOfMeasureRule(),
   ...variantShippingRules(''),
   body('category_id').optional({ nullable: true, values: 'falsy' }).isString().trim().notEmpty(),
   body('sub_category_id').optional({ nullable: true, values: 'falsy' }).isString().trim().notEmpty(),
   body('remarks').optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
-  requirePriceWhenNoVariants('mrp', 'mrp'),
-  requirePriceWhenNoVariants('special_price', 'special_price'),
-  requirePriceWhenNoVariants('expenses', 'expenses'),
-  body('purchase_price').optional({ values: 'falsy' }).isFloat({ min: 0 }),
+  requireFieldWhenNoVariants('mrp', 'mrp'),
+  requireFieldWhenNoVariants('special_price', 'special_price'),
+  requireFieldWhenNoVariants('wholesale_price', 'wholesale_price'),
+  requireFieldWhenNoVariants('purchase_price', 'purchase_price'),
+  requireFieldWhenNoVariants('expenses', 'expenses'),
   body('purchase_cost').optional({ nullable: true }).isFloat({ min: 0 }),
   body('system_barcode').optional().isString().trim().notEmpty(),
   body('vendor_barcode').optional({ nullable: true }).isString().trim(),
@@ -88,10 +120,10 @@ const createProductValidator = [
     .custom((variants) => {
       if (!variants || !variants.length) return true;
       variants.forEach((v, i) => {
-        for (const key of ['mrp', 'special_price', 'expenses']) {
+        for (const key of ['mrp', 'special_price', 'wholesale_price', 'purchase_price', 'expenses']) {
           const hasPurchaseAlias = key === 'purchase_price' && v.purchase_cost != null && v.purchase_cost !== '';
           if ((v[key] === undefined || v[key] === null || v[key] === '') && !hasPurchaseAlias) {
-            throw new Error(`variants[${i}].${key} is required — each variant needs its own price`);
+            throw new Error(`variants[${i}].${key} is required — each variant needs its own value`);
           }
         }
         const hasWeight =
@@ -131,7 +163,7 @@ const updateProductValidator = [
   body('hsn_code').optional({ values: 'falsy' }).isString().trim().isLength({ max: 20 }),
   body('gst_percent').optional({ values: 'falsy' }).isFloat({ min: 0, max: 100 }),
   body('gst_type').optional({ values: 'falsy' }).isIn(GST_TYPES),
-  body('unit_of_measure').optional({ values: 'falsy' }).isString().trim().isLength({ max: 40 }),
+  unitOfMeasureRule(),
   body('category_id').optional({ nullable: true, values: 'falsy' }).isString().trim().notEmpty(),
   body('sub_category_id').optional({ nullable: true, values: 'falsy' }).isString().trim().notEmpty(),
   body('is_active').optional().isBoolean().toBoolean(),
@@ -146,9 +178,11 @@ const createVariantValidator = [
   body('vendor_barcode').optional({ nullable: true }).isString().trim(),
   body('mrp').isFloat({ min: 0 }),
   body('special_price').isFloat({ min: 0 }),
+  body('wholesale_price').isFloat({ min: 0 }),
   body('purchase_price').optional({ values: 'falsy' }).isFloat({ min: 0 }),
   body('purchase_cost').optional({ nullable: true }).isFloat({ min: 0 }),
   body('expenses').isFloat({ min: 0 }),
+  warrantyRule(''),
   body('weight').isFloat({ min: 0 }),
   body('length').isFloat({ min: 0 }),
   body('width').isFloat({ min: 0 }),

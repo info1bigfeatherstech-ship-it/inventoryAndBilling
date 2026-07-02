@@ -30,11 +30,11 @@ const {
 } = require('../../validators/shop/shopStaffCode.validators');
 
 const ADMIN_ONLY = ['SUPER_ADMIN'];
-const SHOP_READ_ROLES = ['SUPER_ADMIN', 'SHOP_OWNER', 'SHOP_STOCK_LISTER', 'BILLING_STAFF', 'WH_MANAGER', 'WH_STOCK_LISTER'];
-const BANK_READ_ROLES = ['SUPER_ADMIN', 'SHOP_OWNER', 'BILLING_STAFF'];
+const SHOP_READ_ROLES = ['SUPER_ADMIN', 'SHOP_OWNER', 'SHOP_MANAGER', 'BILLING_STAFF', 'WH_MANAGER', 'WH_STOCK_LISTER'];
+const BANK_READ_ROLES = ['SUPER_ADMIN', 'SHOP_OWNER', 'BILLING_STAFF', 'SHOP_MANAGER'];
 const BANK_WRITE_ROLES = ['SUPER_ADMIN', 'SHOP_OWNER'];
-const STAFF_READ_ROLES = ['SUPER_ADMIN', 'SHOP_OWNER', 'BILLING_STAFF'];
-const STAFF_WRITE_ROLES = ['SUPER_ADMIN', 'SHOP_OWNER'];
+const STAFF_READ_ROLES = ['SUPER_ADMIN', 'SHOP_OWNER', 'BILLING_STAFF', 'SHOP_MANAGER'];
+const STAFF_WRITE_ROLES = ['SUPER_ADMIN', 'SHOP_OWNER', 'SHOP_MANAGER'];
 
 router.use(requireAuth);
 
@@ -129,7 +129,7 @@ router.delete(
 router.get('/', authorizeRoles(...SHOP_READ_ROLES), listShopsValidator, validateRequest, ShopController.list);
 router.get(
   '/:shopId/warehouse-stock-catalog',
-  authorizeRoles('SUPER_ADMIN', 'SHOP_OWNER'),
+  authorizeRoles('SUPER_ADMIN', 'SHOP_OWNER', 'SHOP_MANAGER'),
   warehouseStockCatalogValidator,
   validateRequest,
   ShopWarehouseCatalogController.getCatalog

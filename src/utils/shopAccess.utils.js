@@ -1,12 +1,13 @@
 const { AppError } = require('../errors/AppError');
+const { toRoleSet, SHOP_STAFF_ROLES } = require('../constants/userRole.constants');
 
-const SHOP_STAFF_ROLES = new Set(['SHOP_OWNER', 'SHOP_STOCK_LISTER', 'BILLING_STAFF']);
+const SHOP_STAFF_ROLE_SET = toRoleSet(SHOP_STAFF_ROLES);
 
 const assertShopReadAccess = (shopId, user) => {
   if (!shopId) return;
   if (user?.role === 'SUPER_ADMIN') return;
 
-  if (SHOP_STAFF_ROLES.has(user?.role)) {
+  if (SHOP_STAFF_ROLE_SET.has(user?.role)) {
     if (user.shopId && user.shopId === shopId) return;
     throw new AppError('You can only access your assigned shop', 403, 'SHOP_FORBIDDEN');
   }
@@ -24,7 +25,7 @@ const resolveShopIdForUser = (user, requestedShopId) => {
     return requestedShopId;
   }
 
-  if (SHOP_STAFF_ROLES.has(user?.role)) {
+  if (SHOP_STAFF_ROLE_SET.has(user?.role)) {
     if (!user.shopId) {
       throw new AppError('User is not assigned to a shop', 403, 'SHOP_NOT_ASSIGNED');
     }
@@ -41,7 +42,7 @@ const resolveShopIdForUser = (user, requestedShopId) => {
 const applyShopListScope = (where, user) => {
   if (user?.role === 'SUPER_ADMIN') return where;
 
-  if (SHOP_STAFF_ROLES.has(user?.role) && user.shopId) {
+  if (SHOP_STAFF_ROLE_SET.has(user?.role) && user.shopId) {
     where.shop_id = user.shopId;
   }
 
@@ -49,7 +50,7 @@ const applyShopListScope = (where, user) => {
 };
 
 module.exports = {
-  SHOP_STAFF_ROLES,
+  SHOP_STAFF_ROLES: SHOP_STAFF_ROLE_SET,
   assertShopReadAccess,
   resolveShopIdForUser,
   applyShopListScope,

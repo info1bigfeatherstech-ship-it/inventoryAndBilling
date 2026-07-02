@@ -189,7 +189,7 @@ const BulkTransferService = {
     try {
       const requestType = data.request_type || 'WH_TO_SHOP';
       const canCreateShop =
-        user.role === 'SUPER_ADMIN' || user.role === 'SHOP_OWNER';
+        user.role === 'SUPER_ADMIN' || user.role === 'SHOP_OWNER' || user.role === 'SHOP_MANAGER';
       const canCreateWh =
         user.role === 'SUPER_ADMIN' || isWarehouseStaff(user);
 
@@ -629,13 +629,15 @@ const BulkTransferService = {
           throw new AppError('Only destination warehouse staff can receive', 403, 'WAREHOUSE_FORBIDDEN');
         }
       } else {
-        if (user.role !== 'SUPER_ADMIN' && user.role !== 'SHOP_OWNER') {
-          throw new AppError('Only shop owners can receive WH→Shop bulk transfers', 403, 'FORBIDDEN');
+        if (!['SUPER_ADMIN', 'SHOP_OWNER', 'SHOP_MANAGER'].includes(user.role)) {
+          throw new AppError('Only shop owners or managers can receive WH→Shop bulk transfers', 403, 'FORBIDDEN');
         }
-        const shopId = await resolveOwnerShopId(user);
-        const allowedShop = shopId || user.shopId;
+        let allowedShop = user.shopId;
+        if (user.role === 'SHOP_OWNER') {
+          allowedShop = (await resolveOwnerShopId(user)) || user.shopId;
+        }
         if (user.role !== 'SUPER_ADMIN' && allowedShop !== bulk.to_shop_id) {
-          throw new AppError('Only destination shop owner can receive', 403, 'SHOP_FORBIDDEN');
+          throw new AppError('Only destination shop owner or manager can receive', 403, 'SHOP_FORBIDDEN');
         }
       }
 
@@ -754,8 +756,9 @@ const BulkTransferService = {
         bulk.from_warehouse_id === user.warehouseId || bulk.to_warehouse_id === user.warehouseId;
       if (!involved) throw new AppError('Insufficient permissions to cancel', 403, 'FORBIDDEN');
     }
-    if (user.role === 'SHOP_OWNER') {
-      const shopId = await resolveOwnerShopId(user);
+    if (['SHOP_OWNER', 'SHOP_MANAGER'].includes(user.role)) {
+      const shopId =
+        user.role === 'SHOP_OWNER' ? (await resolveOwnerShopId(user)) || user.shopId : user.shopId;
       if (shopId !== bulk.to_shop_id) throw new AppError('Insufficient permissions', 403, 'FORBIDDEN');
     }
 

@@ -564,7 +564,11 @@ const TransferRequestService = {
       }
 
       const shopId =
-        user.role === 'SHOP_OWNER' ? await resolveOwnerShopId(user) : user.shopId;
+        user.role === 'SHOP_OWNER'
+          ? await resolveOwnerShopId(user)
+          : user.role === 'SHOP_MANAGER'
+            ? user.shopId
+            : user.shopId;
 
       if (shopId) {
         orConditions.push({ from_shop_id: shopId }, { to_shop_id: shopId });

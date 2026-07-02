@@ -12,7 +12,7 @@ const {
   dateRangeQuery,
 } = require('../../validators/stock/stockLedger.validators');
 
-const READ_ROLES = ['SUPER_ADMIN', 'WH_MANAGER', 'WH_STOCK_LISTER', 'SHOP_OWNER', 'SHOP_STOCK_LISTER', 'BILLING_STAFF'];
+const READ_ROLES = ['SUPER_ADMIN', 'WH_MANAGER', 'WH_STOCK_LISTER', 'SHOP_OWNER', 'SHOP_MANAGER', 'BILLING_STAFF'];
 
 router.use(requireAuth);
 

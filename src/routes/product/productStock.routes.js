@@ -15,7 +15,7 @@ const {
   bulkStockCsvValidator,
 } = require('../../validators/product/productStock.validators');
 
-const READ_ROLES = ['SUPER_ADMIN', 'WH_MANAGER', 'WH_STOCK_LISTER', 'SHOP_OWNER', 'SHOP_STOCK_LISTER', 'BILLING_STAFF'];
+const READ_ROLES = ['SUPER_ADMIN', 'WH_MANAGER', 'WH_STOCK_LISTER', 'SHOP_OWNER', 'SHOP_MANAGER', 'BILLING_STAFF'];
 const WRITE_ROLES = ['SUPER_ADMIN', 'WH_MANAGER', 'WH_STOCK_LISTER'];
 
 const csvUpload = multer({

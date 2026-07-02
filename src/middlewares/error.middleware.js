@@ -5,10 +5,31 @@ const { Prisma } = require('@prisma/client');
 const { AppError } = require('../errors/AppError');
 const { normalizeExternalError } = require('../utils/externalError.utils');
 
-// 404 handler
-const notFound = (req, res, next) => {
-  const error = new AppError(`Route not found: ${req.method} ${req.url}`, 404);
-  next(error);
+/** Strip Prisma CLI ANSI color codes from error messages shown to clients. */
+const stripAnsi = (text) => String(text || '').replace(/\x1B\[[0-9;]*m/g, '');
+
+const SCHEMA_OUT_OF_DATE_MESSAGE =
+  'This feature is not fully set up yet. Please contact your administrator.';
+
+const GENERIC_REQUEST_FAILED = 'Unable to complete the request. Please try again.';
+
+const isSchemaDriftMessage = (raw) =>
+  /column `.+` does not exist/i.test(raw) ||
+  /table `.+` does not exist/i.test(raw) ||
+  /does not exist in the current database/i.test(raw);
+
+const isTechnicalDbMessage = (raw) =>
+  isSchemaDriftMessage(raw) ||
+  /Invalid `prisma\./i.test(raw) ||
+  /prisma\.\w+\.(create|update|delete|findMany|findFirst|findUnique)/i.test(raw) ||
+  /invocation in\s+/i.test(raw);
+
+const toClientSafeMessage = (message, fallback = GENERIC_REQUEST_FAILED) => {
+  const raw = stripAnsi(message);
+  if (!raw || isTechnicalDbMessage(raw)) {
+    return fallback;
+  }
+  return raw.length > 240 ? `${raw.slice(0, 237)}…` : raw;
 };
 
 // Prisma error handler
@@ -16,23 +37,49 @@ const handlePrismaError = (error) => {
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
     switch (error.code) {
       case 'P2002':
-        return new AppError(`Duplicate entry: ${error.meta?.target?.join(', ')} already exists`, 409);
+        return new AppError('This record already exists. Please use a different value.', 409, 'DUPLICATE_ENTRY');
       case 'P2025':
-        return new AppError('Record not found', 404);
+        return new AppError('Record not found', 404, 'NOT_FOUND');
       case 'P2003':
-        return new AppError('Foreign key constraint failed', 400);
+        return new AppError('Related record is missing or invalid.', 400, 'INVALID_REFERENCE');
       case 'P2014':
-        return new AppError('Invalid ID format', 400);
+        return new AppError('Invalid ID format', 400, 'INVALID_ID');
+      case 'P2021':
+      case 'P2022':
+        return new AppError(SCHEMA_OUT_OF_DATE_MESSAGE, 500, 'DB_SCHEMA_OUT_OF_DATE');
       default:
-        return new AppError(`Database error: ${error.message}`, 500);
+        return new AppError(GENERIC_REQUEST_FAILED, 500, 'DATABASE_ERROR');
     }
+  }
+
+  if (error instanceof Prisma.PrismaClientValidationError) {
+    return new AppError(
+      'Some data was invalid. Please check the form and try again.',
+      400,
+      'DATABASE_VALIDATION_ERROR'
+    );
   }
   
   if (error instanceof Prisma.PrismaClientInitializationError) {
-    return new AppError('Database connection failed', 503);
+    return new AppError('Database connection failed', 503, 'DB_UNAVAILABLE');
+  }
+
+  const raw = stripAnsi(error?.message || '');
+  if (isSchemaDriftMessage(raw)) {
+    return new AppError(SCHEMA_OUT_OF_DATE_MESSAGE, 500, 'DB_SCHEMA_OUT_OF_DATE');
+  }
+
+  if (isTechnicalDbMessage(raw)) {
+    return new AppError(GENERIC_REQUEST_FAILED, 500, 'DATABASE_ERROR');
   }
   
   return null;
+};
+
+// 404 handler
+const notFound = (req, res, next) => {
+  const error = new AppError(`Route not found: ${req.method} ${req.url}`, 404);
+  next(error);
 };
 
 // Global error handler
@@ -66,7 +113,8 @@ const errorHandler = (err, req, res, next) => {
 
   // Unknown errors should still be treated as operational response
   if (!(error instanceof AppError)) {
-    error = new AppError(error.message || 'Internal server error', error.statusCode || 500, error.code || 'INTERNAL_ERROR');
+    const safeMessage = toClientSafeMessage(error.message, 'Internal server error');
+    error = new AppError(safeMessage, error.statusCode || 500, error.code || 'INTERNAL_ERROR');
     error.isOperational = false;
     if (originalStack) {
       error.stack = originalStack;
@@ -97,7 +145,7 @@ const errorHandler = (err, req, res, next) => {
   const message =
     config.isProduction && isServerFault
       ? 'Internal server error'
-      : error.message;
+      : toClientSafeMessage(error.message, isServerFault ? 'Internal server error' : GENERIC_REQUEST_FAILED);
 
   res.status(statusCode).json({
     success: false,

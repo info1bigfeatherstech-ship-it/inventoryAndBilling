@@ -11,7 +11,7 @@ const {
   bankTransactionsValidator,
 } = require('../../validators/cashbank/cashbank.validators');
 
-const SHOP_CASH_ROLES = ['SUPER_ADMIN', 'SHOP_OWNER', 'BILLING_STAFF', 'SHOP_STOCK_LISTER'];
+const SHOP_CASH_ROLES = ['SUPER_ADMIN', 'SHOP_OWNER', 'BILLING_STAFF'];
 
 router.use(requireAuth);
 

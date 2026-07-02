@@ -1,8 +1,8 @@
 const { body, param, query } = require('express-validator');
+const { SHOP_CODE_PATTERN, SHOP_CODE_FORMAT_HINT } = require('../../constants/shop.constants');
 
 const shopIdParam = [param('shopId').isString().trim().notEmpty()];
 
-const SHOP_CODE_RE = /^[A-Z0-9_]{3,20}$/;
 const GSTIN_BODY_RE = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/i;
 
 const createShopValidator = [
@@ -11,8 +11,8 @@ const createShopValidator = [
     .trim()
     .custom((v) => {
       const code = String(v).trim().toUpperCase();
-      if (!SHOP_CODE_RE.test(code)) {
-        throw new Error('shop_code must be 3-20 uppercase alphanumeric characters or underscore');
+      if (!SHOP_CODE_PATTERN.test(code)) {
+        throw new Error(`shop_code must be ${SHOP_CODE_FORMAT_HINT}`);
       }
       return true;
     }),

@@ -96,7 +96,7 @@
 
 //     // For shop ledger, apply role-based check
 //   if (user.role !== 'SUPER_ADMIN') {
-//     if (['SHOP_OWNER', 'SHOP_STOCK_LISTER', 'BILLING_STAFF'].includes(user.role)) {
+//     if (['SHOP_OWNER', 'SHOP_MANAGER', 'BILLING_STAFF'].includes(user.role)) {
 //       if (user.shopId !== shopId) {
 //         throw new AppError('Access denied. You can only view your own shop ledger.', 403, 'FORBIDDEN');
 //       }
@@ -269,7 +269,7 @@ const StockLedgerService = {
   async getShopLedger(shopId, dateRange = {}, user) {
     // Role-based check for shop ledger
     if (user.role !== 'SUPER_ADMIN') {
-      if (['SHOP_OWNER', 'SHOP_STOCK_LISTER', 'BILLING_STAFF'].includes(user.role)) {
+      if (['SHOP_OWNER', 'SHOP_MANAGER', 'BILLING_STAFF'].includes(user.role)) {
         if (user.shopId !== shopId) {
           throw new AppError('Access denied. You can only view your own shop ledger.', 403, 'FORBIDDEN');
         }

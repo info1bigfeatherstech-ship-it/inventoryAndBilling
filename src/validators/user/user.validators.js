@@ -6,11 +6,11 @@ const USER_ROLES = [
   'WH_STOCK_LISTER',
   'SHOP_OWNER',
   'BILLING_STAFF',
-  'SHOP_STOCK_LISTER',
+  'SHOP_MANAGER',
 ];
 
 const WAREHOUSE_ROLES = ['WH_MANAGER', 'WH_STOCK_LISTER'];
-const SHOP_ROLES = ['SHOP_OWNER', 'BILLING_STAFF', 'SHOP_STOCK_LISTER'];
+const SHOP_ROLES = ['SHOP_OWNER', 'BILLING_STAFF', 'SHOP_MANAGER'];
 
 const normalizePhone = (value) => String(value || '').replace(/[^\d]/g, '');
 

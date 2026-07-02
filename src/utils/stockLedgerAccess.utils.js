@@ -6,7 +6,7 @@ const applyLedgerScope = (where, user) => {
   if (user?.role === 'SUPER_ADMIN') return where;
   
   // Shop roles: only see their shop's ledger
-  if (['SHOP_OWNER', 'SHOP_STOCK_LISTER', 'BILLING_STAFF'].includes(user?.role)) {
+  if (['SHOP_OWNER', 'SHOP_MANAGER', 'BILLING_STAFF'].includes(user?.role)) {
     if (!user.shopId) {
       throw new AppError('User not assigned to a shop', 403, 'SHOP_NOT_ASSIGNED');
     }
@@ -52,7 +52,7 @@ const assertLedgerReadAccess = (ledgerEntry, user) => {
   if (user?.role === 'SUPER_ADMIN') return;
   
   // Shop roles
-  if (['SHOP_OWNER', 'SHOP_STOCK_LISTER', 'BILLING_STAFF'].includes(user?.role)) {
+  if (['SHOP_OWNER', 'SHOP_MANAGER', 'BILLING_STAFF'].includes(user?.role)) {
     if (!user.shopId) {
       throw new AppError('User not assigned to a shop', 403, 'SHOP_NOT_ASSIGNED');
     }

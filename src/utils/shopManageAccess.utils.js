@@ -1,10 +1,13 @@
 const { AppError } = require('../middlewares/error.middleware');
 const { assertShopReadAccess, resolveShopIdForUser } = require('./shopAccess.utils');
 const { resolveOwnerShopId } = require('./transferRequest.utils');
+const { UserRole } = require('../constants/userRole.constants');
 
-const BANK_READ_ROLES = new Set(['SUPER_ADMIN', 'SHOP_OWNER', 'BILLING_STAFF']);
+const BANK_READ_ROLES = new Set(['SUPER_ADMIN', 'SHOP_OWNER', 'BILLING_STAFF', UserRole.SHOP_MANAGER]);
 const BANK_WRITE_ROLES = new Set(['SUPER_ADMIN', 'SHOP_OWNER']);
+const STAFF_WRITE_ROLES = new Set(['SUPER_ADMIN', 'SHOP_OWNER', UserRole.SHOP_MANAGER]);
 
+const isShopManager = (user) => user?.role === UserRole.SHOP_MANAGER;
 const resolveManagedShopId = async (user, requestedShopId) => {
   if (user?.role === 'SHOP_OWNER') {
     const ownedShopId = await resolveOwnerShopId(user);
@@ -36,10 +39,22 @@ const assertShopBankWriteAccess = async (shopId, user) => {
   return resolvedShopId;
 };
 
+const assertShopStaffWriteAccess = async (shopId, user) => {
+  if (!STAFF_WRITE_ROLES.has(user?.role)) {
+    throw new AppError('Only shop owners and managers can manage staff codes', 403, 'FORBIDDEN');
+  }
+  const resolvedShopId = await resolveManagedShopId(user, shopId);
+  assertShopReadAccess(resolvedShopId, user);
+  return resolvedShopId;
+};
+
 module.exports = {
   BANK_READ_ROLES,
   BANK_WRITE_ROLES,
+  STAFF_WRITE_ROLES,
+  isShopManager,
   resolveManagedShopId,
   assertShopBankReadAccess,
   assertShopBankWriteAccess,
+  assertShopStaffWriteAccess,
 };

@@ -7,7 +7,7 @@ const {
 } = require('../../utils/shopStaffCode.utils');
 const {
   assertShopBankReadAccess,
-  assertShopBankWriteAccess,
+  assertShopStaffWriteAccess,
 } = require('../../utils/shopManageAccess.utils');
 
 const STAFF_CODE_SELECT = {
@@ -84,7 +84,7 @@ const ShopStaffCodeService = {
   },
 
   async create(shopId, data, user) {
-    const resolvedShopId = await assertShopBankWriteAccess(shopId, user);
+    const resolvedShopId = await assertShopStaffWriteAccess(shopId, user);
     const payload = sanitizeStaffPayload(data);
 
     const shop = await prisma.shop.findUnique({
@@ -115,7 +115,7 @@ const ShopStaffCodeService = {
   },
 
   async update(shopId, staffCodeId, data, user) {
-    const resolvedShopId = await assertShopBankWriteAccess(shopId, user);
+    const resolvedShopId = await assertShopStaffWriteAccess(shopId, user);
 
     const existing = await prisma.shopStaffCode.findFirst({
       where: { staff_code_id: staffCodeId, shop_id: resolvedShopId },
@@ -142,7 +142,7 @@ const ShopStaffCodeService = {
   },
 
   async remove(shopId, staffCodeId, user) {
-    const resolvedShopId = await assertShopBankWriteAccess(shopId, user);
+    const resolvedShopId = await assertShopStaffWriteAccess(shopId, user);
 
     const existing = await prisma.shopStaffCode.findFirst({
       where: { staff_code_id: staffCodeId, shop_id: resolvedShopId },

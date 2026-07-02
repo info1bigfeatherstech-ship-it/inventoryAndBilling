@@ -40,7 +40,11 @@ const SHOP_SELECT = {
   updated_at: true,
 };
 
-const normalizeShopCode = (value) => String(value || '').trim().toUpperCase();
+const {
+  normalizeShopCode,
+  assertValidShopCode,
+  SHOP_CODE_FORMAT_HINT,
+} = require('../../constants/shop.constants');
 const normalizeShopType = (value) => {
   const shopType = String(value || 'OWNER').trim().toUpperCase();
   if (!['OWNER', 'FRANCHISE'].includes(shopType)) {
@@ -188,6 +192,13 @@ const ShopService = {
   async createShop(data) {
     const shopCode = normalizeShopCode(data.shop_code);
     if (!shopCode) throw new AppError('shop_code is required', 400, 'SHOP_CODE_REQUIRED');
+    if (!assertValidShopCode(shopCode)) {
+      throw new AppError(
+        `shop_code must be ${SHOP_CODE_FORMAT_HINT}`,
+        400,
+        'INVALID_SHOP_CODE'
+      );
+    }
   
     const existing = await prisma.shop.findUnique({ where: { shop_code: shopCode } });
     if (existing) throw new AppError(`Shop code "${shopCode}" already exists`, 409, 'SHOP_CODE_EXISTS');

@@ -41,7 +41,7 @@ enum UserRole {
   WH_STOCK_LISTER
   SHOP_OWNER
   BILLING_STAFF
-  SHOP_STOCK_LISTER
+  SHOP_MANAGER
 }
 
 /// Channels used for analytics / bill attribution (BizPro-style).
@@ -436,10 +436,13 @@ model Product {
   sub_category_id String?
 
   /// Default prices shared by variants; each variant may override its own prices.
-  mrp            Float
-  special_price  Float
-  purchase_price Float
-  expenses       Float @default(0)
+  mrp             Float
+  special_price   Float
+  wholesale_price Float
+  purchase_price  Float
+  expenses        Float @default(0)
+  /// e.g. "1 Year", "6 Months", "No Warranty"
+  warranty        String?
 
   is_active Boolean @default(true)
   remarks   String?
@@ -481,8 +484,10 @@ model ProductVariant {
   
   mrp             Float
   special_price   Float
+  wholesale_price Float
   purchase_price  Float
   expenses        Float @default(0)
+  warranty        String?
   purchase_code   Int
 
   weight         Float?

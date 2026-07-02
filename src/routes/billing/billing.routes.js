@@ -17,7 +17,7 @@ const {
 
 const { createRateLimiter, RL_KEY_PREFIX } = require('../../middlewares/rateLimiter.middleware');
 
-const READ_ROLES = ['SUPER_ADMIN', 'SHOP_OWNER', 'SHOP_STOCK_LISTER', 'BILLING_STAFF', 'WH_MANAGER', 'WH_STOCK_LISTER'];
+const READ_ROLES = ['SUPER_ADMIN', 'SHOP_OWNER', 'SHOP_MANAGER', 'BILLING_STAFF', 'WH_MANAGER', 'WH_STOCK_LISTER'];
 const WRITE_ROLES = ['SUPER_ADMIN', 'SHOP_OWNER', 'BILLING_STAFF'];
 
 const idem24h = idempotency({ ttlSeconds: 86400 });

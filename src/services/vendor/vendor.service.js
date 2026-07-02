@@ -144,6 +144,15 @@ const VendorService = {
     return { total, page, limit, vendors };
   },
 
+  async getActiveVendorNames() {
+    const vendors = await prisma.vendor.findMany({
+      where: { is_active: true },
+      select: { company_name: true },
+      orderBy: { company_name: 'asc' },
+    });
+    return vendors.map((vendor) => vendor.company_name);
+  },
+
   async getVendorById(vendorId) {
     const vendor = await prisma.vendor.findUnique({
       where: { vendor_id: vendorId },

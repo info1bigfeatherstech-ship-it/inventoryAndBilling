@@ -9,7 +9,7 @@ const { monthlyOverviewValidator } = require('../../validators/dashboard/dashboa
 const READ_ROLES = [
   'SUPER_ADMIN',
   'SHOP_OWNER',
-  'SHOP_STOCK_LISTER',
+  'SHOP_MANAGER',
   'WH_MANAGER',
   'WH_STOCK_LISTER',
   'ACCOUNTANT',

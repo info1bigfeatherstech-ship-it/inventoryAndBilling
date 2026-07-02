@@ -5,6 +5,8 @@ const { assertShopReadAccess, resolveShopIdForUser } = require('../../utils/shop
 const { createStockLedgerEntry } = require('../stock/stockLedger.helpers');
 const logger = require('../../utils/logger.utils');
 
+const { formatShopStocksForUser } = require('../../utils/productCatalogFields.utils');
+
 const SHOP_STOCK_SELECT = {
   shop_stock_id: true,
   shop_id: true,
@@ -23,8 +25,10 @@ const SHOP_STOCK_SELECT = {
       system_barcode: true,
       mrp: true,
       special_price: true,
+      wholesale_price: true,
       purchase_price: true,
       expenses: true,
+      warranty: true,
       purchase_code: true,
       images: {
         orderBy: { sort_order: 'asc' },
@@ -107,7 +111,8 @@ const ShopStockService = {
       };
     }
 
-    return stock;
+    const formatted = await formatShopStocksForUser([stock], user);
+    return formatted[0];
   },
 
   async listShopStocks(shopId, query = {}, user) {
@@ -140,11 +145,11 @@ const ShopStockService = {
       stocks = stocks.filter((s) => s.quantity_available <= s.low_stock_threshold);
       const total = stocks.length;
       stocks = stocks.slice(skip, skip + take);
-      return { total, page, limit, stocks };
+      return { total, page, limit, stocks: await formatShopStocksForUser(stocks, user) };
     }
 
     const total = await prisma.shopStock.count({ where });
-    return { total, page, limit, stocks };
+    return { total, page, limit, stocks: await formatShopStocksForUser(stocks, user) };
   },
 
   async updateShopStock(shopId, variantId, data, user) {
@@ -333,7 +338,8 @@ const ShopStockService = {
     });
 
     const alerts = stocks.filter((s) => s.quantity_available <= s.low_stock_threshold);
-    return { shop_id: resolvedShopId, count: alerts.length, alerts };
+    const formatted = await formatShopStocksForUser(alerts, user);
+    return { shop_id: resolvedShopId, count: formatted.length, alerts: formatted };
   },
 };
 

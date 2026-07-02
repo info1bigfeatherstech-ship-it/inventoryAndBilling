@@ -33,7 +33,7 @@ const READ_ROLES = [
   'WH_MANAGER',
   'WH_STOCK_LISTER',
   'SHOP_OWNER',
-  'SHOP_STOCK_LISTER',
+  'SHOP_MANAGER',
   'BILLING_STAFF',
 ];
 
@@ -96,6 +96,11 @@ router.post(
   bulkCsvValidator,
   validateRequest,
   ProductController.bulkCreateCsv
+);
+router.get(
+  '/bulk/template',
+  authorizeRoles(...READ_ROLES),
+  ProductController.bulkDownloadTemplate
 );
 router.patch('/bulk', authorizeRoles(...WRITE_ROLES), bulkUpdateValidator, validateRequest, ProductController.bulkUpdate);
 router.delete('/bulk', authorizeRoles(...WRITE_ROLES), bulkDeleteValidator, validateRequest, ProductController.bulkDelete);

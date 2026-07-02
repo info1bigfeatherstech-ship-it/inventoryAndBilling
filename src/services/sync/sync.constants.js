@@ -6,7 +6,16 @@ const OFFLINE_SYNC_ROLES = Object.freeze([
   'SUPER_ADMIN',
   'SHOP_OWNER',
   'BILLING_STAFF',
-  'SHOP_STOCK_LISTER',
+  'SHOP_MANAGER',
+]);
+
+/** Shop managers may sync operational data only — not billing or customer mutations. */
+const SHOP_MANAGER_BLOCKED_PUSH_ENTITIES = Object.freeze([
+  'customer',
+  'customer_update',
+  'bill',
+  'bill_payment',
+  'credit_note',
 ]);
 
 const SYNC_ENTITY_TYPES = Object.freeze([
@@ -44,4 +53,5 @@ module.exports = {
   SYNC_MAX_PAGE_LIMIT,
   SYNC_IDEMPOTENCY_TTL_SECONDS,
   SYNC_PUSH_RESULT_STATUS,
+  SHOP_MANAGER_BLOCKED_PUSH_ENTITIES,
 };

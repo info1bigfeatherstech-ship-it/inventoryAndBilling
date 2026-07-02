@@ -15,7 +15,8 @@ const createBillValidator = [
   body('customer_gstin').optional({ nullable: true }).isString().trim().isLength({ max: 15 }),
   body('bill_type').optional().isIn(BILL_TYPES),
   body('place_of_supply_state_code').optional({ nullable: true }).matches(/^\d{2}$/),
-  body('discount').optional().isFloat({ min: 0, max: 100 }),
+  body('discount').optional().isFloat({ min: 0 }),
+  body('extra_discount').optional().isFloat({ min: 0 }),
   body('items').isArray({ min: 1 }),
   // Inventory items (GST / NON_GST / ESTIMATE)
   body('items.*.variant_id').optional({ nullable: true }).isString().trim(),

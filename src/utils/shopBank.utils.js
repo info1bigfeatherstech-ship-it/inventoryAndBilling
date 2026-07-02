@@ -62,6 +62,19 @@ const formatBankAccountResponse = (row, { includeUpi = true } = {}) => ({
     : undefined,
 });
 
+/** Non-credential bank summary for shop managers (read-only). */
+const formatBankAccountPublicSummary = (row) => ({
+  bank_account_id: row.bank_account_id,
+  bank_name: row.bank_name,
+  branch_name: row.branch_name,
+  account_holder_name: row.account_holder_name,
+  is_default: row.is_default,
+  is_active: row.is_active,
+  remarks: row.remarks,
+  created_at: row.created_at,
+  updated_at: row.updated_at,
+});
+
 const sortAccountsDefaultFirst = (accounts) =>
   [...accounts].sort((a, b) => {
     if (a.is_default !== b.is_default) return a.is_default ? -1 : 1;
@@ -75,5 +88,6 @@ module.exports = {
   assertValidUpiId,
   assertValidGstNumber,
   formatBankAccountResponse,
+  formatBankAccountPublicSummary,
   sortAccountsDefaultFirst,
 };

@@ -4,7 +4,7 @@ const { applyBillListScope } = require('../../utils/billAccess.utils');
 const { applyWarehouseFinanceScope } = require('../../utils/warehouseFinanceAccess.utils');
 const { applyShopFinanceScope } = require('../../utils/shopFinanceAccess.utils');
 
-const SHOP_SCOPED_ROLES = new Set(['SHOP_OWNER', 'SHOP_STOCK_LISTER', 'BILLING_STAFF']);
+const SHOP_SCOPED_ROLES = new Set(['SHOP_OWNER', 'SHOP_MANAGER', 'BILLING_STAFF']);
 const PURCHASE_EXPENSE_ROLES = new Set(['SUPER_ADMIN', 'WH_MANAGER', 'WH_STOCK_LISTER', 'ACCOUNTANT']);
 
 /**

@@ -25,7 +25,8 @@ const {
   isIntraStateSupply,
   buildTaxSummaryFromLines,
   calculateLineAmounts,
-  aggregateBillTotals,
+  computeBillTotals,
+  parseExtraDiscountAmount,
   splitGstComponents,
   derivePaymentStatus,
   resolvePlaceOfSupplyStateCode,
@@ -288,7 +289,7 @@ const BillingService = {
       const loyaltyDiscountPercent = customer
         ? await CustomerService.getCustomerDiscountPercent(customer.customer_id)
         : 0;
-      const extraDiscountPercent = Math.min(100, Math.max(0, Number(data.discount) || 0));
+      const extraDiscountAmount = parseExtraDiscountAmount(data);
 
       const shopStateCode = normalizeStateCode(shop.state_code);
       if (
@@ -352,7 +353,10 @@ const BillingService = {
         };
       });
 
-      const totals = aggregateBillTotals(computedLines, extraDiscountPercent, loyaltyDiscountPercent);
+      const totals = computeBillTotals(computedLines, {
+        loyaltyDiscountPercent,
+        extraDiscountAmount,
+      });
       const creditNoteIds = Array.isArray(data.credit_note_ids)
         ? [...new Set(data.credit_note_ids)]
         : [];
@@ -520,7 +524,7 @@ const BillingService = {
                   paid_amount: paidAmount,
                   payment_status: paymentStatus,
                   payment_method: paidAmount > 0 ? data.payment_method || null : null,
-                  discount: roundMoney(totals.discount + creditApplied),
+                  discount: totals.discount,
                 },
                 select: BILL_SELECT,
               })
@@ -624,7 +628,7 @@ const BillingService = {
       if (Number.isNaN(price) || price < 0) throw new AppError('unit_price must be >= 0', 400, 'INVALID_UNIT_PRICE');
     }
 
-    const extraDiscountPercent = Math.min(100, Math.max(0, Number(data.discount) || 0));
+    const extraDiscountAmount = parseExtraDiscountAmount(data);
     const paymentAmount = data.payment_amount != null ? roundMoney(data.payment_amount) : 0;
 
     if (paymentAmount > 0 && !data.payment_method) {
@@ -669,11 +673,11 @@ const BillingService = {
       };
     });
 
-    // Simple total (no loyalty discount, no GST)
+    // Simple total (no loyalty discount, no GST); extra discount after gross
     const subtotal = roundMoney(computedLines.reduce((s, l) => s + l.line_subtotal, 0));
-    const discountAmount = roundMoney(subtotal * extraDiscountPercent / 100);
-    const taxableAmount = roundMoney(subtotal - discountAmount);
-    const totalAmount = taxableAmount;
+    const extraDiscount = roundMoney(Math.min(extraDiscountAmount, subtotal));
+    const taxableAmount = subtotal;
+    const totalAmount = roundMoney(Math.max(0, subtotal - extraDiscount));
 
     const creditNoteIds = Array.isArray(data.credit_note_ids) ? [...new Set(data.credit_note_ids)] : [];
     const paidAmount = paymentAmount > 0 ? Math.min(paymentAmount, totalAmount) : 0;
@@ -693,7 +697,7 @@ const BillingService = {
           customer_name: customer?.name ?? data.customer_name?.trim() ?? null,
           customer_gstin: null,
           subtotal,
-          discount: discountAmount,
+          discount: extraDiscount,
           taxable_amount: taxableAmount,
           gst_amount: 0,
           total_amount: totalAmount,
@@ -764,7 +768,7 @@ const BillingService = {
                 paid_amount: finalPaidAmount,
                 payment_status: finalPaymentStatus,
                 payment_method: finalPaidAmount > 0 ? data.payment_method || null : null,
-                discount: roundMoney(discountAmount + creditApplied),
+                discount: extraDiscount,
               },
               select: BILL_SELECT,
             })

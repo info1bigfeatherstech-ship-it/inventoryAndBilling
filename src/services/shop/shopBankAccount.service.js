@@ -4,12 +4,17 @@ const {
   assertValidIfsc,
   assertValidUpiId,
   formatBankAccountResponse,
+  formatBankAccountPublicSummary,
   sortAccountsDefaultFirst,
 } = require('../../utils/shopBank.utils');
 const {
   assertShopBankReadAccess,
   assertShopBankWriteAccess,
+  isShopManager,
 } = require('../../utils/shopManageAccess.utils');
+
+const formatBankForUser = (row, user) =>
+  isShopManager(user) ? formatBankAccountPublicSummary(row) : formatBankAccountResponse(row);
 
 const BANK_ACCOUNT_SELECT = {
   bank_account_id: true,
@@ -147,7 +152,7 @@ const ShopBankAccountService = {
       select: BANK_ACCOUNT_SELECT,
     });
 
-    const formatted = sortAccountsDefaultFirst(accounts.map((row) => formatBankAccountResponse(row)));
+    const formatted = sortAccountsDefaultFirst(accounts.map((row) => formatBankForUser(row, user)));
     return { shop_id: resolvedShopId, accounts: formatted };
   },
 
@@ -161,7 +166,7 @@ const ShopBankAccountService = {
       select: BANK_ACCOUNT_SELECT,
     });
     if (!row) throw new AppError('Bank account not found', 404, 'BANK_ACCOUNT_NOT_FOUND');
-    return formatBankAccountResponse(row);
+    return formatBankForUser(row, user);
   },
 
   async create(shopId, data, user) {
@@ -207,7 +212,7 @@ const ShopBankAccountService = {
       });
     });
 
-    return formatBankAccountResponse(row);
+    return formatBankForUser(row, user);
   },
 
   async update(shopId, bankAccountId, data, user) {
@@ -236,7 +241,7 @@ const ShopBankAccountService = {
       });
     });
 
-    return formatBankAccountResponse(row);
+    return formatBankForUser(row, user);
   },
 
   async remove(shopId, bankAccountId, user) {

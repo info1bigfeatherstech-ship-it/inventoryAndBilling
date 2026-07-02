@@ -17,21 +17,21 @@ const {
   cancelValidator,
 } = require('../../validators/stock/transferRequest.validators');
 
-const READ_ROLES = ['SUPER_ADMIN', 'WH_MANAGER', 'WH_STOCK_LISTER', 'SHOP_OWNER', 'SHOP_STOCK_LISTER'];
+const READ_ROLES = ['SUPER_ADMIN', 'WH_MANAGER', 'WH_STOCK_LISTER', 'SHOP_OWNER', 'SHOP_MANAGER'];
 
-/** SHOP_OWNER: WH→Shop, Shop→Shop. WH_MANAGER: WH→WH only (enforced in service). */
-const CREATE_ROLES = ['SUPER_ADMIN', 'SHOP_OWNER', 'WH_MANAGER'];
+/** SHOP_OWNER / SHOP_MANAGER: WH→Shop, Shop→Shop. WH_MANAGER: WH→WH only (enforced in service). */
+const CREATE_ROLES = ['SUPER_ADMIN', 'SHOP_OWNER', 'SHOP_MANAGER', 'WH_MANAGER'];
 
-/** WH→Shop / WH→WH: source WH_MANAGER. Shop→Shop: source SHOP_OWNER. */
-const APPROVE_ROLES = ['SUPER_ADMIN', 'WH_MANAGER', 'SHOP_OWNER'];
+/** WH→Shop / WH→WH: source WH_MANAGER. Shop→Shop: source shop owner or manager. */
+const APPROVE_ROLES = ['SUPER_ADMIN', 'WH_MANAGER', 'SHOP_OWNER', 'SHOP_MANAGER'];
 
-/** WH→Shop / WH→WH: WH_MANAGER + WH_STOCK_LISTER. Shop→Shop: source SHOP_OWNER (enforced in service). */
-const DISPATCH_ROLES = ['SUPER_ADMIN', 'WH_MANAGER', 'WH_STOCK_LISTER', 'SHOP_OWNER'];
+/** WH→Shop / WH→WH: WH_MANAGER + WH_STOCK_LISTER. Shop→Shop: source shop owner or manager. */
+const DISPATCH_ROLES = ['SUPER_ADMIN', 'WH_MANAGER', 'WH_STOCK_LISTER', 'SHOP_OWNER', 'SHOP_MANAGER'];
 
-/** WH→WH: dest WH_MANAGER. WH→Shop / Shop→Shop: dest SHOP_OWNER. */
-const RECEIVE_ROLES = ['SUPER_ADMIN', 'WH_MANAGER', 'SHOP_OWNER'];
+/** WH→WH: dest WH_MANAGER. WH→Shop / Shop→Shop: dest shop owner or manager. */
+const RECEIVE_ROLES = ['SUPER_ADMIN', 'WH_MANAGER', 'SHOP_OWNER', 'SHOP_MANAGER'];
 
-const CANCEL_ROLES = ['SUPER_ADMIN', 'WH_MANAGER', 'SHOP_OWNER'];
+const CANCEL_ROLES = ['SUPER_ADMIN', 'WH_MANAGER', 'SHOP_OWNER', 'SHOP_MANAGER'];
 
 const idem24h = idempotency({ ttlSeconds: 86400 });
 

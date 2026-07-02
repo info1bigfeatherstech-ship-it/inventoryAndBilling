@@ -6,7 +6,7 @@ const { validateRequest } = require('../../middlewares/validation.middleware');
 const { requireAuth, authorizeRoles } = require('../../middlewares/auth.middleware');
 const { reorderSuggestionsValidator } = require('../../validators/stock/shopProductLevel.validators');
 
-const READ_ROLES = ['SUPER_ADMIN', 'SHOP_OWNER', 'SHOP_STOCK_LISTER', 'BILLING_STAFF'];
+const READ_ROLES = ['SUPER_ADMIN', 'SHOP_OWNER', 'SHOP_MANAGER', 'BILLING_STAFF'];
 
 router.use(requireAuth);
 

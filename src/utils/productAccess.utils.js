@@ -1,7 +1,7 @@
 const { AppError } = require('../middlewares/error.middleware');
 
 const WAREHOUSE_ROLES = new Set(['WH_MANAGER', 'WH_STOCK_LISTER']);
-const CATALOG_READ_ROLES = new Set(['SHOP_OWNER', 'SHOP_STOCK_LISTER', 'BILLING_STAFF']);
+const CATALOG_READ_ROLES = new Set(['SHOP_OWNER', 'SHOP_MANAGER', 'BILLING_STAFF']);
 
 const resolveWarehouseId = (user, requestedWarehouseId) => {
   if (user.role === 'SUPER_ADMIN') {

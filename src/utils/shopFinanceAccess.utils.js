@@ -1,7 +1,7 @@
 const { AppError } = require('../errors/AppError');
 
-const SHOP_FINANCE_READ_ROLES = new Set(['SUPER_ADMIN', 'SHOP_OWNER', 'SHOP_STOCK_LISTER']);
-const SHOP_FINANCE_WRITE_ROLES = new Set(['SUPER_ADMIN', 'SHOP_OWNER']);
+const SHOP_FINANCE_READ_ROLES = new Set(['SUPER_ADMIN', 'SHOP_OWNER', 'SHOP_MANAGER']);
+const SHOP_FINANCE_WRITE_ROLES = new Set(['SUPER_ADMIN', 'SHOP_OWNER', 'SHOP_MANAGER']);
 const SHOP_FINANCE_CANCEL_ROLES = new Set(['SUPER_ADMIN', 'SHOP_OWNER']);
 
 const assertShopFinanceAccess = (shopId, user, { write = false, cancel = false } = {}) => {

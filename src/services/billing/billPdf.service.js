@@ -550,7 +550,9 @@ const renderGstTaxInvoice = (doc, bill, { isNonGst = false, isEstimate = false, 
   };
 
   drawTotalLine('Sub Total', fmtNum(bill.subtotal));
-  drawTotalLine('Discount', `- ${fmtNum(mrpDiscount)}`);
+  if (mrpDiscount > 0) {
+    drawTotalLine('MRP Discount', `- ${fmtNum(mrpDiscount)}`);
+  }
 
   if (!isNonGst) {
     drawTotalLine('Total Amount', fmtNum(bill.taxable_amount));
@@ -570,6 +572,10 @@ const renderGstTaxInvoice = (doc, bill, { isNonGst = false, isEstimate = false, 
       drawTotalLine(`Total Tax Amount (${taxRates.totalPercent}%)`, fmtNum(bill.gst_amount));
       ty += 2;
     }
+  }
+
+  if (safeNum(bill.discount) > 0) {
+    drawTotalLine('Extra Discount', `- ${fmtNum(bill.discount)}`);
   }
 
   doc.moveTo(tx, ty).lineTo(tx + tw, ty).stroke();
@@ -868,7 +874,7 @@ const renderThermalReceipt = (doc, bill, { isNonGst = false, isEstimate = false,
 
   drawSummaryLine('Subtotal', fmtNum(bill.subtotal));
   if (mrpDiscount > 0) {
-    drawSummaryLine('Discount', `- ${fmtNum(mrpDiscount)}`);
+    drawSummaryLine('MRP Discount', `- ${fmtNum(mrpDiscount)}`);
   }
 
   if (!isNonGst) {
@@ -886,6 +892,10 @@ const renderThermalReceipt = (doc, bill, { isNonGst = false, isEstimate = false,
     if (bill.gst_amount > 0) {
       drawSummaryLine('Total Tax', fmtNum(bill.gst_amount));
     }
+  }
+
+  if (safeNum(bill.discount) > 0) {
+    drawSummaryLine('Extra Discount', `- ${fmtNum(bill.discount)}`);
   }
 
   drawThermalDashedLine(doc, y);

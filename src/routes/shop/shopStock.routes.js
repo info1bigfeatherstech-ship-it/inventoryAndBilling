@@ -11,7 +11,7 @@ const {
   bulkUpdateShopStockValidator,
 } = require('../../validators/shop/shopStock.validators');
 
-const WRITE_ROLES = ['SUPER_ADMIN', 'SHOP_OWNER', 'SHOP_STOCK_LISTER'];
+const WRITE_ROLES = ['SUPER_ADMIN', 'SHOP_OWNER', 'SHOP_MANAGER'];
 const READ_ROLES = [...WRITE_ROLES, 'BILLING_STAFF', 'WH_MANAGER'];
 
 router.use(requireAuth);

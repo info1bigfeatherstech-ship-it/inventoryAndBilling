@@ -2,8 +2,14 @@ const { AppError } = require('../errors/AppError');
 const { resolveShopIdForUser } = require('./shopAccess.utils');
 const { resolveOwnerShopId } = require('./transferRequest.utils');
 
-const SHOP_BILLING_ROLES = new Set(['SHOP_OWNER', 'BILLING_STAFF', 'SHOP_STOCK_LISTER']);
-const SHOP_WRITE_ROLES = new Set(['SHOP_OWNER', 'BILLING_STAFF']);
+const {
+  toRoleSet,
+  SHOP_BILLING_READ_ROLES,
+  SHOP_BILLING_WRITE_ROLES,
+} = require('../constants/userRole.constants');
+
+const SHOP_BILLING_ROLES = toRoleSet(SHOP_BILLING_READ_ROLES);
+const SHOP_WRITE_ROLES = toRoleSet(SHOP_BILLING_WRITE_ROLES);
 
 /**
  * Resolve shop id for billing write operations.

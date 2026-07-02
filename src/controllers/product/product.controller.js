@@ -101,7 +101,7 @@ const ProductController = {
     const { barcode } = req.params;
     const shopId = req.query.shop_id;
     
-    const product = await ProductService.getProductByBarcode(barcode, shopId);
+    const product = await ProductService.getProductByBarcode(barcode, shopId, req.user);
     
     return successResponse(res, req, {
       statusCode: 200,
@@ -229,6 +229,17 @@ const ProductController = {
       message: isPreview ? 'Preview generated successfully' : 'Bulk product import completed',
       data: results,
     });
+  }),
+
+  bulkDownloadTemplate: asyncHandler(async (req, res) => {
+    const buffer = await ProductService.getBulkTemplateBuffer();
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename="bulk-product-upload-template-software-final-with-validation.xlsx"'
+    );
+    res.setHeader('Cache-Control', 'no-store');
+    return res.send(buffer);
   }),
 
   bulkUpdate: asyncHandler(async (req, res) => {

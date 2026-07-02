@@ -8,7 +8,7 @@ const {
   setProductLevelsValidator,
 } = require('../../validators/stock/shopProductLevel.validators');
 
-const WRITE_ROLES = ['SUPER_ADMIN', 'SHOP_OWNER'];
+const WRITE_ROLES = ['SUPER_ADMIN', 'SHOP_OWNER', 'SHOP_MANAGER'];
 
 router.use(requireAuth);
 
