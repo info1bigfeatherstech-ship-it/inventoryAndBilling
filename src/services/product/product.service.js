@@ -604,6 +604,30 @@ const syncVariantsFromProductPrices = async (tx, productId, pricePayload) => {
   }
 };
 
+/** Keep variant[0] in sync with product default prices (Variant 0 = primary sellable unit). */
+const syncPrimaryVariantFromProductPrices = async (tx, productId, pricePayload) => {
+  const primary = await tx.productVariant.findFirst({
+    where: { product_id: productId },
+    orderBy: [{ sort_order: 'asc' }, { created_at: 'asc' }],
+    select: {
+      variant_id: true,
+      mrp: true,
+      special_price: true,
+      wholesale_price: true,
+      purchase_price: true,
+      expenses: true,
+      warranty: true,
+    },
+  });
+  if (!primary) return;
+
+  const priced = buildPriceUpdatePayload(primary, pricePayload);
+  await tx.productVariant.update({
+    where: { variant_id: primary.variant_id },
+    data: priced,
+  });
+};
+
 const assertCategoryValid = async (categoryId, subCategoryId) => {
   const category = await prisma.category.findUnique({
     where: { category_id: categoryId },
@@ -1365,14 +1389,18 @@ const ProductService = {
 
     await prisma.product.update({ where: { product_id: productId }, data: productFields });
 
-    if (data.apply_prices_to_variants === true && hasPriceField) {
+    if (hasPriceField) {
       const pricePayload = {};
       for (const key of CATALOG_FIELD_KEYS) {
         if (Object.prototype.hasOwnProperty.call(productFields, key)) pricePayload[key] = productFields[key];
       }
       if (Object.keys(pricePayload).length) {
         await prisma.$transaction(async (tx) => {
-          await syncVariantsFromProductPrices(tx, productId, pricePayload);
+          if (data.apply_prices_to_variants === true) {
+            await syncVariantsFromProductPrices(tx, productId, pricePayload);
+          } else {
+            await syncPrimaryVariantFromProductPrices(tx, productId, pricePayload);
+          }
         });
       }
     }
