@@ -156,10 +156,52 @@ const buildInstructionsSheet = (workbook) => {
   return ws;
 };
 
+// const buildUploadDataSheet = (workbook) => {
+//   const ws = workbook.addWorksheet('Upload Data');
+//   ws.addRow(UPLOAD_DATA_HEADERS);
+//   ws.getRow(1).font = { bold: true };
+//   addRows(ws, UPLOAD_DATA_SAMPLE_ROWS);
+//   UPLOAD_DATA_HEADERS.forEach((_, index) => {
+//     ws.getColumn(index + 1).width = Math.max(UPLOAD_DATA_HEADERS[index].length + 2, 14);
+//   });
+//   return ws;
+// };
+
+
+const MANDATORY_HEADER_FIELDS = [
+  'name',
+  'product_code',
+  'vendor_name',
+  'category_name',
+  'mrp',
+  'special_price',
+  'wholesale_price',
+  'purchase_price',
+  'expenses',
+  'unit_of_measure',
+  'length',
+  'width',
+  'height',
+  'low_stock_threshold',
+];
+
 const buildUploadDataSheet = (workbook) => {
   const ws = workbook.addWorksheet('Upload Data');
   ws.addRow(UPLOAD_DATA_HEADERS);
   ws.getRow(1).font = { bold: true };
+
+  UPLOAD_DATA_HEADERS.forEach((header, index) => {
+    const cell = ws.getRow(1).getCell(index + 1);
+    if (MANDATORY_HEADER_FIELDS.includes(header)) {
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFFF0000' },
+      };
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    }
+  });
+
   addRows(ws, UPLOAD_DATA_SAMPLE_ROWS);
   UPLOAD_DATA_HEADERS.forEach((_, index) => {
     ws.getColumn(index + 1).width = Math.max(UPLOAD_DATA_HEADERS[index].length + 2, 14);
