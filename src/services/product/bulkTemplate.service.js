@@ -266,6 +266,7 @@ const applyUploadDataValidations = (uploadSheet, { categoryNames, vendorNames })
  * @param {{ categoryNames: string[], vendorNames: string[] }} params
  * @returns {Promise<Buffer>}
  */
+
 const generateBulkProductTemplate = async ({ categoryNames = [], vendorNames = [] } = {}) => {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = TEMPLATE_APP_NAME;
@@ -277,9 +278,37 @@ const generateBulkProductTemplate = async ({ categoryNames = [], vendorNames = [
   buildListsSheet(workbook, { categoryNames, vendorNames });
   applyUploadDataValidations(uploadSheet, { categoryNames, vendorNames });
 
+  // Open the file directly on "Upload Data" tab (index 1) instead of "Instructions" (index 0),
+  // so users land where they actually need to fill data.
+  workbook.views = [
+    {
+      x: 0,
+      y: 0,
+      width: 10000,
+      height: 20000,
+      firstSheet: 0,
+      activeTab: 1,
+      visibility: 'visible',
+    },
+  ];
+
   const buffer = await workbook.xlsx.writeBuffer();
   return Buffer.from(buffer);
 };
+// const generateBulkProductTemplate = async ({ categoryNames = [], vendorNames = [] } = {}) => {
+//   const workbook = new ExcelJS.Workbook();
+//   workbook.creator = TEMPLATE_APP_NAME;
+//   workbook.created = new Date();
+
+//   buildInstructionsSheet(workbook);
+//   const uploadSheet = buildUploadDataSheet(workbook);
+//   buildEnumReferenceSheet(workbook);
+//   buildListsSheet(workbook, { categoryNames, vendorNames });
+//   applyUploadDataValidations(uploadSheet, { categoryNames, vendorNames });
+
+//   const buffer = await workbook.xlsx.writeBuffer();
+//   return Buffer.from(buffer);
+// };
 
 module.exports = {
   generateBulkProductTemplate,
