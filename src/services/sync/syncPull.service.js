@@ -73,6 +73,7 @@ const SHOP_STOCK_SYNC_SELECT = {
       sku: true,
       product_code: true,
       system_barcode: true,
+      attributes: true,
       mrp: true,
       special_price: true,
       warranty: true,

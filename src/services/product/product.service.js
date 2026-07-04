@@ -556,25 +556,7 @@ const attachListingMeta = (product) => {
   };
 };
 
-const parseAttributes = (raw) => {
-  if (raw === null || raw === undefined || raw === '') return null;
-  if (Array.isArray(raw)) return raw;
-  if (typeof raw === 'object') return raw;
-  if (typeof raw === 'string') {
-    try {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
-    } catch {
-      // key:value pairs separated by |
-      const pairs = raw.split('|').map((p) => p.trim()).filter(Boolean);
-      return pairs.map((pair) => {
-        const [key, ...rest] = pair.split(':');
-        return { key: key.trim(), value: rest.join(':').trim() };
-      });
-    }
-  }
-  return null;
-};
+const { parseAttributes } = require('../../utils/variantAttributes.utils');
 
 const mapIncomingPriceFields = (data, target = {}) => mapIncomingCatalogFields(data, target);
 
@@ -1032,6 +1014,7 @@ const createBulkVariant = async ({ productId, variantData, warehouseId, productN
       product_code: variantData.product_code,
       system_barcode: variantData.product_code,
       sku: `SKU-${variantData.product_code}`,
+      attributes: variantData.attributes ?? null,
       mrp: variantData.mrp,
       special_price: variantData.special_price,
       wholesale_price: variantData.wholesale_price,
@@ -1060,23 +1043,29 @@ const createBulkVariant = async ({ productId, variantData, warehouseId, productN
 };
 
 const updateBulkVariantFromCsv = async ({ variantId, variantData }) => {
+  const data = {
+    mrp: variantData.mrp,
+    special_price: variantData.special_price,
+    wholesale_price: variantData.wholesale_price,
+    purchase_price: variantData.purchase_price,
+    expenses: variantData.expenses,
+    warranty: variantData.warranty ?? null,
+    purchase_code: variantData.purchase_code,
+    weight: variantData.weight,
+    length: variantData.length,
+    width: variantData.width,
+    height: variantData.height,
+    low_stock_threshold: variantData.low_stock_threshold,
+    remarks: variantData.remarks ?? null,
+  };
+
+  if (variantData.attributesProvided) {
+    data.attributes = variantData.attributes ?? null;
+  }
+
   await prisma.productVariant.update({
     where: { variant_id: variantId },
-    data: {
-      mrp: variantData.mrp,
-      special_price: variantData.special_price,
-      wholesale_price: variantData.wholesale_price,
-      purchase_price: variantData.purchase_price,
-      expenses: variantData.expenses,
-      warranty: variantData.warranty ?? null,
-      purchase_code: variantData.purchase_code,
-      weight: variantData.weight,
-      length: variantData.length,
-      width: variantData.width,
-      height: variantData.height,
-      low_stock_threshold: variantData.low_stock_threshold,
-      remarks: variantData.remarks ?? null,
-    },
+    data,
   });
 };
 
@@ -1879,9 +1868,18 @@ const ProductService = {
 
       const priced = buildCsvVariantPrices(row, row.rowNumber);
 
+      const { value: csvAttributes, provided: attributesProvided } = (() => {
+        if (row.attributes === undefined) {
+          return { value: undefined, provided: false };
+        }
+        return { value: parseAttributes(row.attributes), provided: true };
+      })();
+
       variantsData.push({
         product_code: productCode,
         ...priced,
+        attributes: csvAttributes,
+        attributesProvided,
         weight: row.weight ? Number(row.weight) : null,
         length: row.length ? Number(row.length) : null,
         width: row.width ? Number(row.width) : null,
@@ -1922,6 +1920,7 @@ const ProductService = {
           purchase_price: v.purchase_price,
           expenses: v.expenses,
           warranty: v.warranty,
+          attributes: v.attributes,
         })),
         has_images: variantsData.some((v) => v.imageFolderPath !== null),
         vendor_id: primary_vendor_id,

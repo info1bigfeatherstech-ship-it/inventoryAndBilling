@@ -19,7 +19,7 @@ const INSTRUCTIONS_ROWS = [
   ['One row = one variant', 'Each row maps to a ProductVariant. If a product has 2 sizes, add 2 rows with the same name but different product_code (e.g. 9902-1, 9902-2).'],
   ['product_code format', 'Must be unique per warehouse. Format: NNNN-V where NNNN is product number and V is variant number (e.g. 9901-1).'],
   ['Required fields', 'name, product_code, category_name, mrp, special_price, wholesale_price, purchase_price, expenses'],
-  ['Optional fields', 'title, description, brand_name, vendor_name, sub_category_name, warranty, weight, length, width, height, low_stock_threshold, remarks, hsn_code, gst_percent, gst_type, unit_of_measure'],
+  ['Optional fields', 'title, description, brand_name, vendor_name, sub_category_name, warranty, attributes, weight, length, width, height, low_stock_threshold, remarks, hsn_code, gst_percent, gst_type, unit_of_measure'],
   ['No empty required fields', 'Leave optional fields blank if not applicable. Do NOT delete columns.'],
   [null, null],
   ['DROPDOWN / ENUM FIELDS', null],
@@ -38,6 +38,9 @@ const INSTRUCTIONS_ROWS = [
   ['DIMENSION & WEIGHT FIELDS (for shipping)', null],
   ['weight', 'In grams (g). Example: 350 for 350g.'],
   ['length / width / height', 'In centimeters (cm). Used for volumetric weight calculation.'],
+  [null, null],
+  ['VARIANT ATTRIBUTES', null],
+  ['attributes', 'Optional. Pipe-separated key:value pairs per variant row. Example: Color:White|Size:M — shown on invoices to identify the variant.'],
   [null, null],
   ['CATEGORY & VENDOR', null],
   ['category_name', 'Must match an existing category name in the system (select from dropdown).'],
@@ -67,6 +70,7 @@ const UPLOAD_DATA_HEADERS = [
   'purchase_price',
   'expenses',
   'warranty',
+  'attributes',
   'hsn_code',
   'gst_percent',
   'gst_type',
@@ -80,12 +84,12 @@ const UPLOAD_DATA_HEADERS = [
 ];
 
 const UPLOAD_DATA_SAMPLE_ROWS = [
-  ['Ceramic Coffee Mug', 'Ceramic Coffee Mug - Matte Black', '350ml ceramic mug with handle', 'HomeStyle', '9901-1', 'HiTech', 'Electronics', null, 599, 449, 320, 80, 20, '1 Year', '6912', 12, 'CGST_SGST', 'Pcs', 350, 12, 9, 10, 15, 'Test upload - expect purchase_code 2086'],
-  ['Running Sports Shoes', 'Running Shoes - Size 8 UK', 'Lightweight mesh running shoes', 'SportMax', '9902-1', 'HiTech', 'Electronics', null, 3499, 2799, 2200, 350, 45, '6 Months', '6404', 18, 'CGST_SGST', 'Pcs', 450, 32, 22, 12, 8, 'Test upload variant 1 - expect purchase_code 2381'],
-  ['Running Sports Shoes', 'Running Shoes - Size 9 UK', 'Lightweight mesh running shoes', 'SportMax', '9902-2', 'HiTech', 'Electronics', null, 3499, 2799, 2200, 350, 45, '6 Months', '6404', 18, 'CGST_SGST', 'Pcs', 450, 32, 22, 12, 8, 'Test upload variant 2 - same pricing - expect purchase_code 2381'],
-  ['USB-C Cable 3-Pack', 'USB-C to USB-A Cable 1m (3 pcs)', 'Fast charge braided cables', 'TechLine', '9903-1', 'HiTech', 'Electronics', null, 899, 699, 520, 120, 25, '3 Months', '8544', 12, 'CGST_SGST', 'Pcs', 120, 18, 12, 3, 20, 'Test upload - expect purchase_code 2131'],
-  ['Wireless Earbuds Pro', 'Wireless Earbuds - White', 'ANC TWS earbuds with case', 'AudioPro', '9904-1', 'HiTech', 'Electronics', null, 4999, 3999, 3100, 900, 100, '1 Year', '8518', 18, 'CGST_SGST', 'Pcs', 55, 6, 4, 3, 10, 'Test upload - expect purchase_code 2986'],
-  ['Wireless Earbuds Pro', 'Wireless Earbuds - Black', 'ANC TWS earbuds with case', 'AudioPro', '9904-2', 'HiTech', 'Electronics', null, 4999, 3999, 3150, 950, 80, '1 Year', '8518', 18, 'CGST_SGST', 'Pcs', 55, 6, 4, 3, 10, 'Test upload variant 2 - different pricing - expect purchase_code 3016'],
+  ['Ceramic Coffee Mug', 'Ceramic Coffee Mug - Matte Black', '350ml ceramic mug with handle', 'HomeStyle', '9901-1', 'HiTech', 'Electronics', null, 599, 449, 320, 80, 20, '1 Year', 'Color:Black|Size:350ml', '6912', 12, 'CGST_SGST', 'Pcs', 350, 12, 9, 10, 15, 'Test upload - expect purchase_code 2086'],
+  ['Running Sports Shoes', 'Running Shoes - Size 8 UK', 'Lightweight mesh running shoes', 'SportMax', '9902-1', 'HiTech', 'Electronics', null, 3499, 2799, 2200, 350, 45, '6 Months', 'Color:Blue|Size:8 UK', '6404', 18, 'CGST_SGST', 'Pcs', 450, 32, 22, 12, 8, 'Test upload variant 1 - expect purchase_code 2381'],
+  ['Running Sports Shoes', 'Running Shoes - Size 9 UK', 'Lightweight mesh running shoes', 'SportMax', '9902-2', 'HiTech', 'Electronics', null, 3499, 2799, 2200, 350, 45, '6 Months', 'Color:Blue|Size:9 UK', '6404', 18, 'CGST_SGST', 'Pcs', 450, 32, 22, 12, 8, 'Test upload variant 2 - same pricing - expect purchase_code 2381'],
+  ['USB-C Cable 3-Pack', 'USB-C to USB-A Cable 1m (3 pcs)', 'Fast charge braided cables', 'TechLine', '9903-1', 'HiTech', 'Electronics', null, 899, 699, 520, 120, 25, '3 Months', 'Length:1m|Pack:3', '8544', 12, 'CGST_SGST', 'Pcs', 120, 18, 12, 3, 20, 'Test upload - expect purchase_code 2131'],
+  ['Wireless Earbuds Pro', 'Wireless Earbuds - White', 'ANC TWS earbuds with case', 'AudioPro', '9904-1', 'HiTech', 'Electronics', null, 4999, 3999, 3100, 900, 100, '1 Year', 'Color:White', '8518', 18, 'CGST_SGST', 'Pcs', 55, 6, 4, 3, 10, 'Test upload - expect purchase_code 2986'],
+  ['Wireless Earbuds Pro', 'Wireless Earbuds - Black', 'ANC TWS earbuds with case', 'AudioPro', '9904-2', 'HiTech', 'Electronics', null, 4999, 3999, 3150, 950, 80, '1 Year', 'Color:Black', '8518', 18, 'CGST_SGST', 'Pcs', 55, 6, 4, 3, 10, 'Test upload variant 2 - different pricing - expect purchase_code 3016'],
 ];
 
 const buildUnitOfMeasureEnumReferenceRows = () => {

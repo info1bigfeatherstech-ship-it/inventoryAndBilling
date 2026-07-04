@@ -144,6 +144,7 @@ const BILL_SELECT = {
           mrp: true,
           warranty: true,
           product_code: true,
+          attributes: true,
           product: { select: { product_id: true, name: true, brand_name: true, warranty: true } },
         },
       },

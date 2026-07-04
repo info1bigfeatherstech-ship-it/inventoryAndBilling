@@ -21,8 +21,9 @@ const SHOP_STOCK_SELECT = {
     select: {
       variant_id: true,
       sku: true,
-      product_code: true, 
+      product_code: true,
       system_barcode: true,
+      attributes: true,
       mrp: true,
       special_price: true,
       wholesale_price: true,

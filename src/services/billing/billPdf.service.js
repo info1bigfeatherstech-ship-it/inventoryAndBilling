@@ -10,6 +10,7 @@ const {
 const { getStateName } = require('../../constants/indianStateCodes');
 const { amountInWords } = require('../../utils/amountInWords.utils');
 const { maskAccountNumber } = require('../../utils/shopBank.utils');
+const { formatAttributesDisplay, parseAttributes } = require('../../utils/variantAttributes.utils');
 
 const M = 36;
 const R = 559;
@@ -70,14 +71,31 @@ const resolveLineProductName = (item) =>
   || item.variant?.sku
   || 'Item';
 
+const resolveLineBrand = (item) =>
+  displayVal(item.variant?.product?.brand_name || item.product?.brand_name);
+
+const resolveLineWarranty = (item) =>
+  displayVal(item.variant?.warranty || item.product?.warranty);
+
 const resolveLineMeta = (item, { isNonListed = false } = {}) => {
   if (isNonListed || item.manual_item_name) return [];
-  const brand = displayVal(item.variant?.product?.brand_name || item.product?.brand_name);
-  const warranty = displayVal(item.variant?.warranty || item.product?.warranty);
-  return [
-    brand ? `Brand: ${brand}` : null,
-    warranty ? `Warranty: ${warranty}` : null,
-  ].filter(Boolean);
+
+  const lines = [];
+  const parts = parseAttributes(item.variant?.attributes) || [];
+  if (parts.length) lines.push({ kind: 'attributes', parts });
+
+  const brand = resolveLineBrand(item);
+  if (brand) lines.push({ kind: 'field', label: 'Brand', value: brand });
+
+  const warranty = resolveLineWarranty(item);
+  if (warranty) lines.push({ kind: 'field', label: 'Warranty', value: warranty });
+
+  return lines;
+};
+
+const resolveLineAttributeText = (item, { isNonListed = false } = {}) => {
+  if (isNonListed || item.manual_item_name) return '';
+  return formatAttributesDisplay(item.variant?.attributes, { maxLength: 120 });
 };
 
 /** Bold label + regular value on one line. */
@@ -425,23 +443,27 @@ const renderGstTaxInvoice = (doc, bill, { isNonGst = false, isEstimate = false, 
   // ── Product table (full grid borders) ──
   const cols = isNonGst
     ? [
-      { label: 'S.No.', w: 28 },
-      { label: 'Product Name', w: 216 },
-      { label: 'Qty', w: 32 },
-      { label: 'MRP', w: 68 },
-      { label: 'Special Price', w: 76 },
-      { label: 'Total', w: W - 28 - 216 - 32 - 68 - 76 },
+      { label: 'S.No.', w: 24 },
+      { label: 'Product Name', w: 130 },
+      { label: 'Brand', w: 44 },
+      { label: 'Warranty', w: 44 },
+      { label: 'Qty', w: 28 },
+      { label: 'MRP', w: 60 },
+      { label: 'Special Price', w: 68 },
+      { label: 'Total', w: W - 24 - 130 - 44 - 44 - 28 - 60 - 68 },
     ]
     : [
-      { label: 'S.No.', w: 28 },
-      { label: 'Product Name', w: 168 },
-      { label: 'HSN Code', w: 48 },
-      { label: 'Qty', w: 32 },
-      { label: 'MRP', w: 68 },
-      { label: 'Special Price', w: 76 },
-      { label: 'Total', w: W - 28 - 168 - 48 - 32 - 68 - 76 },
+      { label: 'S.No.', w: 24 },
+      { label: 'Product Name', w: 110 },
+      { label: 'Brand', w: 40 },
+      { label: 'Warranty', w: 40 },
+      { label: 'HSN Code', w: 40 },
+      { label: 'Qty', w: 28 },
+      { label: 'MRP', w: 60 },
+      { label: 'Special Price', w: 68 },
+      { label: 'Total', w: W - 24 - 110 - 40 - 40 - 40 - 28 - 60 - 68 },
     ];
-  const rowH = 31;
+  const rowH = 38;
   const headerH = 16;
   const colWidths = cols.map((c) => c.w);
   const productColIndex = 1;
@@ -458,11 +480,14 @@ const renderGstTaxInvoice = (doc, bill, { isNonGst = false, isEstimate = false, 
     let rowY = tableY + headerH;
     tableItems.forEach((item, idx) => {
       const name = truncateProductName(resolveLineProductName(item));
-      const metaLines = resolveLineMeta(item, { isNonListed });
+      const brand = resolveLineBrand(item);
+      const warranty = resolveLineWarranty(item);
       const row = isNonGst
         ? [
           String(idx + 1),
           name,
+          brand,
+          warranty,
           String(item.quantity),
           fmtNum(lineMrp(item)),
           fmtNum(item.unit_price),
@@ -471,6 +496,8 @@ const renderGstTaxInvoice = (doc, bill, { isNonGst = false, isEstimate = false, 
         : [
           String(idx + 1),
           name,
+          brand,
+          warranty,
           displayVal(item.hsn_code),
           String(item.quantity),
           fmtNum(lineMrp(item)),
@@ -481,15 +508,10 @@ const renderGstTaxInvoice = (doc, bill, { isNonGst = false, isEstimate = false, 
       cols.forEach((col, i) => {
         if (i === productColIndex) {
           doc.font('Helvetica').fontSize(7.5);
-          doc.text(name, cx + 3, rowY + 3, { width: Math.max(1, col.w - 6), height: 9, align: 'center' });
-          doc.font('Helvetica').fontSize(6.4);
-          metaLines.slice(0, 2).forEach((line, metaIdx) => {
-            doc.text(line, cx + 3, rowY + 13 + metaIdx * 8, {
-              width: Math.max(1, col.w - 6),
-              height: 8,
-              align: 'center',
-            });
-          });
+          doc.text(name, cx + 3, rowY + 3, { width: Math.max(1, col.w - 6), height: 9, align: 'left' });
+          if (!isNonListed && !item.manual_item_name) {
+            drawProductCellAttributes(doc, cx, rowY + 13, col.w, item.variant?.attributes);
+          }
         } else {
           cellText(doc, row[i], cx, rowY, col.w, rowH, { align: 'center', bold: false, size: 7.5 });
         }
@@ -704,9 +726,58 @@ const calculateThermalHeight = (bill) => {
   }
   const itemHeight = items.reduce((sum, item) => {
     const metaLines = resolveLineMeta(item, { isNonListed: bill.bill_type === 'NON_LISTED_BILL' });
-    return sum + 22 + (metaLines.length ? 10 : 0);
+    let extra = 32;
+    extra += metaLines.length * 9;
+    return sum + extra;
   }, 0);
   return Math.max(310, baseHeight + itemHeight);
+};
+
+const drawThermalAttributeParts = (doc, y, parts) => {
+  if (!parts?.length) return y;
+  doc.fontSize(7);
+  let x = 12;
+  parts.forEach((attr, i) => {
+    if (i > 0) {
+      doc.font('Helvetica').text(', ', x, y, { lineBreak: false });
+      x += doc.widthOfString(', ');
+    }
+    doc.font('Helvetica-Bold').text(`${attr.key}: `, x, y, { lineBreak: false });
+    x += doc.widthOfString(`${attr.key}: `);
+    doc.font('Helvetica').text(attr.value, x, y, { lineBreak: false });
+    x += doc.widthOfString(attr.value);
+  });
+  return y + 9;
+};
+
+const drawThermalFieldLine = (doc, y, label, value) => {
+  if (!value) return y;
+  doc.fontSize(7);
+  doc.font('Helvetica-Bold').text(`${label}: `, 12, y, { continued: true, lineBreak: false });
+  doc.font('Helvetica').text(value, { width: 202.77 });
+  return y + 9;
+};
+
+/** Bold attribute keys under product name in A4 table cells. */
+const drawProductCellAttributes = (doc, x, y, colW, attributes) => {
+  const parts = parseAttributes(attributes) || [];
+  if (!parts.length) return;
+
+  const pad = 3;
+  const textX = x + pad;
+  doc.fontSize(6.4);
+  let cursorX = textX;
+
+  parts.forEach((attr, i) => {
+    if (i > 0) {
+      doc.font('Helvetica').text(', ', cursorX, y, { lineBreak: false });
+      cursorX += doc.widthOfString(', ');
+    }
+    doc.font('Helvetica-Bold').text(`${attr.key}: `, cursorX, y, { lineBreak: false });
+    cursorX += doc.widthOfString(`${attr.key}: `);
+    doc.font('Helvetica').text(attr.value, cursorX, y, { lineBreak: false });
+    cursorX += doc.widthOfString(attr.value);
+  });
 };
 
 const drawThermalDashedLine = (doc, y) => {
@@ -895,10 +966,13 @@ const renderThermalReceipt = (doc, bill, { isNonGst = false, isEstimate = false,
     doc.font('Helvetica-Bold').fontSize(8).text(name, 12, y, { width: 202.77 });
     y += 10;
 
-    if (metaLines.length) {
-      doc.font('Helvetica').fontSize(7).text(metaLines.join(' | '), 12, y, { width: 202.77 });
-      y += 10;
-    }
+    metaLines.forEach((entry) => {
+      if (entry.kind === 'attributes') {
+        y = drawThermalAttributeParts(doc, y, entry.parts);
+      } else if (entry.kind === 'field') {
+        y = drawThermalFieldLine(doc, y, entry.label, entry.value);
+      }
+    });
 
     doc.font('Helvetica').fontSize(7.5);
     doc.text(`MRP: Rs. ${fmtNum(lineMrp(item))}`, 12, y, { width: 80, align: 'left' });
@@ -906,6 +980,11 @@ const renderThermalReceipt = (doc, bill, { isNonGst = false, isEstimate = false,
     doc.text(fmtNum(item.unit_price), 112, y, { width: 50, align: 'right' });
     doc.text(fmtNum(lineSpecialTotal(item)), 162, y, { width: 40, align: 'right' });
     y += 11;
+
+    if (idx < items.length - 1) {
+      drawThermalDashedLine(doc, y);
+      y += 5;
+    }
   });
 
   drawThermalDashedLine(doc, y);
