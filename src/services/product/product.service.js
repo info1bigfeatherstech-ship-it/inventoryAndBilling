@@ -273,7 +273,6 @@ const PRODUCT_LIST_SELECT = {
   category: { select: { category_id: true, name: true } },
   sub_category: { select: { category_id: true, name: true } },
   variants: {
-    where: { is_active: true },
     orderBy: { sort_order: 'asc' },
     select: {
       variant_id: true,
@@ -826,12 +825,24 @@ const fetchProductDetail = async (productId) =>
     select: PRODUCT_DETAIL_SELECT,
   });
 
+const parseQueryBoolean = (value) => {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  const normalized = String(value).trim().toLowerCase();
+  if (normalized === 'true' || normalized === '1') return true;
+  if (normalized === 'false' || normalized === '0') return false;
+  return undefined;
+};
+
 const buildProductWhere = (query = {}, user) => {
   const where = {};
+  const isActiveFilter = parseQueryBoolean(query.is_active);
+  const includeInactive = parseQueryBoolean(query.include_inactive) === true;
 
-  if (typeof query.is_active === 'boolean') {
-    where.is_active = query.is_active;
-  } else if (query.include_inactive !== true) {
+  if (isActiveFilter !== undefined) {
+    where.is_active = isActiveFilter;
+  } else if (!includeInactive) {
     where.is_active = true;
   }
 
@@ -2212,6 +2223,33 @@ async listInactiveProducts(query = {}, user) {
     const categoryNames = await CategoryService.getActiveCategoryNames();
     const vendorNames = await VendorService.getActiveVendorNames();
     return bulkTemplateService.generateBulkProductTemplate({ categoryNames, vendorNames });
+  },
+
+  async getInventoryStats(_query = {}, user) {
+    const where = {};
+    applyWarehouseScope(where, user);
+
+    const [totalProducts, activeCount, avgMrpAgg, variantGroups] = await Promise.all([
+      prisma.product.count({ where }),
+      prisma.product.count({ where: { ...where, is_active: true } }),
+      prisma.product.aggregate({ where, _avg: { mrp: true } }),
+      prisma.productVariant.groupBy({
+        by: ['product_id'],
+        where: { is_active: true, product: where },
+        _count: { variant_id: true },
+      }),
+    ]);
+
+    const multiVariantCount = variantGroups.filter((group) => group._count.variant_id > 1).length;
+    const avgMrpRaw = avgMrpAgg._avg?.mrp;
+    const avgMrp = avgMrpRaw != null ? Math.round(Number(avgMrpRaw)) : 0;
+
+    return {
+      total_products: totalProducts,
+      active_count: activeCount,
+      multi_variant_count: multiVariantCount,
+      avg_mrp: avgMrp,
+    };
   },
 };
 

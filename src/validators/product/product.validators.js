@@ -238,6 +238,10 @@ const bulkCsvValidator = [
   query('warehouse_id').optional().isString().trim().notEmpty(),
 ];
 
+const inventoryStatsValidator = [
+  query('warehouse_id').optional().isString().trim().notEmpty(),
+];
+
 module.exports = {
   productIdParam,
   variantIdParam,
@@ -247,6 +251,7 @@ module.exports = {
   updateVariantValidator,
   syncVariantImagesValidator,
   listProductsValidator,
+  inventoryStatsValidator,
   bulkUpdateValidator,
   bulkDeleteValidator,
   bulkCsvValidator,

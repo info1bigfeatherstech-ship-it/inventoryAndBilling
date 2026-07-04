@@ -300,6 +300,15 @@ bulkRestore: asyncHandler(async (req, res) => {
   });
 }),
 
+  inventoryStats: asyncHandler(async (req, res) => {
+    const stats = await ProductService.getInventoryStats(req.query, withUserContext(req));
+    return successResponse(res, req, {
+      statusCode: 200,
+      message: 'Product inventory stats fetched successfully',
+      data: stats,
+    });
+  }),
+
 // ========== GET ONLY INACTIVE PRODUCTS ==========
 listInactive: asyncHandler(async (req, res) => {
   const { total, page, limit, products } = await ProductService.listInactiveProducts(req.query, withUserContext(req));

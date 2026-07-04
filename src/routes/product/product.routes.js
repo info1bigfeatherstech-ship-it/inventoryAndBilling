@@ -11,6 +11,7 @@ const {
   createProductValidator,
   updateProductValidator,
   listProductsValidator,
+  inventoryStatsValidator,
   bulkUpdateValidator,
   bulkDeleteValidator,
   bulkCsvValidator,
@@ -87,6 +88,14 @@ router.get(
   listProductsValidator,
   validateRequest,
   ProductController.listInactive
+);
+
+router.get(
+  '/inventory-stats',
+  authorizeRoles(...READ_ROLES),
+  inventoryStatsValidator,
+  validateRequest,
+  ProductController.inventoryStats
 );
 
 router.post(
