@@ -2181,42 +2181,126 @@ async listInactiveProducts(query = {}, user) {
 
 
 
-  // Permanent delete with cascade (for testing)
-  async hardDeleteProductsByDate(dateThreshold, user) {
-    // Only SUPER_ADMIN can do this
+  // Permanent delete of archived products only (SUPER_ADMIN).
+  async hardDeleteProducts(productIds, user) {
     if (user.role !== 'SUPER_ADMIN') {
-      throw new AppError('Only SUPER_ADMIN can permanently delete products', 403);
+      throw new AppError('Only SUPER_ADMIN can permanently delete products', 403, 'FORBIDDEN');
     }
 
-    // Delete all products created after date
+    const uniqueIds = [...new Set((Array.isArray(productIds) ? productIds : []).filter(Boolean))];
+    if (!uniqueIds.length) {
+      throw new AppError('product_ids array is required', 400, 'PRODUCT_IDS_REQUIRED');
+    }
+
+    const products = await prisma.product.findMany({
+      where: { product_id: { in: uniqueIds } },
+      select: {
+        product_id: true,
+        name: true,
+        product_code: true,
+        is_active: true,
+        warehouse_id: true,
+      },
+    });
+
+    if (products.length !== uniqueIds.length) {
+      throw new AppError('One or more products not found', 404, 'PRODUCT_NOT_FOUND');
+    }
+
+    const activeProducts = products.filter((p) => p.is_active);
+    if (activeProducts.length) {
+      throw new AppError(
+        'Only archived products can be permanently deleted. Archive the product first.',
+        409,
+        'PRODUCT_NOT_ARCHIVED',
+        { product_ids: activeProducts.map((p) => p.product_id) }
+      );
+    }
+
+    const variants = await prisma.productVariant.findMany({
+      where: { product_id: { in: uniqueIds } },
+      select: { variant_id: true },
+    });
+    const variantIds = variants.map((v) => v.variant_id);
+
+    const images = variantIds.length
+      ? await prisma.productVariantImage.findMany({
+          where: { variant_id: { in: variantIds } },
+          select: { storage_key: true, storage_provider: true },
+        })
+      : [];
+
     const deleted = await prisma.$transaction(async (tx) => {
-      // Get products to delete
-      const products = await tx.product.findMany({
-        where: { created_at: { gt: dateThreshold } },
-        select: { product_id: true }
+      if (variantIds.length) {
+        await tx.shopStock.deleteMany({ where: { variant_id: { in: variantIds } } });
+        await tx.shopProductLevel.deleteMany({ where: { variant_id: { in: variantIds } } });
+        await tx.bulkTransferRequestItem.deleteMany({ where: { variant_id: { in: variantIds } } });
+        await tx.transferRequest.deleteMany({ where: { variant_id: { in: variantIds } } });
+      }
+
+      await tx.debitNoteLineItem.deleteMany({
+        where: {
+          OR: [
+            { product_id: { in: uniqueIds } },
+            ...(variantIds.length ? [{ variant_id: { in: variantIds } }] : []),
+          ],
+        },
+      });
+      await tx.billLineItem.deleteMany({
+        where: {
+          OR: [
+            { product_id: { in: uniqueIds } },
+            ...(variantIds.length ? [{ variant_id: { in: variantIds } }] : []),
+          ],
+        },
+      });
+      await tx.creditNoteLineItem.deleteMany({
+        where: {
+          OR: [
+            { product_id: { in: uniqueIds } },
+            ...(variantIds.length ? [{ variant_id: { in: variantIds } }] : []),
+          ],
+        },
+      });
+      await tx.purchaseItem.deleteMany({ where: { product_id: { in: uniqueIds } } });
+
+      await tx.stockLedger.deleteMany({
+        where: {
+          OR: [
+            { product_id: { in: uniqueIds } },
+            ...(variantIds.length ? [{ variant_id: { in: variantIds } }] : []),
+          ],
+        },
+      });
+      await tx.productStock.deleteMany({ where: { product_id: { in: uniqueIds } } });
+
+      await tx.inwardReceiptItem.updateMany({
+        where: { mapped_product_id: { in: uniqueIds } },
+        data: { mapped_product_id: null, mapped_variant_id: null },
       });
 
-      const productIds = products.map(p => p.product_id);
-      if (productIds.length === 0) return 0;
+      if (variantIds.length) {
+        await tx.productVariantImage.deleteMany({ where: { variant_id: { in: variantIds } } });
+        await tx.productVariant.deleteMany({ where: { product_id: { in: uniqueIds } } });
+      }
 
-      // Delete in correct order (child first)
-      await tx.productStock.deleteMany({ where: { product_id: { in: productIds } } });
-      
-      // Get all variant IDs for these products
-      const variants = await tx.productVariant.findMany({
-        where: { product_id: { in: productIds } },
-        select: { variant_id: true }
-      });
-      const variantIds = variants.map(v => v.variant_id);
-      
-      await tx.productVariantImage.deleteMany({ where: { variant_id: { in: variantIds } } });
-      await tx.productVariant.deleteMany({ where: { product_id: { in: productIds } } });
-      
-      const result = await tx.product.deleteMany({ where: { product_id: { in: productIds } } });
+      const result = await tx.product.deleteMany({ where: { product_id: { in: uniqueIds } } });
       return result.count;
     });
 
-    return { deleted: deleted };
+    await Promise.all(
+      images.map((img) =>
+        MediaService.deleteStoredImage(img.storage_provider, img.storage_key).catch(() => null)
+      )
+    );
+
+    const warehouseIds = [...new Set(products.map((p) => p.warehouse_id))];
+    await Promise.all([
+      ...uniqueIds.map((id) => cacheDel(productDetailCacheKey(id))),
+      ...warehouseIds.map((warehouseId) => cacheDelByPattern(productListCachePattern(warehouseId))),
+    ]);
+
+    return { deleted, product_ids: uniqueIds };
   },
 
   async getBulkTemplateBuffer() {

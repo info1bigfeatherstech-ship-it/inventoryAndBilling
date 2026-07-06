@@ -259,27 +259,17 @@ const ProductController = {
       data: results,
     });
   }),
-    // ========== HARD DELETE PRODUCTS BY DATE (For Testing) ==========
-    hardDeleteByDate: asyncHandler(async (req, res) => {
-      const { date } = req.query;
-      
-      if (!date) {
-        throw new AppError('date query parameter is required (ISO format)', 400, 'DATE_REQUIRED');
-      }
-      
-      const dateThreshold = new Date(date);
-      if (isNaN(dateThreshold.getTime())) {
-        throw new AppError('Invalid date format. Use ISO format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS', 400, 'INVALID_DATE');
-      }
-      
-      const result = await ProductService.hardDeleteProductsByDate(dateThreshold, req.user);
-      
-      return successResponse(res, req, {
-        statusCode: 200,
-        message: `${result.deleted} product(s) permanently deleted`,
-        data: result,
-      });
-    }),
+  // ========== HARD DELETE ARCHIVED PRODUCTS (SUPER_ADMIN) ==========
+  hardDelete: asyncHandler(async (req, res) => {
+    const result = await ProductService.hardDeleteProducts(req.body.product_ids, req.user);
+
+    return successResponse(res, req, {
+      statusCode: 200,
+      message: `${result.deleted} product(s) permanently deleted`,
+      data: result,
+    });
+  }),
+
     // ========== RESTORE SINGLE PRODUCT ==========
 restore: asyncHandler(async (req, res) => {
   const result = await ProductService.restoreProduct(req.params.productId, req.user);

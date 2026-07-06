@@ -238,6 +238,11 @@ const bulkCsvValidator = [
   query('warehouse_id').optional().isString().trim().notEmpty(),
 ];
 
+const hardDeleteValidator = [
+  body('product_ids').isArray({ min: 1 }),
+  body('product_ids.*').isString().trim().notEmpty(),
+];
+
 const inventoryStatsValidator = [
   query('warehouse_id').optional().isString().trim().notEmpty(),
 ];
@@ -254,5 +259,6 @@ module.exports = {
   inventoryStatsValidator,
   bulkUpdateValidator,
   bulkDeleteValidator,
+  hardDeleteValidator,
   bulkCsvValidator,
 };

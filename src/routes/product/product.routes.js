@@ -14,6 +14,7 @@ const {
   inventoryStatsValidator,
   bulkUpdateValidator,
   bulkDeleteValidator,
+  hardDeleteValidator,
   bulkCsvValidator,
   updateVariantValidator,
   createVariantValidator,
@@ -118,7 +119,7 @@ router.delete('/bulk', authorizeRoles(...WRITE_ROLES), bulkDeleteValidator, vali
 router.patch('/bulk/restore', authorizeRoles(...WRITE_ROLES), ProductController.bulkRestore);
 
 
-router.delete('/hard-delete-by-date', authorizeRoles('SUPER_ADMIN'), ProductController.hardDeleteByDate);
+router.delete('/hard-delete', authorizeRoles('SUPER_ADMIN'), hardDeleteValidator, validateRequest, ProductController.hardDelete);
 
 router.get('/by-barcode/:barcode',authorizeRoles(...READ_ROLES), ProductController.getByBarcode);
 
