@@ -3,6 +3,7 @@ const {
   UNIT_OF_MEASURE_VALUES,
   UNIT_OF_MEASURE_DESCRIPTIONS,
 } = require('../../constants/unitOfMeasure.constants');
+const { parseAttributes } = require('../../utils/variantAttributes.utils');
 
 /** Mirrors Prisma GSTType enum (schema.prisma). */
 const GST_TYPE_VALUES = ['CGST_SGST', 'IGST', 'EXEMPT'];
@@ -372,6 +373,102 @@ const generateBulkProductTemplate = async ({ categoryNames = [], vendorNames = [
 //   return Buffer.from(buffer);
 // };
 
+// ─── Product Export (all products → same template column layout) ─────────────
+// Adds a leading warehouse_name column (products are per-warehouse) and a
+// trailing images column (comma-separated variant image URLs). One row = one
+// variant, mirroring the bulk upload template so the file stays human-readable.
+
+const EXPORT_HEADERS = ['warehouse_name', ...UPLOAD_DATA_HEADERS, 'images'];
+
+const exportNumberOrBlank = (value) => {
+  if (value === null || value === undefined || value === '') return null;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+};
+
+/** Storage shape [{key,value}] → template string "Color:White|Size:M". */
+const attributesToTemplateString = (raw) => {
+  const parsed = parseAttributes(raw);
+  if (!parsed?.length) return '';
+  return parsed.map(({ key, value }) => `${key}:${value}`).join('|');
+};
+
+const variantImageUrls = (variant) => {
+  const images = Array.isArray(variant?.images) ? variant.images : [];
+  return images.map((img) => img?.url).filter(Boolean).join(', ');
+};
+
+/** Build one export row (array in EXPORT_HEADERS order) for a product + variant. */
+const buildExportRowForVariant = (product, variant) => {
+  const v = variant || {};
+  return [
+    product.warehouse?.warehouse_name || '',
+    product.name || '',
+    product.title || '',
+    product.description || '',
+    product.brand_name || '',
+    v.product_code || product.product_code || '',
+    product.primary_vendor?.company_name || '',
+    product.category?.name || '',
+    product.sub_category?.name || '',
+    exportNumberOrBlank(v.mrp),
+    exportNumberOrBlank(v.special_price),
+    exportNumberOrBlank(v.wholesale_price),
+    exportNumberOrBlank(v.purchase_price),
+    exportNumberOrBlank(v.expenses),
+    v.warranty ?? product.warranty ?? '',
+    attributesToTemplateString(v.attributes),
+    product.hsn_code || '',
+    exportNumberOrBlank(product.gst_percent),
+    product.gst_type || '',
+    product.unit_of_measure || '',
+    exportNumberOrBlank(v.weight),
+    exportNumberOrBlank(v.length),
+    exportNumberOrBlank(v.width),
+    exportNumberOrBlank(v.height),
+    exportNumberOrBlank(v.low_stock_threshold),
+    v.remarks || '',
+    variantImageUrls(v),
+  ];
+};
+
+/**
+ * Build an Excel workbook of all products (one row per variant) for export.
+ * @param {{ products: Array<object> }} params
+ * @returns {Promise<Buffer>}
+ */
+const generateProductExportBuffer = async ({ products = [] } = {}) => {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = TEMPLATE_APP_NAME;
+  workbook.created = new Date();
+
+  const ws = workbook.addWorksheet('Products');
+  ws.addRow(EXPORT_HEADERS);
+  ws.getRow(1).font = { bold: true };
+
+  for (const product of products) {
+    const variants = Array.isArray(product.variants) && product.variants.length
+      ? product.variants
+      : [null];
+    for (const variant of variants) {
+      ws.addRow(buildExportRowForVariant(product, variant));
+    }
+  }
+
+  EXPORT_HEADERS.forEach((header, index) => {
+    const col = ws.getColumn(index + 1);
+    col.width = ['description', 'images', 'name', 'title'].includes(header)
+      ? 40
+      : Math.max(header.length + 2, 14);
+    // Keep product_code as text so leading zeros (e.g. 0004-1) are preserved.
+    if (header === 'product_code') col.numFmt = '@';
+  });
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  return Buffer.from(buffer);
+};
+
 module.exports = {
   generateBulkProductTemplate,
+  generateProductExportBuffer,
 };

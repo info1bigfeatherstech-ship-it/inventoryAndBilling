@@ -293,6 +293,48 @@ const PRODUCT_LIST_SELECT = {
   },
 };
 
+const PRODUCT_EXPORT_SELECT = {
+  product_id: true,
+  warehouse_id: true,
+  product_code: true,
+  name: true,
+  title: true,
+  description: true,
+  brand_name: true,
+  warranty: true,
+  hsn_code: true,
+  gst_percent: true,
+  gst_type: true,
+  unit_of_measure: true,
+  is_active: true,
+  warehouse: { select: { warehouse_id: true, warehouse_name: true } },
+  primary_vendor: { select: { company_name: true } },
+  category: { select: { name: true } },
+  sub_category: { select: { name: true } },
+  variants: {
+    orderBy: [{ sort_order: 'asc' }, { created_at: 'asc' }],
+    select: {
+      product_code: true,
+      sku: true,
+      attributes: true,
+      mrp: true,
+      special_price: true,
+      wholesale_price: true,
+      purchase_price: true,
+      expenses: true,
+      warranty: true,
+      weight: true,
+      length: true,
+      width: true,
+      height: true,
+      low_stock_threshold: true,
+      remarks: true,
+      is_active: true,
+      images: { orderBy: { sort_order: 'asc' }, select: { url: true } },
+    },
+  },
+};
+
 const PRODUCT_DETAIL_SELECT = {
   product_id: true,
   warehouse_id: true,
@@ -2535,6 +2577,21 @@ async listInactiveProducts(query = {}, user) {
     const categoryNames = await CategoryService.getActiveCategoryNames();
     const vendorNames = await VendorService.getActiveVendorNames();
     return bulkTemplateService.generateBulkProductTemplate({ categoryNames, vendorNames });
+  },
+
+  /**
+   * Export all products (active + inactive) as an Excel buffer, warehouse-scoped.
+   * Super admin (no warehouse filter) → all warehouses; warehouse users → own only.
+   * One row per variant, matching the bulk template columns + warehouse_name + images.
+   */
+  async getProductsExportBuffer(user) {
+    const where = buildProductWhere({ include_inactive: true }, user);
+    const products = await prisma.product.findMany({
+      where,
+      orderBy: [{ warehouse_id: 'asc' }, { product_code: 'asc' }],
+      select: PRODUCT_EXPORT_SELECT,
+    });
+    return bulkTemplateService.generateProductExportBuffer({ products });
   },
 
   async getInventoryStats(_query = {}, user) {

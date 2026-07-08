@@ -242,6 +242,15 @@ const ProductController = {
     return res.send(buffer);
   }),
 
+  bulkExportProducts: asyncHandler(async (req, res) => {
+    const buffer = await ProductService.getProductsExportBuffer(withUserContext(req));
+    const stamp = new Date().toISOString().slice(0, 10);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="products-export-${stamp}.xlsx"`);
+    res.setHeader('Cache-Control', 'no-store');
+    return res.send(buffer);
+  }),
+
   bulkUpdate: asyncHandler(async (req, res) => {
     const results = await ProductService.bulkUpdate(req.body.items, req.user);
     return successResponse(res, req, {

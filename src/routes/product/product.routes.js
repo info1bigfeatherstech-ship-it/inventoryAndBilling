@@ -112,6 +112,11 @@ router.get(
   authorizeRoles(...READ_ROLES),
   ProductController.bulkDownloadTemplate
 );
+router.get(
+  '/bulk/export',
+  authorizeRoles(...WRITE_ROLES),
+  ProductController.bulkExportProducts
+);
 router.patch('/bulk', authorizeRoles(...WRITE_ROLES), bulkUpdateValidator, validateRequest, ProductController.bulkUpdate);
 router.delete('/bulk', authorizeRoles(...WRITE_ROLES), bulkDeleteValidator, validateRequest, ProductController.bulkDelete);
 
