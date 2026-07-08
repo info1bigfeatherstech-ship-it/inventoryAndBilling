@@ -366,9 +366,209 @@ const buildVariantCode = (baseProductCode, serial) => `${baseProductCode}-${seri
 
 const parseVariantSerial = (variantCode, baseProductCode) => {
   const prefix = `${baseProductCode}-`;
-  if (!variantCode || !variantCode.startsWith(prefix)) return null;
-  const n = parseInt(variantCode.slice(prefix.length), 10);
+  const code = normalizeCode(variantCode);
+  const base = normalizeCode(baseProductCode);
+  if (!code || !base) return null;
+  if (code === base) return 1;
+  if (!code.startsWith(prefix)) return null;
+  const n = parseInt(code.slice(prefix.length), 10);
   return Number.isFinite(n) && n > 0 ? n : null;
+};
+
+const BULK_VARIANT_CODE_RE = /^([A-Z0-9]+)-(\d+)$/;
+const BULK_BASE_CODE_RE = /^[A-Z0-9]+$/;
+
+/** Preserve CSV base token exactly (trim + uppercase only). 0398 stays 0398; 398 stays 398. */
+const normalizeBulkBaseToken = (base) => String(base || '').trim().toUpperCase();
+
+/** Bulk CSV: bare base (2313) → primary variant 2313-1; explicit suffix (2313-2) kept as-is. */
+const parseBulkVariantProductCode = (raw, rowNumber) => {
+  const normalized = normalizeProductCode(raw);
+  if (!normalized) {
+    throw new Error(`Row ${rowNumber}: product_code is required`);
+  }
+
+  const variantMatch = normalized.match(BULK_VARIANT_CODE_RE);
+  if (variantMatch) {
+    const base = normalizeBulkBaseToken(variantMatch[1]);
+    const serial = Number(variantMatch[2]);
+    if (!Number.isFinite(serial) || serial < 1) {
+      throw new Error(`Row ${rowNumber}: variant number must be 1 or greater (e.g. ${base}-1).`);
+    }
+    return {
+      base,
+      serial,
+      productCode: `${base}-${serial}`,
+      inputWasBare: false,
+      rawInput: normalized,
+    };
+  }
+
+  if (BULK_BASE_CODE_RE.test(normalized)) {
+    const base = normalizeBulkBaseToken(normalized);
+    return {
+      base,
+      serial: 1,
+      productCode: `${base}-1`,
+      inputWasBare: true,
+      rawInput: base,
+    };
+  }
+
+  throw new Error(
+    `Row ${rowNumber}: invalid product_code "${normalized}". Use a base code (e.g. 2313) or variant code (e.g. 2313-1).`
+  );
+};
+
+const getMaxVariantSerialForBase = async (prismaClient, baseCode, warehouseId) => {
+  const products = await prismaClient.product.findMany({
+    where: { warehouse_id: warehouseId, product_code: baseCode },
+    select: {
+      variants: { select: { product_code: true } },
+    },
+  });
+
+  let maxSerial = 0;
+  for (const product of products) {
+    for (const variant of product.variants) {
+      const serial = parseVariantSerial(variant.product_code, baseCode);
+      if (serial && serial > maxSerial) maxSerial = serial;
+    }
+  }
+  return maxSerial;
+};
+
+const findDuplicateBulkCodesInCsv = (rows) => {
+  const rowNumbersByCode = new Map();
+  for (const row of rows) {
+    try {
+      const { productCode } = parseBulkVariantProductCode(row.product_code, row.rowNumber);
+      if (!rowNumbersByCode.has(productCode)) rowNumbersByCode.set(productCode, []);
+      rowNumbersByCode.get(productCode).push(row.rowNumber);
+    } catch {
+      // Row-level format errors are reported per product group.
+    }
+  }
+  return rowNumbersByCode;
+};
+
+const assertBulkVariantCodesForGroup = async (productRows, warehouseId, duplicateCodesInCsv = new Map()) => {
+  const productName = productRows[0]?.name || 'Product';
+  const parsed = productRows.map((row) => ({
+    row,
+    ...parseBulkVariantProductCode(row.product_code, row.rowNumber),
+  }));
+
+  const bases = [...new Set(parsed.map((entry) => entry.base))];
+  if (bases.length > 1) {
+    throw new Error(
+      `All rows for "${productName}" must use the same base product_code (found: ${bases.join(', ')}).`
+    );
+  }
+
+  const base = bases[0];
+  const serials = parsed.map((entry) => entry.serial);
+
+  for (const entry of parsed) {
+    const duplicateRows = duplicateCodesInCsv.get(entry.productCode) || [];
+    if (duplicateRows.length > 1) {
+      const bareRows = parsed
+        .filter((item) => duplicateRows.includes(item.row.rowNumber) && item.inputWasBare)
+        .map((item) => item.row.rowNumber);
+      const bareNote = bareRows.length > 1
+        ? ` Base code ${base} without suffix is treated as ${base}-1 — only one row per product may use it.`
+        : '';
+      throw new Error(
+        `Row ${entry.row.rowNumber}: product_code ${entry.productCode} is duplicated in CSV (rows: ${duplicateRows.join(', ')}). Each variant code must be unique.${bareNote}`
+      );
+    }
+  }
+
+  const duplicateSerial = serials.find((serial, index) => serials.indexOf(serial) !== index);
+  if (duplicateSerial) {
+    const bareCount = parsed.filter((entry) => entry.inputWasBare && entry.serial === duplicateSerial).length;
+    const bareNote = bareCount > 1
+      ? ` Multiple rows use base code ${base} (each becomes ${base}-1). Use ${base}-1 once, then ${base}-2, ${base}-3 for more variants.`
+      : '';
+    throw new Error(
+      `Duplicate variant code ${base}-${duplicateSerial} in CSV for "${productName}". Each variant row must have a unique suffix.${bareNote}`
+    );
+  }
+
+  const existingProduct = await prisma.product.findFirst({
+    where: {
+      warehouse_id: warehouseId,
+      name: { equals: productName, mode: 'insensitive' },
+    },
+    select: { product_id: true, product_code: true, name: true },
+  });
+
+  const maxDbSerial = await getMaxVariantSerialForBase(prisma, base, warehouseId);
+  const isNewProduct = !existingProduct;
+
+  if (isNewProduct && !serials.includes(1)) {
+    throw new Error(
+      `"${productName}": first variant must be ${base} or ${base}-1 (primary variant). Use ${base}-2, ${base}-3 for additional variants.`
+    );
+  }
+
+  if (isNewProduct) {
+    const sortedSerials = [...serials].sort((a, b) => a - b);
+    for (let i = 0; i < sortedSerials.length; i += 1) {
+      if (sortedSerials[i] !== i + 1) {
+        throw new Error(
+          `"${productName}": variant suffixes must be consecutive starting at -1 (expected ${base}-${i + 1}).`
+        );
+      }
+    }
+  }
+
+  if (existingProduct && existingProduct.product_code !== base) {
+    throw new Error(
+      `"${productName}" already exists with base code ${existingProduct.product_code}, but CSV uses ${base}.`
+    );
+  }
+
+  if (isNewProduct) {
+    const existingBaseProduct = await prisma.product.findFirst({
+      where: { warehouse_id: warehouseId, product_code: base },
+      select: { name: true },
+    });
+    if (existingBaseProduct) {
+      throw new Error(
+        `Base product code ${base} is already used by "${existingBaseProduct.name}". Use a different base code or add variants to that product.`
+      );
+    }
+  }
+
+  for (const entry of parsed) {
+    const existingVariant = await prisma.productVariant.findFirst({
+      where: {
+        product_code: entry.productCode,
+        product: { warehouse_id: warehouseId },
+      },
+      select: { variant_id: true },
+    });
+
+    if (existingVariant) {
+      const nextSerial = maxDbSerial + 1;
+      const bareHint = entry.inputWasBare
+        ? ` Base code ${entry.rawInput} is treated as primary variant ${entry.productCode}.`
+        : '';
+      throw new Error(
+        `Row ${entry.row.rowNumber}: variant ${entry.productCode} already exists.${bareHint} Use ${base}-${nextSerial} for the next new variant.`
+      );
+    }
+
+    if (entry.serial <= maxDbSerial) {
+      const nextSerial = maxDbSerial + 1;
+      throw new Error(
+        `Row ${entry.row.rowNumber}: variants up to ${base}-${maxDbSerial} already exist in this warehouse. Use ${base}-${nextSerial} or higher.`
+      );
+    }
+  }
+
+  return parsed;
 };
 
 const resolveSpecialPriceInput = (obj) => {
@@ -986,6 +1186,35 @@ const normalizeProductCode = (value) => {
     return `${baseToken}-${seq}`;
   }
   return s;
+};
+
+/**
+ * Resolve the image folder for a bulk variant, mirroring CSV product_code rules:
+ * - Primary variant (serial 1): folder may be "<base>-1" (preferred) OR bare "<base>".
+ * - Non-primary variants (serial >= 2): only exact "<base>-<serial>" is accepted.
+ * A bare "<base>" folder never applies to -2/-3/... variants.
+ * Returns the folder path only if it exists, is a directory, and contains image files.
+ */
+const resolveBulkImageFolder = ({ imagesRootFolder, base, serial, productCode }) => {
+  if (!imagesRootFolder) return null;
+
+  const candidates = serial === 1
+    ? [productCode, base] // explicit "<base>-1" wins over bare "<base>"
+    : [productCode];
+
+  const seen = new Set();
+  for (const candidate of candidates) {
+    if (!candidate || seen.has(candidate)) continue;
+    seen.add(candidate);
+
+    const folderPath = path.join(imagesRootFolder, candidate);
+    if (!fs.existsSync(folderPath) || !fs.statSync(folderPath).isDirectory()) continue;
+
+    const files = fs.readdirSync(folderPath).filter((f) => /\.(jpg|jpeg|png|gif|webp)$/i.test(f));
+    if (files.length > 0) return folderPath;
+  }
+
+  return null;
 };
 
 const uploadBulkVariantImages = async ({ warehouseId, productId, variantId, productName, imageFolderPath }) => {
@@ -1806,6 +2035,7 @@ const ProductService = {
     }
 
     const productGroups = Array.from(productMap.values());
+    const duplicateCodesInCsv = findDuplicateBulkCodesInCsv(productGroups.flatMap((group) => group.rows));
 
     const BATCH_SIZE = 50;
     const BATCH_DELAY_MS = 1000;
@@ -1819,7 +2049,8 @@ const ProductService = {
             warehouseId,
             preview,
             imagesRootFolder,
-            results
+            results,
+            duplicateCodesInCsv,
           });
         } catch (error) {
           results.failed.push({
@@ -1828,6 +2059,9 @@ const ProductService = {
             message: error.message,
             code: error.code || 'ROW_FAILED',
           });
+          if (preview && results.preview) {
+            results.preview.invalid += 1;
+          }
         }
       }
 
@@ -1839,9 +2073,11 @@ const ProductService = {
     return results;
   },
 
-  async processSingleProductGroup(productData, { warehouseId, preview, imagesRootFolder, results }) {
+  async processSingleProductGroup(productData, { warehouseId, preview, imagesRootFolder, results, duplicateCodesInCsv = new Map() }) {
     const { name: productName, rows: productRows } = productData;
     const firstRow = productRows[0];
+
+    const parsedCodes = await assertBulkVariantCodesForGroup(productRows, warehouseId, duplicateCodesInCsv);
 
     const primary_vendor_id = await resolveVendorSmart(
       firstRow.primary_vendor_id || firstRow.vendor_name,
@@ -1856,25 +2092,17 @@ const ProductService = {
     const variantsData = [];
     const missingImageVariants = [];
 
-    for (const row of productRows) {
-      const productCode = normalizeProductCode(row.product_code);
+    for (let index = 0; index < productRows.length; index += 1) {
+      const row = productRows[index];
+      const { productCode, base, serial } = parsedCodes[index];
       if (!productCode) throw new Error(`product_code required for variant at row ${row.rowNumber}`);
 
       let imageFolderPath = null;
       let imagesMissing = false;
 
       if (!preview && imagesRootFolder) {
-        const folderPath = path.join(imagesRootFolder, productCode);
-        if (fs.existsSync(folderPath) && fs.statSync(folderPath).isDirectory()) {
-          const files = fs.readdirSync(folderPath).filter((f) => /\.(jpg|jpeg|png|gif|webp)$/i.test(f));
-          if (files.length > 0) {
-            imageFolderPath = folderPath;
-          } else {
-            imagesMissing = true;
-          }
-        } else {
-          imagesMissing = true;
-        }
+        imageFolderPath = resolveBulkImageFolder({ imagesRootFolder, base, serial, productCode });
+        if (!imageFolderPath) imagesMissing = true;
       }
 
       const priced = buildCsvVariantPrices(row, row.rowNumber);
@@ -1913,7 +2141,7 @@ const ProductService = {
       results.warnings.push({
         product: productName,
         variants: missingImageVariants,
-        message: `Image folder(s) not found or empty for variants: ${missingImageVariants.join(', ')}. Product created without images.`,
+        message: `Image folder(s) not found or empty for variants: ${missingImageVariants.join(', ')}. Product created without images. Folder names must match product_code — primary variant may use base or base-1, other variants must use exact suffix (e.g. base-2).`,
       });
     }
 
@@ -2003,7 +2231,7 @@ const ProductService = {
           ...(primary_vendor_id && { primary_vendor: { connect: { vendor_id: primary_vendor_id } } }),
           ...(category_id && { category: { connect: { category_id } } }),
           ...(sub_category_id && { sub_category: { connect: { category_id: sub_category_id } } }),
-          product_code: variantsData[0].product_code.split('-')[0],
+          product_code: normalizeBaseProductCode(variantsData[0].product_code),
           name: productName,
           hsn_code: sanitizeOptionalHsn(firstRow.hsn_code),
           gst_percent: sanitizeOptionalGstPercent(firstRow.gst_percent),

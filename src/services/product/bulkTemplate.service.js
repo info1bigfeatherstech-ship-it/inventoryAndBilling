@@ -69,8 +69,8 @@ const buildInstructionsRows = () => [
   ['Use the "Upload Data" sheet to fill in product details. Read this sheet carefully before starting.', null],
   [null, null],
   ['GENERAL RULES', null],
-  ['One row = one variant', 'Each row maps to a ProductVariant. If a product has 2 sizes, add 2 rows with the same name but different product_code (e.g. 9902-1, 9902-2).'],
-  ['product_code format', 'Must be unique per warehouse. Format: NNNN-V where NNNN is product number and V is variant number (e.g. 9901-1).'],
+  ['One row = one variant', 'Each row maps to a ProductVariant. Single variant: use base code (e.g. 3321) or 3321-1 — both create the primary variant. Multiple variants: same name with 3212, 3212-2, 3212-3 or 3212-1, 3212-2, 3212-3.'],
+  ['product_code format', 'Single variant: base code alone (e.g. 2313) auto-creates primary variant 2313-1. You may also write 2313-1 explicitly. Multi-variant: first row 2313 or 2313-1, then 2313-2, 2313-3 on separate rows with the same name. Duplicate base codes in the same CSV are rejected. Product code is stored exactly as entered (0398 stays 0398, 398 stays 398). Set product_code column to Text in Excel before filling.'],
   ['Required fields', formatFieldList(MANDATORY_HEADER_FIELDS)],
   ['Optional fields', formatFieldList(OPTIONAL_HEADER_FIELDS)],
   ['No empty required fields', 'Red header columns on Upload Data are required. Leave optional fields blank if not applicable. Do NOT delete or reorder columns.'],
@@ -184,7 +184,7 @@ const ENUM_REFERENCE_ROWS = [
   ['Schema enum', 'EXEMPT', null],
   [null, null, null],
   ['Notes', 'Notes', 'Notes'],
-  ['product_code', 'Must be unique per warehouse', 'Format convention: NNNN-V  (e.g. 9901-1, 9901-2 for 2 variants of same product)'],
+  ['product_code', 'Must be unique per warehouse', 'Single variant: 2313 or 2313-1 (same result). Multi-variant: 2313, 2313-2, 2313-3 or 2313-1, 2313-2, 2313-3. Do not repeat the same code in one CSV.'],
   ['hsn_code', 'Harmonised System of Nomenclature', '4–8 digit code. Refer to GST HSN schedule for your product category.'],
   ['expenses', 'Landed cost additions', 'Freight, handling charges etc. Default 0 if blank.'],
 ];
@@ -249,8 +249,12 @@ const buildUploadDataSheet = (workbook) => {
   });
 
   addRows(ws, UPLOAD_DATA_SAMPLE_ROWS);
-  UPLOAD_DATA_HEADERS.forEach((_, index) => {
-    ws.getColumn(index + 1).width = Math.max(UPLOAD_DATA_HEADERS[index].length + 2, 14);
+  UPLOAD_DATA_HEADERS.forEach((header, index) => {
+    const col = ws.getColumn(index + 1);
+    col.width = Math.max(UPLOAD_DATA_HEADERS[index].length + 2, 14);
+    if (header === 'product_code') {
+      col.numFmt = '@';
+    }
   });
   return ws;
 };
