@@ -1,3 +1,4 @@
+const { roundMoney } = require('../../utils/billing.utils');
 const prisma = require('../../utils/prisma.utils');
 const { AppError } = require('../../errors/AppError');
 const { parsePagination } = require('../../utils/pagination.utils');
@@ -12,6 +13,7 @@ const { resolveShopIdForUser, assertShopReadAccess } = require('../../utils/shop
 const { resolveOwnerShopId } = require('../../utils/transferRequest.utils');
 const {
   generateBulkRequestNumber,
+  getBulkRequestedQuantity,
   getDispatchQuantity,
   getBulkItemInTransit,
   isBulkFullyReceived,
@@ -30,6 +32,13 @@ const {
 } = require('./transferStock.ops');
 const { getWarehouseStockAvailable } = require('../../utils/warehouseStock.utils');
 const { snapshotTransferCost } = require('../../utils/transferCost.utils');
+const AppSettingsService = require('../settings/appSettings.service');
+const {
+  snapshotFranchiseTransferPricing,
+  isFranchiseShopType,
+} = require('../../utils/franchisePrice.utils');
+const { formatBulkTransferRequestForUser } = require('../../utils/franchiseTransferPricing.utils');
+const TransferBillService = require('./transferBill.service');
 
 const TX_OPTIONS = { isolationLevel: 'Serializable', maxWait: 10000, timeout: 30000 };
 
@@ -60,12 +69,27 @@ const BULK_SELECT = {
   cancelled_by: true,
   cancelled_at: true,
   cancel_reason: true,
+  transfer_bill_type: true,
+  transfer_bill_number: true,
+  transfer_bill_generated_at: true,
   created_at: true,
   updated_at: true,
-  from_warehouse: { select: { warehouse_id: true, warehouse_name: true, city: true } },
-  from_shop: { select: { shop_id: true, shop_name: true } },
-  to_shop: { select: { shop_id: true, shop_name: true, city: true } },
-  to_warehouse: { select: { warehouse_id: true, warehouse_name: true, city: true } },
+  from_warehouse: {
+    select: {
+      warehouse_id: true,
+      warehouse_code: true,
+      warehouse_name: true,
+      address: true,
+      city: true,
+      manager_name: true,
+      gstin: true,
+      legal_name: true,
+      state_code: true,
+    },
+  },
+  from_shop: { select: { shop_id: true, shop_code: true, shop_name: true, address: true, city: true } },
+  to_shop: { select: { shop_id: true, shop_code: true, shop_name: true, address: true, city: true, pincode: true, phone: true, email: true, state_code: true, shop_type: true } },
+  to_warehouse: { select: { warehouse_id: true, warehouse_code: true, warehouse_name: true, address: true, city: true } },
   requester: USER_BRIEF,
   approver: USER_BRIEF,
   dispatcher: USER_BRIEF,
@@ -75,6 +99,7 @@ const BULK_SELECT = {
       bulk_item_id: true,
       variant_id: true,
       quantity: true,
+      requested_quantity: true,
       batch_number: true,
       is_approved: true,
       approved_quantity: true,
@@ -82,12 +107,31 @@ const BULK_SELECT = {
       received_quantity: true,
       unit_cost_snapshot: true,
       line_value_snapshot: true,
+      franchise_markup_percent_snapshot: true,
+      franchise_mrp_snapshot: true,
+      franchise_unit_price_snapshot: true,
+      franchise_line_value_snapshot: true,
       variant: {
         select: {
           variant_id: true,
           sku: true,
           product_code: true,
-          product: { select: { product_id: true, name: true, hsn_code: true } },
+          mrp: true,
+          special_price: true,
+          purchase_price: true,
+          expenses: true,
+          warranty: true,
+          attributes: true,
+          product: {
+            select: {
+              product_id: true,
+              name: true,
+              brand_name: true,
+              hsn_code: true,
+              expenses: true,
+              warranty: true,
+            },
+          },
         },
       },
     },
@@ -112,6 +156,7 @@ const loadVariant = async (variantId) => {
       low_stock_threshold: true,
       purchase_price: true,
       expenses: true,
+      mrp: true,
       product: { select: { warehouse_id: true, is_active: true, name: true, expenses: true } },
     },
   });
@@ -178,6 +223,7 @@ const buildLineItems = async (items, fromWarehouseId) => {
     lineItems.push({
       variant_id: item.variant_id,
       quantity: qty,
+      requested_quantity: qty,
       batch_number: batchNumber || null,
     });
   }
@@ -345,12 +391,25 @@ const BulkTransferService = {
           from_warehouse: { select: { warehouse_id: true, warehouse_name: true } },
           to_shop: { select: { shop_id: true, shop_name: true } },
           to_warehouse: { select: { warehouse_id: true, warehouse_name: true } },
-          items: { select: { quantity: true, is_approved: true, approved_quantity: true } },
+          items: { select: { quantity: true, requested_quantity: true, is_approved: true, approved_quantity: true, received_quantity: true } },
         },
       }),
     ]);
 
-    const data = rows.map((row) => ({
+    const data = rows.map((row) => {
+      const requestedTotal = row.items.reduce(
+        (s, i) => s + getBulkRequestedQuantity(i),
+        0
+      );
+      const approvedTotal = row.items.reduce((s, i) => {
+        if (i.is_approved === false) return s;
+        return s + getDispatchQuantity(i);
+      }, 0);
+      const receivedTotal = row.items.reduce(
+        (s, i) => s + (Number(i.received_quantity) || 0),
+        0
+      );
+      return {
       bulk_request_id: row.bulk_request_id,
       bulk_request_number: row.bulk_request_number,
       request_type: row.request_type,
@@ -362,9 +421,13 @@ const BulkTransferService = {
       to_warehouse: row.to_warehouse,
       status: row.status,
       items_count: row.items.length,
-      total_quantity: row.items.reduce((s, i) => s + (i.approved_quantity ?? i.quantity), 0),
+      requested_total_quantity: requestedTotal,
+      approved_total_quantity: approvedTotal,
+      received_total_quantity: receivedTotal,
+      total_quantity: approvedTotal,
       requested_at: row.requested_at,
-    }));
+    };
+    });
 
     return { total, page, limit, requests: data };
   },
@@ -376,7 +439,7 @@ const BulkTransferService = {
     });
     if (!bulk) throw new AppError('Bulk transfer request not found', 404, 'BULK_REQUEST_NOT_FOUND');
     await assertBulkRead(bulk, user);
-    return bulk;
+    return formatBulkTransferRequestForUser(bulk, user);
   },
 
   async approveBulkRequest(bulkRequestId, data, user) {
@@ -409,14 +472,20 @@ const BulkTransferService = {
             if (!item) continue;
 
             const approved = row.approved !== false;
-            const qty = approved ? Number(row.quantity ?? item.quantity) : 0;
+            const qty = approved ? Number(row.quantity ?? getBulkRequestedQuantity(item)) : 0;
+            if (approved && qty > getBulkRequestedQuantity(item)) {
+              throw new AppError(
+                `Approved quantity cannot exceed requested quantity for variant ${row.variant_id}`,
+                400,
+                'INVALID_APPROVED_QUANTITY'
+              );
+            }
 
             await tx.bulkTransferRequestItem.update({
               where: { bulk_item_id: item.bulk_item_id },
               data: {
                 is_approved: approved && qty > 0,
                 approved_quantity: approved && qty > 0 ? qty : 0,
-                quantity: qty > 0 ? qty : item.quantity,
                 rejection_reason: approved ? null : row.reason?.trim() || 'Not approved',
               },
             });
@@ -430,7 +499,7 @@ const BulkTransferService = {
           for (const item of items) {
             await tx.bulkTransferRequestItem.update({
               where: { bulk_item_id: item.bulk_item_id },
-              data: { approved_quantity: item.quantity },
+              data: { approved_quantity: getBulkRequestedQuantity(item) },
             });
           }
         }
@@ -442,19 +511,26 @@ const BulkTransferService = {
           throw new AppError('At least one item must be approved', 409, 'NO_APPROVED_ITEMS');
         }
 
+        const billMeta = await TransferBillService.prepareFranchiseApprove(
+          tx,
+          bulk,
+          data.transfer_bill_type
+        );
+
         return tx.bulkTransferRequest.update({
           where: { bulk_request_id: bulkRequestId },
           data: {
             status: 'APPROVED',
             approved_by: user.userId,
             approved_at: new Date(),
+            ...(billMeta || {}),
           },
           select: BULK_SELECT,
         });
       }, TX_OPTIONS);
 
       logger.info('Bulk transfer approved', { bulk_request_id: bulkRequestId, user_id: user.userId });
-      return updated;
+      return formatBulkTransferRequestForUser(updated, user);
     } catch (err) {
       logger.error('approveBulkRequest failed', { bulkRequestId, error: err.message, stack: err.stack });
       throw err;
@@ -510,7 +586,7 @@ const BulkTransferService = {
       }, TX_OPTIONS);
 
       logger.info('Bulk transfer rejected', { bulk_request_id: bulkRequestId, user_id: user.userId });
-      return updated;
+      return formatBulkTransferRequestForUser(updated, user);
     } catch (err) {
       logger.error('rejectBulkRequest failed', { bulkRequestId, error: err.message, stack: err.stack });
       throw err;
@@ -540,6 +616,18 @@ const BulkTransferService = {
           where: { bulk_request_id: bulkRequestId },
         });
 
+        const destShop =
+          bulk.request_type === 'WH_TO_SHOP' && bulk.to_shop_id
+            ? await tx.shop.findUnique({
+                where: { shop_id: bulk.to_shop_id },
+                select: { shop_type: true },
+              })
+            : null;
+        const isFranchiseDest = isFranchiseShopType(destShop?.shop_type);
+        const franchiseMarkup = isFranchiseDest
+          ? await AppSettingsService.getFranchiseMarkupPercent()
+          : null;
+
         for (const item of items) {
           const qty = getDispatchQuantity(item);
           if (qty <= 0) continue;
@@ -550,11 +638,36 @@ const BulkTransferService = {
           await validateWarehouseStock(tx, variant.variant_id, bulk.from_warehouse_id, qty, batchNumber);
 
           const costSnap = snapshotTransferCost(variant, qty);
+          let franchiseSnap = {};
+          if (isFranchiseDest) {
+            const existingFranchise = item.franchise_unit_price_snapshot;
+            if (existingFranchise != null) {
+              franchiseSnap = {
+                franchise_markup_percent_snapshot: item.franchise_markup_percent_snapshot,
+                franchise_mrp_snapshot: item.franchise_mrp_snapshot,
+                franchise_unit_price_snapshot: item.franchise_unit_price_snapshot,
+                franchise_line_value_snapshot: roundMoney(existingFranchise * qty),
+              };
+            } else {
+              const pricingVariant = await tx.productVariant.findUnique({
+                where: { variant_id: item.variant_id },
+                select: {
+                  mrp: true,
+                  purchase_price: true,
+                  expenses: true,
+                  product: { select: { expenses: true } },
+                },
+              });
+              franchiseSnap = snapshotFranchiseTransferPricing(pricingVariant, qty, franchiseMarkup);
+            }
+          }
+
           await tx.bulkTransferRequestItem.update({
             where: { bulk_item_id: item.bulk_item_id },
             data: {
               unit_cost_snapshot: costSnap.unit_cost,
               line_value_snapshot: costSnap.line_value,
+              ...franchiseSnap,
             },
           });
 
@@ -603,7 +716,7 @@ const BulkTransferService = {
       });
 
       logger.info('Bulk transfer dispatched', { bulk_request_id: bulkRequestId, user_id: user.userId });
-      return updated;
+      return formatBulkTransferRequestForUser(updated, user);
     } catch (err) {
       logger.error('dispatchBulkRequest failed', { bulkRequestId, error: err.message, stack: err.stack });
       throw err;
@@ -734,7 +847,7 @@ const BulkTransferService = {
       });
 
       logger.info('Bulk transfer received', { bulk_request_id: bulkRequestId, status: updated.status });
-      return updated;
+      return formatBulkTransferRequestForUser(updated, user);
     } catch (err) {
       logger.error('receiveBulkRequest failed', { bulkRequestId, error: err.message, stack: err.stack });
       throw err;

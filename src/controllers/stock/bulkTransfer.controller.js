@@ -1,7 +1,10 @@
 const asyncHandler = require('../../utils/asyncHandler.utils');
+const { AppError } = require('../../errors/AppError');
 const BulkTransferService = require('../../services/stock/bulkTransfer.service');
 const TransferChallanService = require('../../services/stock/transferChallan.service');
+const TransferBillService = require('../../services/stock/transferBill.service');
 const { generateTransferChallanPdf } = require('../../services/stock/transferChallanPdf.service');
+const { verifyTransferBillToken } = require('../../utils/transferBillToken.utils');
 const { successResponse, paginatedMeta } = require('../../utils/response.utils');
 
 const BulkTransferController = {
@@ -39,7 +42,32 @@ const BulkTransferController = {
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader(
       'Content-Disposition',
-      `inline; filename="bulk-transfer-challan-${challanDoc.document_number}.pdf"`
+      `inline; filename="transfer-bill-${challanDoc.document_number}.pdf"`
+    );
+    return res.send(buffer);
+  }),
+
+  getPublicTransferBillPdf: asyncHandler(async (req, res) => {
+    let decoded;
+    try {
+      decoded = verifyTransferBillToken(req.params.token);
+    } catch (err) {
+      if (err.name === 'TokenExpiredError') {
+        throw new AppError('Transfer bill link has expired', 410, 'LINK_EXPIRED');
+      }
+      throw new AppError('Invalid transfer bill link', 400, 'INVALID_LINK');
+    }
+
+    if (decoded.kind !== 'bulk_transfer_bill' || !decoded.bulkRequestId) {
+      throw new AppError('Invalid transfer bill link', 400, 'INVALID_LINK');
+    }
+
+    const challanDoc = await TransferBillService.buildBulkTransferBillDocument(decoded.bulkRequestId);
+    const { buffer } = await generateTransferChallanPdf(challanDoc);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="transfer-bill-${challanDoc.document_number}.pdf"`
     );
     return res.send(buffer);
   }),

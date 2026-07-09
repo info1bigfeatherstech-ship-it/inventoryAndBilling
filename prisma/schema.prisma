@@ -160,6 +160,11 @@ enum InwardStatus {
   CANCELLED
 }
 
+enum TransferBillType {
+  GST_INVOICE
+  NON_GST_INVOICE
+}
+
 enum TransferRequestStatus {
   REQUESTED
   APPROVED
@@ -231,6 +236,11 @@ model Warehouse {
   address        String
   city           String
   manager_name   String?
+  /// Optional — required only when approving franchise transfer GST bills from this warehouse.
+  gstin          String?
+  legal_name     String?
+  /// 2-digit GST state code; may be derived from gstin when blank.
+  state_code     String?
   is_active      Boolean @default(true)
   remarks        String?
 
@@ -1284,6 +1294,10 @@ model BulkTransferRequest {
   cancelled_at  DateTime?
   cancel_reason String?
 
+  transfer_bill_type         TransferBillType?
+  transfer_bill_number       String?           @unique
+  transfer_bill_generated_at DateTime?
+
   items BulkTransferRequestItem[]
 
   from_warehouse Warehouse? @relation("BulkTransferFromWarehouse", fields: [from_warehouse_id], references: [warehouse_id])
@@ -1312,6 +1326,8 @@ model BulkTransferRequestItem {
   bulk_request_id String
   variant_id      String
   quantity        Int
+  /// Original qty requested by shop — never changed after create.
+  requested_quantity Int?
   batch_number    String?
 
   is_approved       Boolean @default(true)
@@ -1323,6 +1339,12 @@ model BulkTransferRequestItem {
   /// Snapshotted at dispatch from variant landed cost.
   unit_cost_snapshot  Float?
   line_value_snapshot Float?
+
+  /// Franchise shop transfers — snapshotted at dispatch.
+  franchise_markup_percent_snapshot Float?
+  franchise_mrp_snapshot            Float?
+  franchise_unit_price_snapshot     Float?
+  franchise_line_value_snapshot     Float?
 
   bulk_request BulkTransferRequest @relation(fields: [bulk_request_id], references: [bulk_request_id], onDelete: Cascade)
   variant      ProductVariant      @relation(fields: [variant_id], references: [variant_id])
@@ -1374,9 +1396,19 @@ model TransferRequest {
   cancelled_at  DateTime?
   cancel_reason String?
 
+  transfer_bill_type         TransferBillType?
+  transfer_bill_number       String?           @unique
+  transfer_bill_generated_at DateTime?
+
   /// Snapshotted at dispatch (unit landed cost × dispatch qty).
   unit_cost_snapshot  Float?
   line_value_snapshot Float?
+
+  /// Franchise shop transfers — snapshotted at dispatch (not stored on product master).
+  franchise_markup_percent_snapshot Float?
+  franchise_mrp_snapshot            Float?
+  franchise_unit_price_snapshot     Float?
+  franchise_line_value_snapshot     Float?
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
@@ -1525,6 +1557,25 @@ model UserGoogleDriveToken {
   user User @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
 
   @@map("user_google_drive_tokens")
+}
+
+/// Org-wide application settings (singleton row id = "default").
+model AppSettings {
+  id                       String   @id @default("default")
+  /// Allowed values: 20, 40, 60 — markup on (purchase_price + expenses) for franchise transfer pricing.
+  franchise_markup_percent Int      @default(40)
+  /// GST issuer details for franchise transfer GST invoices (warehouse → franchise shop).
+  transfer_invoice_gstin       String?
+  transfer_invoice_legal_name  String?
+  transfer_invoice_state_code  String?
+  transfer_invoice_address     String?
+  transfer_invoice_city        String?
+  transfer_invoice_phone       String?
+  updated_by               String?
+  created_at               DateTime @default(now())
+  updated_at               DateTime @updatedAt
+
+  @@map("app_settings")
 }
 
 model BackupClientSettings {

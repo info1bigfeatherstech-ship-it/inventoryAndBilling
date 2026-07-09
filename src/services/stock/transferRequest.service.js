@@ -27,6 +27,15 @@ const {
 } = require('../../utils/transferRequest.utils');
 const { deductWarehouseStock } = require('../../utils/warehouseStock.utils');
 const { snapshotTransferCost } = require('../../utils/transferCost.utils');
+const AppSettingsService = require('../settings/appSettings.service');
+const {
+  snapshotFranchiseTransferPricing,
+  isFranchiseShopType,
+} = require('../../utils/franchisePrice.utils');
+const {
+  formatTransferRequestForUser,
+  formatTransferRequestsForUser,
+} = require('../../utils/franchiseTransferPricing.utils');
 
 const TX_OPTIONS = { isolationLevel: 'Serializable', maxWait: 10000, timeout: 30000 };
 
@@ -64,6 +73,10 @@ const REQUEST_SELECT = {
   cancel_reason: true,
   unit_cost_snapshot: true,
   line_value_snapshot: true,
+  franchise_markup_percent_snapshot: true,
+  franchise_mrp_snapshot: true,
+  franchise_unit_price_snapshot: true,
+  franchise_line_value_snapshot: true,
   created_at: true,
   updated_at: true,
   variant: {
@@ -71,13 +84,29 @@ const REQUEST_SELECT = {
       variant_id: true,
       product_code: true,
       sku: true,
-      product: { select: { product_id: true, name: true, warehouse_id: true, hsn_code: true } },
+      mrp: true,
+      special_price: true,
+      purchase_price: true,
+      expenses: true,
+      warranty: true,
+      attributes: true,
+      product: {
+        select: {
+          product_id: true,
+          name: true,
+          brand_name: true,
+          warehouse_id: true,
+          hsn_code: true,
+          expenses: true,
+          warranty: true,
+        },
+      },
     },
   },
-  from_warehouse: { select: { warehouse_id: true, warehouse_code: true, warehouse_name: true } },
-  to_warehouse: { select: { warehouse_id: true, warehouse_code: true, warehouse_name: true } },
-  from_shop: { select: { shop_id: true, shop_code: true, shop_name: true } },
-  to_shop: { select: { shop_id: true, shop_code: true, shop_name: true } },
+  from_warehouse: { select: { warehouse_id: true, warehouse_code: true, warehouse_name: true, address: true, city: true, manager_name: true } },
+  to_warehouse: { select: { warehouse_id: true, warehouse_code: true, warehouse_name: true, address: true, city: true } },
+  from_shop: { select: { shop_id: true, shop_code: true, shop_name: true, address: true, city: true, pincode: true, phone: true } },
+  to_shop: { select: { shop_id: true, shop_code: true, shop_name: true, address: true, city: true, pincode: true, phone: true, email: true, state_code: true, shop_type: true } },
   requester: USER_BRIEF,
   approver: USER_BRIEF,
   dispatcher: USER_BRIEF,
@@ -123,6 +152,9 @@ const loadVariantForTransfer = async (variantId) => {
       expenses: true,
       sku: true,
       product_code: true,
+      mrp: true,
+      purchase_price: true,
+      expenses: true,
       product: {
         select: {
           warehouse_id: true,
@@ -517,7 +549,7 @@ const TransferRequestService = {
         }),
       ]);
 
-      return { total, page, limit, requests };
+      return { total, page, limit, requests: await formatTransferRequestsForUser(requests, user) };
     } catch (err) {
       logger.error('listRequests failed', { error: err.message, stack: err.stack });
       throw err;
@@ -540,7 +572,7 @@ const TransferRequestService = {
         });
         if (!scoped) throw new AppError('Transfer request not found', 404, 'TRANSFER_REQUEST_NOT_FOUND');
       }
-      return request;
+      return formatTransferRequestForUser(request, user);
     } catch (err) {
       logger.error('getRequestById failed', { requestId, error: err.message, stack: err.stack });
       throw err;
@@ -587,7 +619,7 @@ const TransferRequestService = {
         }),
       ]);
 
-      return { total, page, limit, requests };
+      return { total, page, limit, requests: await formatTransferRequestsForUser(requests, user) };
     } catch (err) {
       logger.error('getMyRequests failed', { error: err.message, stack: err.stack });
       throw err;
@@ -670,6 +702,27 @@ const TransferRequestService = {
 
         const costSnap = snapshotTransferCost(variant, locked.quantity);
 
+        let franchiseSnap = {};
+        if (locked.request_type === 'WH_TO_SHOP' && locked.to_shop_id) {
+          const destShop = await tx.shop.findUnique({
+            where: { shop_id: locked.to_shop_id },
+            select: { shop_type: true },
+          });
+          if (isFranchiseShopType(destShop?.shop_type)) {
+            const markup = await AppSettingsService.getFranchiseMarkupPercent();
+            const pricingVariant = await tx.productVariant.findUnique({
+              where: { variant_id: locked.variant_id },
+              select: {
+                mrp: true,
+                purchase_price: true,
+                expenses: true,
+                product: { select: { expenses: true } },
+              },
+            });
+            franchiseSnap = snapshotFranchiseTransferPricing(pricingVariant, locked.quantity, markup);
+          }
+        }
+
         await tx.transferRequest.update({
           where: { request_id: requestId },
           data: {
@@ -680,6 +733,7 @@ const TransferRequestService = {
             expected_delivery: data.expected_delivery ? new Date(data.expected_delivery) : null,
             unit_cost_snapshot: costSnap.unit_cost,
             line_value_snapshot: costSnap.line_value,
+            ...franchiseSnap,
           },
         });
 
@@ -709,7 +763,7 @@ const TransferRequestService = {
         ledger_id: result.ledger_id,
       });
 
-      return result.request;
+      return formatTransferRequestForUser(result.request, user);
     } catch (err) {
       logger.error('dispatchRequest failed', { requestId, error: err.message, stack: err.stack });
       throw err;

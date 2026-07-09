@@ -5,6 +5,7 @@ const BulkTransferController = require('../../controllers/stock/bulkTransfer.con
 const { validateRequest } = require('../../middlewares/validation.middleware');
 const { requireAuth, authorizeRoles } = require('../../middlewares/auth.middleware');
 const { idempotency } = require('../../middlewares/idempotency.middleware');
+const { createRateLimiter, RL_KEY_PREFIX } = require('../../middlewares/rateLimiter.middleware');
 const {
   bulkRequestIdParam,
   createBulkValidator,
@@ -23,6 +24,14 @@ const DISPATCH_ROLES = ['SUPER_ADMIN', 'WH_MANAGER', 'WH_STOCK_LISTER'];
 const RECEIVE_ROLES = ['SUPER_ADMIN', 'SHOP_OWNER', 'SHOP_MANAGER', 'WH_MANAGER', 'WH_STOCK_LISTER'];
 
 const idem24h = idempotency({ ttlSeconds: 86400 });
+
+const publicTransferBillLimiter = createRateLimiter({
+  max: 30,
+  windowMs: 15 * 60 * 1000,
+  keyPrefix: `${RL_KEY_PREFIX}:public-transfer-bill`,
+});
+
+router.get('/public/:token', publicTransferBillLimiter, BulkTransferController.getPublicTransferBillPdf);
 
 router.use(requireAuth);
 

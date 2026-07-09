@@ -23,12 +23,20 @@ const generateBulkRequestNumber = async (tx = prisma) => {
 };
 
 /**
- * Dispatchable quantity for a bulk line.
+ * Original requested qty (immutable after create).
+ * @param {object} item
+ */
+const getBulkRequestedQuantity = (item) =>
+  Number(item.requested_quantity ?? item.quantity) || 0;
+
+/**
+ * Warehouse-approved / sent qty. Only set after WH approves (approved_quantity).
  * @param {object} item
  */
 const getDispatchQuantity = (item) => {
   if (item.is_approved === false) return 0;
-  return Number(item.approved_quantity ?? item.quantity) || 0;
+  if (item.approved_quantity != null) return Number(item.approved_quantity) || 0;
+  return 0;
 };
 
 /**
@@ -70,6 +78,7 @@ const isBulkPartiallyReceived = (items) => {
 
 module.exports = {
   generateBulkRequestNumber,
+  getBulkRequestedQuantity,
   getDispatchQuantity,
   getBulkItemInTransit,
   isBulkFullyReceived,

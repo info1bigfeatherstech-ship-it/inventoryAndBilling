@@ -5,6 +5,12 @@ const { calculateReorderQuantity } = require('../../utils/stock.utils');
 const { getWarehouseStockAvailable } = require('../../utils/warehouseStock.utils');
 const { parsePagination } = require('../../utils/pagination.utils');
 const logger = require('../../utils/logger.utils');
+const AppSettingsService = require('../settings/appSettings.service');
+const {
+  calculateFranchiseUnitPrice,
+  isFranchiseShopType,
+  isWarehouseInternalRole,
+} = require('../../utils/franchisePrice.utils');
 
 const CATALOG_MODES = ['new', 'existing', 'all'];
 
@@ -64,6 +70,18 @@ const ShopWarehouseCatalogService = {
     if (!warehouse) throw new AppError('Warehouse not found', 404, 'WAREHOUSE_NOT_FOUND');
     if (!warehouse.is_active) throw new AppError('Warehouse is inactive', 409, 'WAREHOUSE_INACTIVE');
 
+    const shop = await prisma.shop.findUnique({
+      where: { shop_id: resolvedShopId },
+      select: { shop_id: true, shop_type: true },
+    });
+    if (!shop) throw new AppError('Shop not found', 404, 'SHOP_NOT_FOUND');
+
+    const isFranchiseShop = isFranchiseShopType(shop.shop_type);
+    const franchiseShopViewer = isFranchiseShop && !isWarehouseInternalRole(user?.role);
+    const franchiseMarkup = isFranchiseShop
+      ? await AppSettingsService.getFranchiseMarkupPercent()
+      : null;
+
     const search = query.search ? String(query.search).trim().toLowerCase() : '';
 
     const whStockRows = await prisma.productStock.groupBy({
@@ -104,12 +122,15 @@ const ShopWarehouseCatalogService = {
           system_barcode: true,
           mrp: true,
           special_price: true,
+          purchase_price: true,
+          expenses: true,
           product: {
             select: {
               product_id: true,
               product_code: true,
               name: true,
               brand_name: true,
+              expenses: true,
             },
           },
         },
@@ -190,7 +211,6 @@ const ShopWarehouseCatalogService = {
         sku: variant.sku,
         system_barcode: variant.system_barcode,
         mrp: variant.mrp,
-        special_price: variant.special_price,
         warehouse_available: warehouseAvailable,
         shop_available: shopAvailable,
         shop_in_transit: shopInTransit,
@@ -200,6 +220,16 @@ const ShopWarehouseCatalogService = {
         below_min: belowMin,
         selectable: warehouseAvailable > 0,
       };
+
+      if (isFranchiseShop) {
+        variantPayload.franchise_unit_price = calculateFranchiseUnitPrice(variant, franchiseMarkup);
+      }
+      if (!franchiseShopViewer) {
+        variantPayload.special_price = variant.special_price;
+        if (isFranchiseShop && isWarehouseInternalRole(user?.role)) {
+          variantPayload.purchase_price = variant.purchase_price;
+        }
+      }
 
       const productId = variant.product_id;
       if (!productMap.has(productId)) {
@@ -236,6 +266,9 @@ const ShopWarehouseCatalogService = {
       warehouse_name: warehouse.warehouse_name,
       warehouse_code: warehouse.warehouse_code,
       mode,
+      is_franchise_shop: isFranchiseShop,
+      franchise_shop_pricing_view: franchiseShopViewer,
+      franchise_markup_percent: franchiseMarkup,
       products,
       meta: {
         page,

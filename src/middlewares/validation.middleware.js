@@ -1,5 +1,6 @@
 const { validationResult } = require('express-validator');
 const { AppError } = require('./error.middleware');
+const { humanizeValidationErrors } = require('../utils/validationMessage.utils');
 
 const validateRequest = (req, res, next) => {
   const errors = validationResult(req);
@@ -10,8 +11,10 @@ const validateRequest = (req, res, next) => {
     message: err.msg,
   }));
 
+  const summary = humanizeValidationErrors(formatted);
+
   return next(
-    new AppError('Validation failed', 400, 'VALIDATION_ERROR', {
+    new AppError(summary, 400, 'VALIDATION_ERROR', {
       fields: formatted,
     })
   );

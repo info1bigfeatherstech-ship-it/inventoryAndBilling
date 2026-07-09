@@ -1,6 +1,11 @@
 const { AppError } = require('../../errors/AppError');
+const { roundMoney } = require('../../utils/billing.utils');
+const { isFranchiseWhToShopTransfer } = require('../../utils/franchiseTransferPricing.utils');
 const TransferRequestService = require('./transferRequest.service');
 const BulkTransferService = require('./bulkTransfer.service');
+const TransferBillService = require('./transferBill.service');
+const { TRANSFER_BILL_READY_STATUSES } = require('../../utils/transferBill.utils');
+const { getDispatchQuantity } = require('../../utils/bulkTransfer.utils');
 
 const CHALLAN_PRINT_STATUSES = new Set([
   'DISPATCHED',
@@ -10,6 +15,97 @@ const CHALLAN_PRINT_STATUSES = new Set([
   'COMPLETED',
 ]);
 
+const REQUEST_TYPE_LABELS = {
+  WH_TO_SHOP: 'Warehouse → Shop',
+  WH_TO_WH: 'Warehouse → Warehouse',
+  SHOP_TO_SHOP: 'Shop → Shop',
+};
+
+const lineMetaFromVariant = (variant) => ({
+  brand_name: variant?.product?.brand_name || null,
+  warranty: variant?.warranty || variant?.product?.warranty || null,
+  attributes: variant?.attributes || null,
+});
+
+const buildIssuerRecipient = (record) => {
+  if (record.request_type === 'WH_TO_WH') {
+    const fromWh = record.from_warehouse;
+    const toWh = record.to_warehouse;
+    return {
+      issuer: fromWh
+        ? {
+            code: fromWh.warehouse_code,
+            name: fromWh.warehouse_name,
+            address: fromWh.address,
+            city: fromWh.city,
+            manager_name: fromWh.manager_name,
+          }
+        : null,
+      recipient: toWh
+        ? {
+            code: toWh.warehouse_code,
+            name: toWh.warehouse_name,
+            address: toWh.address,
+            city: toWh.city,
+          }
+        : null,
+    };
+  }
+  if (record.request_type === 'WH_TO_SHOP') {
+    const fromWh = record.from_warehouse;
+    const toShop = record.to_shop;
+    return {
+      issuer: fromWh
+        ? {
+            code: fromWh.warehouse_code,
+            name: fromWh.warehouse_name,
+            address: fromWh.address,
+            city: fromWh.city,
+            manager_name: fromWh.manager_name,
+          }
+        : null,
+      recipient: toShop
+        ? {
+            code: toShop.shop_code,
+            name: toShop.shop_name,
+            address: toShop.address,
+            city: toShop.city,
+            pincode: toShop.pincode,
+            phone: toShop.phone,
+            state_code: toShop.state_code,
+          }
+        : null,
+    };
+  }
+  if (record.request_type === 'SHOP_TO_SHOP') {
+    const fromShop = record.from_shop;
+    const toShop = record.to_shop;
+    return {
+      issuer: fromShop
+        ? {
+            code: fromShop.shop_code,
+            name: fromShop.shop_name,
+            address: fromShop.address,
+            city: fromShop.city,
+            phone: fromShop.phone,
+          }
+        : null,
+      recipient: toShop
+        ? {
+            code: toShop.shop_code,
+            name: toShop.shop_name,
+            address: toShop.address,
+            city: toShop.city,
+            pincode: toShop.pincode,
+            phone: toShop.phone,
+            state_code: toShop.state_code,
+          }
+        : null,
+    };
+  }
+  return { issuer: null, recipient: null };
+};
+
 const formatLocation = (entity, fallbackCode) => {
   if (!entity) return fallbackCode || '-';
   const name = entity.warehouse_name || entity.shop_name || fallbackCode || '-';
@@ -17,7 +113,7 @@ const formatLocation = (entity, fallbackCode) => {
   return `${name}${city}`;
 };
 
-const buildLinesFromSingleRequest = (request) => {
+const buildCostLinesFromSingleRequest = (request) => {
   const qty =
     request.received_quantity > 0
       ? request.received_quantity
@@ -31,15 +127,41 @@ const buildLinesFromSingleRequest = (request) => {
       quantity: qty,
       unit_cost: request.unit_cost_snapshot,
       line_value: request.line_value_snapshot,
+      ...lineMetaFromVariant(request.variant),
     },
   ];
 };
 
-const buildLinesFromBulk = (bulk) =>
+const buildFranchiseLinesFromSingleRequest = (request) => {
+  const qty =
+    request.received_quantity > 0
+      ? request.received_quantity
+      : request.quantity;
+  const unitMrp = Number(request.franchise_mrp_snapshot) || 0;
+  const unitFranchise = Number(request.franchise_unit_price_snapshot) || 0;
+  const lineMrp = roundMoney(unitMrp * qty);
+  const lineFranchise = roundMoney(unitFranchise * qty);
+  return [
+    {
+      product_name: request.variant?.product?.name,
+      sku: request.variant?.sku || request.variant?.product_code,
+      hsn_code: request.variant?.product?.hsn_code,
+      batch_number: request.batch_number || '',
+      quantity: qty,
+      unit_mrp: unitMrp,
+      unit_franchise_price: unitFranchise,
+      line_mrp_total: lineMrp,
+      line_franchise_total: lineFranchise,
+      ...lineMetaFromVariant(request.variant),
+    },
+  ];
+};
+
+const buildCostLinesFromBulk = (bulk) =>
   (bulk.items || [])
-    .filter((item) => item.is_approved && (item.approved_quantity ?? item.quantity) > 0)
+    .filter((item) => item.is_approved && getDispatchQuantity(item) > 0)
     .map((item) => {
-      const qty = item.approved_quantity ?? item.quantity;
+      const qty = getDispatchQuantity(item);
       return {
         product_name: item.variant?.product?.name,
         sku: item.variant?.sku || item.variant?.product_code,
@@ -48,8 +170,47 @@ const buildLinesFromBulk = (bulk) =>
         quantity: qty,
         unit_cost: item.unit_cost_snapshot,
         line_value: item.line_value_snapshot,
+        ...lineMetaFromVariant(item.variant),
       };
     });
+
+const buildFranchiseLinesFromBulk = (bulk) =>
+  (bulk.items || [])
+    .filter((item) => item.is_approved && getDispatchQuantity(item) > 0)
+    .map((item) => {
+      const qty = getDispatchQuantity(item);
+      const unitMrp = Number(item.franchise_mrp_snapshot) || 0;
+      const unitFranchise = Number(item.franchise_unit_price_snapshot) || 0;
+      const lineMrp = roundMoney(unitMrp * qty);
+      const lineFranchise = roundMoney(unitFranchise * qty);
+      return {
+        product_name: item.variant?.product?.name,
+        sku: item.variant?.sku || item.variant?.product_code,
+        hsn_code: item.variant?.product?.hsn_code,
+        batch_number: item.batch_number || '',
+        quantity: qty,
+        unit_mrp: unitMrp,
+        unit_franchise_price: unitFranchise,
+        line_mrp_total: lineMrp,
+        line_franchise_total: lineFranchise,
+        ...lineMetaFromVariant(item.variant),
+      };
+    });
+
+const computeFranchiseBillTotals = (lines) => {
+  const mrpSubtotal = roundMoney(
+    lines.reduce((sum, line) => sum + (Number(line.line_mrp_total) || 0), 0)
+  );
+  const franchiseSubtotal = roundMoney(
+    lines.reduce((sum, line) => sum + (Number(line.line_franchise_total) || 0), 0)
+  );
+  return {
+    mrp_subtotal: mrpSubtotal,
+    franchise_subtotal: franchiseSubtotal,
+    discount: roundMoney(mrpSubtotal - franchiseSubtotal),
+    final_amount: franchiseSubtotal,
+  };
+};
 
 const resolveFromTo = (record) => {
   if (record.request_type === 'WH_TO_WH') {
@@ -84,6 +245,25 @@ const resolveFromTo = (record) => {
   };
 };
 
+const assertFranchiseSnapshotsReady = (record, lines) => {
+  if (!lines.length) {
+    throw new AppError('Challan has no line items to print', 400, 'CHALLAN_EMPTY');
+  }
+  const missing = lines.some(
+    (line) => line.unit_franchise_price == null || line.unit_mrp == null
+  );
+  if (missing) {
+    throw new AppError(
+      'Franchise transfer bill is available after dispatch with pricing snapshots',
+      409,
+      'FRANCHISE_BILL_NOT_READY'
+    );
+  }
+  if (record.request_type === 'WH_TO_SHOP' && !isFranchiseWhToShopTransfer(record)) {
+    throw new AppError('Not a franchise shop transfer', 400, 'NOT_FRANCHISE_TRANSFER');
+  }
+};
+
 const TransferChallanService = {
   async buildSingleRequestChallan(requestId, user) {
     const request = await TransferRequestService.getRequestById(requestId, user);
@@ -96,8 +276,17 @@ const TransferChallanService = {
     }
 
     const { from_label, to_label, from_address, to_address } = resolveFromTo(request);
+    const { issuer, recipient } = buildIssuerRecipient(request);
+    const isFranchiseBill = isFranchiseWhToShopTransfer(request);
+    const lines = isFranchiseBill
+      ? buildFranchiseLinesFromSingleRequest(request)
+      : buildCostLinesFromSingleRequest(request);
 
-    return {
+    if (isFranchiseBill) {
+      assertFranchiseSnapshotsReady(request, lines);
+    }
+
+    const payload = {
       document_number: request.request_number,
       request_type: request.request_type,
       status: request.status,
@@ -107,13 +296,37 @@ const TransferChallanService = {
       from_address,
       to_label,
       to_address,
+      issuer,
+      recipient,
+      request_type_label: REQUEST_TYPE_LABELS[request.request_type] || request.request_type,
       remarks: request.request_remarks,
-      lines: buildLinesFromSingleRequest(request),
+      is_franchise_bill: isFranchiseBill,
+      bill_format: isFranchiseBill ? 'FRANCHISE' : 'COST',
+      lines,
     };
+
+    if (isFranchiseBill) {
+      payload.franchise_bill_totals = computeFranchiseBillTotals(lines);
+      payload.markup_percent = request.franchise_markup_percent_snapshot;
+    }
+
+    return payload;
   },
 
   async buildBulkRequestChallan(bulkRequestId, user) {
     const bulk = await BulkTransferService.getBulkRequestById(bulkRequestId, user);
+
+    if (bulk.transfer_bill_number && bulk.transfer_bill_type) {
+      if (!TRANSFER_BILL_READY_STATUSES.has(bulk.status)) {
+        throw new AppError(
+          'Transfer bill is available after approval',
+          409,
+          'TRANSFER_BILL_NOT_READY'
+        );
+      }
+      return TransferBillService.buildBulkTransferBillDocument(bulkRequestId);
+    }
+
     if (!CHALLAN_PRINT_STATUSES.has(bulk.status)) {
       throw new AppError(
         'Challan is available after dispatch (DISPATCHED or later)',
@@ -123,8 +336,17 @@ const TransferChallanService = {
     }
 
     const { from_label, to_label } = resolveFromTo(bulk);
+    const { issuer, recipient } = buildIssuerRecipient(bulk);
+    const isFranchiseBill = isFranchiseWhToShopTransfer(bulk);
+    const lines = isFranchiseBill
+      ? buildFranchiseLinesFromBulk(bulk)
+      : buildCostLinesFromBulk(bulk);
 
-    return {
+    if (isFranchiseBill) {
+      assertFranchiseSnapshotsReady(bulk, lines);
+    }
+
+    const payload = {
       document_number: bulk.bulk_request_number,
       request_type: bulk.request_type,
       status: bulk.status,
@@ -132,9 +354,20 @@ const TransferChallanService = {
       tracking_number: bulk.tracking_number,
       from_label,
       to_label,
+      issuer,
+      recipient,
+      request_type_label: REQUEST_TYPE_LABELS[bulk.request_type] || bulk.request_type,
       remarks: bulk.request_remarks,
-      lines: buildLinesFromBulk(bulk),
+      is_franchise_bill: isFranchiseBill,
+      bill_format: isFranchiseBill ? 'FRANCHISE' : 'COST',
+      lines,
     };
+
+    if (isFranchiseBill) {
+      payload.franchise_bill_totals = computeFranchiseBillTotals(lines);
+    }
+
+    return payload;
   },
 };
 

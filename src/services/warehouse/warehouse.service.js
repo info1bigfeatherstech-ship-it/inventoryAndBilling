@@ -14,6 +14,9 @@ const WAREHOUSE_SELECT = {
   address: true,
   city: true,
   manager_name: true,
+  gstin: true,
+  legal_name: true,
+  state_code: true,
   is_active: true,
   remarks: true,
   created_at: true,
@@ -44,6 +47,21 @@ const buildWarehouseWhere = (filters = {}) => {
   return where;
 };
 
+const sanitizeGstFields = (data) => {
+  const out = {};
+  if (Object.prototype.hasOwnProperty.call(data, 'gstin')) {
+    out.gstin = data.gstin?.trim()?.toUpperCase() || null;
+  }
+  if (Object.prototype.hasOwnProperty.call(data, 'legal_name')) {
+    out.legal_name = data.legal_name?.trim() || null;
+  }
+  if (Object.prototype.hasOwnProperty.call(data, 'state_code')) {
+    const raw = data.state_code?.trim() || null;
+    out.state_code = raw;
+  }
+  return out;
+};
+
 const sanitizeWarehouseCreate = (data) => ({
   warehouse_code: data.warehouse_code,
   warehouse_name: data.warehouse_name,
@@ -51,10 +69,22 @@ const sanitizeWarehouseCreate = (data) => ({
   city: data.city,
   manager_name: data.manager_name ?? null,
   remarks: data.remarks ?? null,
+  ...sanitizeGstFields(data),
 });
 
 const sanitizeWarehouseUpdate = (data) => {
-  const allowed = ['warehouse_code', 'warehouse_name', 'address', 'city', 'manager_name', 'is_active', 'remarks'];
+  const allowed = [
+    'warehouse_code',
+    'warehouse_name',
+    'address',
+    'city',
+    'manager_name',
+    'is_active',
+    'remarks',
+    'gstin',
+    'legal_name',
+    'state_code',
+  ];
   const payload = {};
 
   for (const key of allowed) {
@@ -260,6 +290,7 @@ const WarehouseService = {
     if (Object.prototype.hasOwnProperty.call(data, 'address')) {
       payload.address = data.address;
     }
+    Object.assign(payload, sanitizeGstFields(data));
 
     if (!Object.keys(payload).length) {
       throw new AppError('No updatable fields provided', 400, 'EMPTY_UPDATE');

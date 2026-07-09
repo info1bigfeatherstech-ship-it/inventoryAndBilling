@@ -25,6 +25,7 @@ const listBulkValidator = [
 
 const approveBulkValidator = [
   ...bulkRequestIdParam,
+  body('transfer_bill_type').optional().isIn(['GST_INVOICE', 'NON_GST_INVOICE']),
   body('items').optional().isArray(),
   body('items.*.variant_id').optional().isString().trim().notEmpty(),
   body('items.*.quantity').optional().isInt({ min: 0 }),
@@ -40,11 +41,31 @@ const dispatchBulkValidator = [
 
 const receiveBulkValidator = [
   ...bulkRequestIdParam,
-  body('items').optional().isArray(),
-  body('items.*.variant_id').isString().trim().notEmpty(),
-  body('items.*.received_quantity').isInt({ min: 0 }),
-  body('items.*.remarks').optional().isString().trim().isLength({ max: 300 }),
-  body('receive_remarks').optional().isString().trim().isLength({ max: 500 }),
+  body('receive_remarks')
+    .optional({ values: 'null' })
+    .isString()
+    .trim()
+    .isLength({ max: 500 })
+    .withMessage('Receive remarks must be 500 characters or less'),
+  body('items')
+    .optional({ values: 'null' })
+    .isArray({ min: 1 })
+    .withMessage('At least one product line is required when sending items'),
+  body('items')
+    .optional({ values: 'null' })
+    .custom((items) => {
+      if (!items) return true;
+      items.forEach((row, index) => {
+        if (!row?.variant_id || !String(row.variant_id).trim()) {
+          throw new Error(`Please select product on row ${index + 1}`);
+        }
+        const qty = Number(row.received_quantity);
+        if (!Number.isInteger(qty) || qty < 0) {
+          throw new Error(`Please enter a valid received quantity on row ${index + 1}`);
+        }
+      });
+      return true;
+    }),
 ];
 
 const cancelBulkValidator = [

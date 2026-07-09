@@ -241,6 +241,18 @@ const BillingService = {
         );
       }
 
+      if (shop.shop_type === 'FRANCHISE') {
+        for (const item of data.items) {
+          if (item.price_type && item.price_type !== 'SPECIAL') {
+            throw new AppError(
+              'Franchise shops must bill at special price only',
+              400,
+              'FRANCHISE_PRICE_TYPE_LOCKED'
+            );
+          }
+        }
+      }
+
       let customer = null;
       if (data.customer_id) {
         customer = await prisma.customer.findUnique({

@@ -49,6 +49,27 @@ const createWarehouseValidator = [
     .trim()
     .isLength({ max: 500 })
     .withMessage('remarks must be at most 500 characters'),
+
+  body('gstin')
+    .optional({ nullable: true })
+    .isString()
+    .trim()
+    .isLength({ max: 15 })
+    .withMessage('gstin must be at most 15 characters'),
+
+  body('legal_name')
+    .optional({ nullable: true })
+    .isString()
+    .trim()
+    .isLength({ max: 200 })
+    .withMessage('legal_name must be at most 200 characters'),
+
+  body('state_code')
+    .optional({ nullable: true })
+    .isString()
+    .trim()
+    .isLength({ max: 2 })
+    .withMessage('state_code must be at most 2 characters'),
 ];
 
 const updateWarehouseValidator = [
@@ -64,6 +85,9 @@ const updateWarehouseValidator = [
   body('manager_name').optional({ nullable: true }).isString().trim().isLength({ min: 2, max: 100 }),
   body('is_active').optional().isBoolean().withMessage('is_active must be boolean'),
   body('remarks').optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
+  body('gstin').optional({ nullable: true }).isString().trim().isLength({ max: 15 }),
+  body('legal_name').optional({ nullable: true }).isString().trim().isLength({ max: 200 }),
+  body('state_code').optional({ nullable: true }).isString().trim().isLength({ max: 2 }),
 ];
 
 const updateMyWarehouseValidator = [
@@ -74,6 +98,9 @@ const updateMyWarehouseValidator = [
     .isLength({ min: 2, max: 100 })
     .withMessage('manager_name must be 2-100 characters'),
   body('address').optional().isString().trim().isLength({ min: 3, max: 500 }),
+  body('gstin').optional({ nullable: true }).isString().trim().isLength({ max: 15 }),
+  body('legal_name').optional({ nullable: true }).isString().trim().isLength({ max: 200 }),
+  body('state_code').optional({ nullable: true }).isString().trim().isLength({ max: 2 }),
 ];
 
 const listWarehousesValidator = [
