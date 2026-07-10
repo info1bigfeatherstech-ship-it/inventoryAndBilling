@@ -8,6 +8,7 @@ const { TRANSFER_BILL_READY_STATUSES } = require('../../utils/transferBill.utils
 const { getDispatchQuantity } = require('../../utils/bulkTransfer.utils');
 
 const CHALLAN_PRINT_STATUSES = new Set([
+  'APPROVED',
   'DISPATCHED',
   'IN_TRANSIT',
   'PARTIALLY_RECEIVED',
@@ -157,28 +158,49 @@ const buildFranchiseLinesFromSingleRequest = (request) => {
   ];
 };
 
+const resolveBulkLineQty = (bulk, item) => {
+  const approvedQty = getDispatchQuantity(item);
+  if (approvedQty > 0) return approvedQty;
+  if (bulk.status === 'REQUESTED') {
+    return Number(item.requested_quantity ?? item.quantity) || 0;
+  }
+  return 0;
+};
+
 const buildCostLinesFromBulk = (bulk) =>
   (bulk.items || [])
-    .filter((item) => item.is_approved && getDispatchQuantity(item) > 0)
+    .filter((item) => item.is_approved !== false && resolveBulkLineQty(bulk, item) > 0)
     .map((item) => {
-      const qty = getDispatchQuantity(item);
+      const qty = resolveBulkLineQty(bulk, item);
+      const unitCost =
+        item.unit_cost_snapshot != null
+          ? item.unit_cost_snapshot
+          : item.variant?.purchase_price != null
+            ? Number(item.variant.purchase_price)
+            : null;
+      const lineValue =
+        item.line_value_snapshot != null
+          ? item.line_value_snapshot
+          : unitCost != null
+            ? roundMoney(unitCost * qty)
+            : null;
       return {
         product_name: item.variant?.product?.name,
         sku: item.variant?.sku || item.variant?.product_code,
         hsn_code: item.variant?.product?.hsn_code,
         batch_number: item.batch_number || '',
         quantity: qty,
-        unit_cost: item.unit_cost_snapshot,
-        line_value: item.line_value_snapshot,
+        unit_cost: unitCost,
+        line_value: lineValue,
         ...lineMetaFromVariant(item.variant),
       };
     });
 
 const buildFranchiseLinesFromBulk = (bulk) =>
   (bulk.items || [])
-    .filter((item) => item.is_approved && getDispatchQuantity(item) > 0)
+    .filter((item) => item.is_approved !== false && resolveBulkLineQty(bulk, item) > 0)
     .map((item) => {
-      const qty = getDispatchQuantity(item);
+      const qty = resolveBulkLineQty(bulk, item);
       const unitMrp = Number(item.franchise_mrp_snapshot) || 0;
       const unitFranchise = Number(item.franchise_unit_price_snapshot) || 0;
       const lineMrp = roundMoney(unitMrp * qty);
@@ -254,7 +276,7 @@ const assertFranchiseSnapshotsReady = (record, lines) => {
   );
   if (missing) {
     throw new AppError(
-      'Franchise transfer bill is available after dispatch with pricing snapshots',
+      'Franchise transfer bill pricing is not ready yet — approve the request with a bill type first',
       409,
       'FRANCHISE_BILL_NOT_READY'
     );
@@ -302,7 +324,7 @@ const TransferChallanService = {
       document_number: request.request_number,
       request_type: request.request_type,
       status: request.status,
-      document_date: request.dispatched_at || request.updated_at,
+      document_date: request.transfer_bill_generated_at || request.approved_at || request.dispatched_at || request.updated_at,
       tracking_number: request.tracking_number,
       from_label,
       from_address,
@@ -362,7 +384,7 @@ const TransferChallanService = {
       document_number: bulk.bulk_request_number,
       request_type: bulk.request_type,
       status: bulk.status,
-      document_date: bulk.dispatched_at || bulk.updated_at,
+      document_date: bulk.transfer_bill_generated_at || bulk.approved_at || bulk.dispatched_at || bulk.updated_at,
       tracking_number: bulk.tracking_number,
       from_label,
       to_label,

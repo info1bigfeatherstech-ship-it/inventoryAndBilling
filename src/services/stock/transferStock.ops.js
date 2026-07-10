@@ -435,6 +435,7 @@ const dispatchWhToShop = async (tx, params) => {
     productId: variant.product_id,
     variantId: variant.variant_id,
     movementType: 'WH_TO_SHOP',
+    movementPhase: 'DISPATCH',
     quantity,
     fromWarehouseId,
     toShopId,
@@ -453,6 +454,7 @@ const dispatchWhToShop = async (tx, params) => {
 const receiveWhToShop = async (tx, params) => {
   const {
     variant,
+    fromWarehouseId,
     toShopId,
     quantity,
     batchNumber,
@@ -469,7 +471,9 @@ const receiveWhToShop = async (tx, params) => {
     productId: variant.product_id,
     variantId: variant.variant_id,
     movementType: 'WH_TO_SHOP',
+    movementPhase: 'RECEIVE',
     quantity,
+    fromWarehouseId: fromWarehouseId || null,
     toShopId,
     referenceId,
     referenceType,

@@ -369,6 +369,7 @@ const performDispatchStock = async (tx, request, variant) => {
     const ledger = await createStockLedgerEntry(tx, {
       ...ledgerBase,
       movementType,
+      movementPhase: 'DISPATCH',
       fromWarehouseId: request.from_warehouse_id,
       toShopId: request.to_shop_id,
       createdBy: request.dispatched_by,
@@ -418,6 +419,8 @@ const performReceiveStock = async (tx, request, variant, receiveQty) => {
     const ledger = await createStockLedgerEntry(tx, {
       ...ledgerBase,
       movementType,
+      movementPhase: 'RECEIVE',
+      fromWarehouseId: request.from_warehouse_id || null,
       toShopId: request.to_shop_id,
     });
     return { ledger_id: ledger.ledger_id };

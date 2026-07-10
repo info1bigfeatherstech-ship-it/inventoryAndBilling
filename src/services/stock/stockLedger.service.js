@@ -139,6 +139,7 @@ const prisma = require('../../utils/prisma.utils');
 const { parsePagination } = require('../../utils/pagination.utils');
 const { LEDGER_SELECT } = require('./stockLedger.helpers');
 const { applyLedgerScope } = require('../../utils/stockLedgerAccess.utils');
+const { applyTransferLedgerVisibilityWhere } = require('../../utils/stockLedgerView.utils');
 const { AppError } = require('../../middlewares/error.middleware');
 const { ledgerRowsToCsv } = require('../../utils/stockLedgerExport.utils');
 
@@ -199,6 +200,7 @@ const StockLedgerService = {
     let where = buildLedgerWhere(filters);
 
     where = applyLedgerScope(where, user);
+    where = await applyTransferLedgerVisibilityWhere(where, user);
     
     const [total, entries] = await Promise.all([
       prisma.stockLedger.count({ where }),
@@ -238,7 +240,9 @@ const StockLedgerService = {
       }
     }
     
-    const where = {
+    const { page, limit, skip, take } = parsePagination(dateRange, { page: 1, limit: 50, maxLimit: 200 });
+
+    let where = {
       OR: [{ from_warehouse_id: warehouseId }, { to_warehouse_id: warehouseId }],
       ...(dateRange.from || dateRange.to
         ? {
@@ -249,8 +253,7 @@ const StockLedgerService = {
           }
         : {}),
     };
-
-    const { page, limit, skip, take } = parsePagination(dateRange, { page: 1, limit: 50, maxLimit: 200 });
+    where = await applyTransferLedgerVisibilityWhere(where, user);
 
     const [total, entries] = await Promise.all([
       prisma.stockLedger.count({ where }),
@@ -259,11 +262,15 @@ const StockLedgerService = {
         skip,
         take,
         orderBy: { created_at: 'desc' },
-        select: LEDGER_SELECT,
+        select: {
+          ...LEDGER_SELECT,
+          ...LEDGER_RELATIONS_SELECT,
+        },
       }),
     ]);
 
-    return { total, page, limit, entries };
+    const ledger = entries.map(formatLedgerRow);
+    return { total, page, limit, entries: ledger };
   },
 
   async getShopLedger(shopId, dateRange = {}, user) {
@@ -277,7 +284,9 @@ const StockLedgerService = {
       // Warehouse roles can view shop ledger (optional - remove if not needed)
     }
     
-    const where = {
+    const { page, limit, skip, take } = parsePagination(dateRange, { page: 1, limit: 50, maxLimit: 200 });
+
+    let where = {
       OR: [{ from_shop_id: shopId }, { to_shop_id: shopId }],
       ...(dateRange.from || dateRange.to
         ? {
@@ -288,8 +297,7 @@ const StockLedgerService = {
           }
         : {}),
     };
-
-    const { page, limit, skip, take } = parsePagination(dateRange, { page: 1, limit: 50, maxLimit: 200 });
+    where = await applyTransferLedgerVisibilityWhere(where, user);
 
     const [total, entries] = await Promise.all([
       prisma.stockLedger.count({ where }),
@@ -298,7 +306,10 @@ const StockLedgerService = {
         skip,
         take,
         orderBy: { created_at: 'desc' },
-        select: LEDGER_SELECT,
+        select: {
+          ...LEDGER_SELECT,
+          ...LEDGER_RELATIONS_SELECT,
+        },
       }),
     ]);
 
@@ -313,6 +324,7 @@ const StockLedgerService = {
     const maxExport = 10000;
     let where = buildLedgerWhere(filters);
     where = applyLedgerScope(where, user);
+    where = await applyTransferLedgerVisibilityWhere(where, user);
 
     const total = await prisma.stockLedger.count({ where });
     if (total > maxExport) {

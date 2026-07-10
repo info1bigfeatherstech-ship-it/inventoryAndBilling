@@ -519,6 +519,23 @@ const BulkTransferService = {
           throw new AppError('At least one item must be approved', 409, 'NO_APPROVED_ITEMS');
         }
 
+        const approvedItems = await tx.bulkTransferRequestItem.findMany({
+          where: { bulk_request_id: bulkRequestId, is_approved: true, approved_quantity: { gt: 0 } },
+        });
+        for (const item of approvedItems) {
+          if (item.unit_cost_snapshot != null && item.line_value_snapshot != null) continue;
+          const variant = await loadVariant(item.variant_id);
+          const qty = getDispatchQuantity(item);
+          const costSnap = snapshotTransferCost(variant, qty);
+          await tx.bulkTransferRequestItem.update({
+            where: { bulk_item_id: item.bulk_item_id },
+            data: {
+              unit_cost_snapshot: costSnap.unit_cost,
+              line_value_snapshot: costSnap.line_value,
+            },
+          });
+        }
+
         const billMeta = await TransferBillService.prepareFranchiseApprove(
           tx,
           bulk,
@@ -812,6 +829,7 @@ const BulkTransferService = {
           } else {
             await receiveWhToShop(tx, {
               variant,
+              fromWarehouseId: bulk.from_warehouse_id,
               toShopId: bulk.to_shop_id,
               quantity: receiveQty,
               batchNumber,

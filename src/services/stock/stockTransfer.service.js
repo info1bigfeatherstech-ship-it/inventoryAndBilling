@@ -161,6 +161,7 @@ const StockTransferService = {
         productId: variant.product_id,
         variantId: variant.variant_id,
         movementType: 'WH_TO_SHOP',
+        movementPhase: 'RECEIVE',
         quantity,
         fromWarehouseId,
         toShopId,

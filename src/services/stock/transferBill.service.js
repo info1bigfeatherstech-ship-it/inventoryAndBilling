@@ -642,9 +642,14 @@ const TransferBillService = {
 
 
     if (!isFranchiseShopType(destShop?.shop_type)) {
-
+      if (transferBillType) {
+        throw new AppError(
+          'Transfer bill type applies only to franchise shop transfers',
+          400,
+          'NOT_FRANCHISE_TRANSFER'
+        );
+      }
       return null;
-
     }
 
 

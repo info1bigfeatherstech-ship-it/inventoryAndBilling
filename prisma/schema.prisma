@@ -35,6 +35,12 @@ enum MovementType {
   ADJUSTMENT
 }
 
+/// Dispatch vs receive leg for multi-step transfers (WH→Shop). Null for single-step movements.
+enum MovementPhase {
+  DISPATCH
+  RECEIVE
+}
+
 enum UserRole {
   SUPER_ADMIN
   WH_MANAGER
@@ -875,6 +881,8 @@ model StockLedger {
   variant_id String?
 
   movement_type MovementType
+  /// DISPATCH = left source WH toward shop; RECEIVE = arrived at shop stock. Null for other movements.
+  movement_phase MovementPhase?
   quantity      Int
 
   from_warehouse_id String?
@@ -911,6 +919,7 @@ model StockLedger {
   @@index([to_shop_id, created_at])
   @@index([from_warehouse_id, created_at])
   @@index([movement_type, created_at])
+  @@index([movement_type, movement_phase, reference_id, reference_type, variant_id])
   @@index([reference_id, reference_type])
   @@map("stock_ledger")
 }
