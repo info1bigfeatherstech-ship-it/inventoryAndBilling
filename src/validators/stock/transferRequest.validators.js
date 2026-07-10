@@ -56,6 +56,9 @@ const listRequestsValidator = [
 
 const approveRejectValidator = [
   body('rejection_reason').optional().isString().trim().isLength({ max: 500 }),
+  body('transfer_bill_type')
+    .optional()
+    .isIn(['GST_INVOICE', 'NON_GST_INVOICE', 'ESTIMATE_INVOICE']),
 ];
 
 const dispatchValidator = [

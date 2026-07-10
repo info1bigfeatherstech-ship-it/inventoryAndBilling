@@ -379,7 +379,7 @@ const drawFranchiseTable = (pdf, startY, cols, lines, isGst) => {
 
 
 
-const drawShopStyleFooter = (pdf, y, doc, { isGst, issuerName, totals, lines }) => {
+const drawShopStyleFooter = (pdf, y, doc, { isGst, isEstimate = false, issuerName, totals, lines }) => {
 
   const gstSplit = buildTaxSummaryFromLines(lines);
 
@@ -499,130 +499,72 @@ const drawShopStyleFooter = (pdf, y, doc, { isGst, issuerName, totals, lines }) 
 
   y += wordsH;
 
-
-
-  const declPadTop = 6;
-
-  const declH = 40;
-
-  strokeRect(pdf, M, y, W, declH);
-
-  pdf.fontSize(8).font('Helvetica-Bold').text('Declaration :', M + 6, y + declPadTop);
-
-  pdf.font('Helvetica').fontSize(7);
-
-  pdf.text(
-
-    'We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.',
-
-    M + 6,
-
-    y + declPadTop + SECTION_LABEL_GAP,
-
-    { width: W - 12, lineGap: 1 }
-
-  );
-
-  y += declH;
-
-
-
-  const footH = 72;
-
-  strokeRect(pdf, M, y, W, footH);
-
-  pdf.moveTo(MID, y).lineTo(MID, y + footH).stroke();
-
-
-
-  const rx = MID;
-
-  const colW = HALF;
-
-  const footPadTop = 6;
-
-
-
-  if (!isGst) {
-
-    pdf.fontSize(7.5).font('Helvetica-Bold').text('Note:', M + 6, y + footPadTop);
-
+  if (!isEstimate) {
+    const declPadTop = 6;
+    const declH = 40;
+    strokeRect(pdf, M, y, W, declH);
+    pdf.fontSize(8).font('Helvetica-Bold').text('Declaration :', M + 6, y + declPadTop);
     pdf.font('Helvetica').fontSize(7);
+    pdf.text(
+      'We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.',
+      M + 6,
+      y + declPadTop + SECTION_LABEL_GAP,
+      { width: W - 12, lineGap: 1 }
+    );
+    y += declH;
 
-    pdf.text('1. Keep the bill for warranty or guarantee purpose.', M + 6, y + footPadTop + NOTE_LABEL_GAP, {
+    const footH = 72;
+    strokeRect(pdf, M, y, W, footH);
+    pdf.moveTo(MID, y).lineTo(MID, y + footH).stroke();
 
-      width: HALF - 12,
+    const rx = MID;
+    const colW = HALF;
+    const footPadTop = 6;
 
-      lineGap: 1,
-
-    });
-
-  } else {
-
-    pdf.fontSize(7.5).font('Helvetica-Bold').text('Terms & Conditions :', M + 6, y + footPadTop);
-
-    pdf.font('Helvetica').fontSize(7);
-
-    const terms = [
-
-      '1. E. & O.E.',
-
-      '2. Subject to local jurisdiction only.',
-
-      '3. Keep the bill for warranty or guarantee purpose.',
-
-    ];
-
-    let tcy = y + footPadTop + SECTION_LABEL_GAP;
-
-    for (const t of terms) {
-
-      pdf.text(t, M + 6, tcy, { width: HALF - 12, lineGap: 1 });
-
-      tcy += ROW_STEP;
-
+    if (!isGst) {
+      pdf.fontSize(7.5).font('Helvetica-Bold').text('Note:', M + 6, y + footPadTop);
+      pdf.font('Helvetica').fontSize(7);
+      pdf.text('1. Keep the bill for warranty or guarantee purpose.', M + 6, y + footPadTop + NOTE_LABEL_GAP, {
+        width: HALF - 12,
+        lineGap: 1,
+      });
+    } else {
+      pdf.fontSize(7.5).font('Helvetica-Bold').text('Terms & Conditions :', M + 6, y + footPadTop);
+      pdf.font('Helvetica').fontSize(7);
+      const terms = [
+        '1. E. & O.E.',
+        '2. Subject to local jurisdiction only.',
+        '3. Keep the bill for warranty or guarantee purpose.',
+      ];
+      let tcy = y + footPadTop + SECTION_LABEL_GAP;
+      for (const t of terms) {
+        pdf.text(t, M + 6, tcy, { width: HALF - 12, lineGap: 1 });
+        tcy += ROW_STEP;
+      }
     }
 
+    pdf.fontSize(8).font('Helvetica-Bold').text(`For ${issuerName || 'Warehouse'}`, rx + 6, y + 6);
+    const stampX = rx + colW - 62;
+    const stampY = y + 18;
+    pdf.save().dash(3, { space: 2 }).lineWidth(0.6).strokeColor('#999');
+    pdf.rect(stampX, stampY, 48, 36).stroke();
+    pdf.undash().restore();
+    pdf.fontSize(6.5).font('Helvetica').fillColor('#888');
+    pdf.text('Seal / Stamp', stampX, stampY + 14, { width: 48, align: 'center' });
+    pdf.fillColor('#000');
+    pdf.moveTo(rx + 6, y + footH - 14).lineTo(R - 8, y + footH - 14).stroke();
+    pdf.fontSize(7).font('Helvetica-Oblique').text('Authorised Signatory', rx + 6, y + footH - 12);
+
+    y += footH + 8;
+  } else {
+    y += 8;
   }
 
-
-
-  pdf.fontSize(8).font('Helvetica-Bold').text(`For ${issuerName || 'Warehouse'}`, rx + 6, y + 6);
-
-  const stampX = rx + colW - 62;
-
-  const stampY = y + 18;
-
-  pdf.save().dash(3, { space: 2 }).lineWidth(0.6).strokeColor('#999');
-
-  pdf.rect(stampX, stampY, 48, 36).stroke();
-
-  pdf.undash().restore();
-
-  pdf.fontSize(6.5).font('Helvetica').fillColor('#888');
-
-  pdf.text('Seal / Stamp', stampX, stampY + 14, { width: 48, align: 'center' });
-
-  pdf.fillColor('#000');
-
-  pdf.moveTo(rx + 6, y + footH - 14).lineTo(R - 8, y + footH - 14).stroke();
-
-  pdf.fontSize(7).font('Helvetica-Oblique').text('Authorised Signatory', rx + 6, y + footH - 12);
-
-
-
-  y += footH + 8;
-
   pdf.fontSize(7).font('Helvetica-Oblique').fillColor('#666');
-
   pdf.text('This is a computer generated invoice.', M, y, { width: W, align: 'center' });
-
   pdf.fillColor('#000').font('Helvetica');
 
-
-
   return y;
-
 };
 
 
@@ -638,101 +580,60 @@ const buildFranchiseBillPdf = (pdf, doc) => {
   const lines = doc.lines || [];
 
   const isGst = doc.transfer_bill_type === 'GST_INVOICE';
-
+  const isEstimate = doc.transfer_bill_type === 'ESTIMATE_INVOICE';
   const issuerName = issuer.name || doc.from_label || 'Warehouse';
-
-
 
   let y = M;
 
-
-
   if (isGst && issuer.gstin) {
-
     drawLabelValue(pdf, M, y, 'GSTIN', issuer.gstin, HALF);
-
     pdf.fontSize(7.5).font('Helvetica').text('Original / Duplicate / Triplicate', M, y, {
-
       width: W,
-
       align: 'right',
-
     });
-
     y += 16;
-
   } else {
-
     y += 4;
-
   }
-
-
 
   if (isGst) {
-
     const gstTitleSize = 11;
-
     pdf.fontSize(gstTitleSize).font('Helvetica-Bold');
-
     const gstTitle = 'GST INVOICE';
-
     const gstTitleW = pdf.widthOfString(gstTitle);
-
     const gstTitleX = M + (W - gstTitleW) / 2;
-
     pdf.text(gstTitle, gstTitleX, y, { lineBreak: false });
-
     drawManualUnderline(pdf, gstTitleX, y, gstTitle, { size: gstTitleSize, offset: 12 });
-
     y += 18;
-
   }
 
-
-
-  pdf.fontSize(16).font('Helvetica-Bold');
-
-  pdf.text(issuerName, M, y, { width: W, align: 'center' });
-
-  y += 18;
-
-  drawCenteredSegments(pdf, y, [
-
-    { text: 'Location ID : ', bold: true },
-
-    { text: displayVal(issuer.code), bold: false },
-
-    { text: '  |  Name : ', bold: true },
-
-    { text: displayVal(issuer.name), bold: false },
-
-  ]);
-
-  y += 12;
-
-  const addrParts = [issuer.address, issuer.city].filter(Boolean).join(', ');
-
-  if (addrParts) {
-
-    pdf.fontSize(FIELD_SIZE).font('Helvetica').text(addrParts, M, y, { width: W, align: 'center' });
-
-    y += 11;
-
-  }
-
-  if (issuer.manager_name) {
-
-    pdf.fontSize(FIELD_SIZE).font('Helvetica').text(`Manager : ${issuer.manager_name}`, M, y, {
-
-      width: W,
-
-      align: 'center',
-
-    });
-
+  if (isEstimate) {
+    pdf.fontSize(16).font('Helvetica-Bold');
+    pdf.text('Receipt', M, y, { width: W, align: 'center' });
+    y += 34;
+  } else {
+    pdf.fontSize(16).font('Helvetica-Bold');
+    pdf.text(issuerName, M, y, { width: W, align: 'center' });
+    y += 18;
+    drawCenteredSegments(pdf, y, [
+      { text: 'Location ID : ', bold: true },
+      { text: displayVal(issuer.code), bold: false },
+      { text: '  |  Name : ', bold: true },
+      { text: displayVal(issuer.name), bold: false },
+    ]);
     y += 12;
-
+    const addrParts = [issuer.address, issuer.city].filter(Boolean).join(', ');
+    if (addrParts) {
+      pdf.fontSize(FIELD_SIZE).font('Helvetica').text(addrParts, M, y, { width: W, align: 'center' });
+      y += 11;
+    }
+    if (issuer.manager_name) {
+      pdf.fontSize(FIELD_SIZE).font('Helvetica').text(`Manager : ${issuer.manager_name}`, M, y, {
+        width: W,
+        align: 'center',
+      });
+      y += 12;
+    }
   }
 
 
@@ -780,23 +681,14 @@ const buildFranchiseBillPdf = (pdf, doc) => {
   pdf.fontSize(FIELD_SIZE).font('Helvetica');
 
   const billToName = isGst
-
     ? recipient.legal_name || recipient.name || doc.to_label
-
     : recipient.name || doc.to_label;
-
   if (isGst) {
-
     drawLabelValue(pdf, lx + 6, ly, 'M/S', billToName, colW - 12);
-
     ly += 11;
-
   } else {
-
     pdf.text(displayVal(billToName), lx + 6, ly, { width: colW - 12 });
-
     ly += 11;
-
   }
 
   if (recipient.address) {
@@ -834,12 +726,10 @@ const buildFranchiseBillPdf = (pdf, doc) => {
 
 
   const dispatchCode = normalizeStateCode(issuer.state_code);
-
   const supplyCode = normalizeStateCode(recipient.state_code);
-
-  const posName = displayVal(formatCityStateLabel(recipient.city, supplyCode, { withCode: isGst }));
-
-  const dispatchName = displayVal(formatCityStateLabel(issuer.city, dispatchCode, { withCode: isGst }));
+  const showStateCode = isGst;
+  const posName = displayVal(formatCityStateLabel(recipient.city, supplyCode, { withCode: showStateCode }));
+  const dispatchName = displayVal(formatCityStateLabel(issuer.city, dispatchCode, { withCode: showStateCode }));
 
 
 
@@ -892,10 +782,8 @@ const buildFranchiseBillPdf = (pdf, doc) => {
 
 
   const cols = isGst ? getFranchiseGstCols() : getFranchiseNonGstCols();
-
   y = drawFranchiseTable(pdf, y, cols, lines, isGst);
-
-  y = drawShopStyleFooter(pdf, y, doc, { isGst, issuerName, totals, lines });
+  y = drawShopStyleFooter(pdf, y, doc, { isGst, isEstimate, issuerName, totals, lines });
 
 
 

@@ -1,5 +1,5 @@
 const AppSettingsService = require('../services/settings/appSettings.service');
-const { signBulkTransferBillToken } = require('./transferBillToken.utils');
+const { signBulkTransferBillToken, signSingleTransferBillToken } = require('./transferBillToken.utils');
 const {
   calculateFranchiseUnitPrice,
   isFranchiseShopType,
@@ -91,6 +91,9 @@ const formatSingleTransferRequest = (request, user, markupPercent) => {
     is_franchise_transfer: true,
     pricing_visibility: franchiseShopView ? 'FRANCHISE_SHOP' : 'WAREHOUSE',
     franchise_pricing: franchisePricing,
+    ...(request.transfer_bill_number
+      ? { public_transfer_bill_token: signSingleTransferBillToken(request.request_id) }
+      : {}),
   };
 
   if (franchiseShopView) {

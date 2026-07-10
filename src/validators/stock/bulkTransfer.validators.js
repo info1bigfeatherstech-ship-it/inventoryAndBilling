@@ -25,7 +25,7 @@ const listBulkValidator = [
 
 const approveBulkValidator = [
   ...bulkRequestIdParam,
-  body('transfer_bill_type').optional().isIn(['GST_INVOICE', 'NON_GST_INVOICE']),
+  body('transfer_bill_type').optional().isIn(['GST_INVOICE', 'NON_GST_INVOICE', 'ESTIMATE_INVOICE']),
   body('items').optional().isArray(),
   body('items.*.variant_id').optional().isString().trim().notEmpty(),
   body('items.*.quantity').optional().isInt({ min: 0 }),

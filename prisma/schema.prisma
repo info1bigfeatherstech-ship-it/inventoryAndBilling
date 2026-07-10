@@ -163,6 +163,7 @@ enum InwardStatus {
 enum TransferBillType {
   GST_INVOICE
   NON_GST_INVOICE
+  ESTIMATE_INVOICE
 }
 
 enum TransferRequestStatus {

@@ -32,7 +32,7 @@ const AppSettingsService = require('../settings/appSettings.service');
 
 const { generateTransferBillNumber } = require('../../utils/transferBill.utils');
 
-const { signBulkTransferBillToken } = require('../../utils/transferBillToken.utils');
+const { signBulkTransferBillToken, signSingleTransferBillToken } = require('../../utils/transferBillToken.utils');
 
 
 
@@ -48,7 +48,7 @@ const REQUEST_TYPE_LABELS = {
 
 
 
-const VALID_BILL_TYPES = new Set(['GST_INVOICE', 'NON_GST_INVOICE']);
+const VALID_BILL_TYPES = new Set(['GST_INVOICE', 'NON_GST_INVOICE', 'ESTIMATE_INVOICE']);
 
 
 
@@ -284,7 +284,7 @@ const assertFranchiseBillType = (billType) => {
 
     throw new AppError(
 
-      'transfer_bill_type is required (GST_INVOICE or NON_GST_INVOICE) for franchise transfers',
+      'transfer_bill_type is required (GST_INVOICE, NON_GST_INVOICE, or ESTIMATE_INVOICE) for franchise transfers',
 
       400,
 
@@ -548,6 +548,71 @@ const buildIssuerRecipient = (record, shopGst = null) => {
 
   };
 
+};
+
+
+
+const buildBillLinesFromSingle = (request, billType) => {
+  const qty = Number(request.quantity) || 0;
+  if (qty <= 0) return [];
+  return buildBillLines(
+    [
+      {
+        is_approved: true,
+        approved_quantity: qty,
+        franchise_mrp_snapshot: request.franchise_mrp_snapshot,
+        franchise_unit_price_snapshot: request.franchise_unit_price_snapshot,
+        variant: request.variant,
+      },
+    ],
+    billType
+  );
+};
+
+
+
+const snapshotFranchiseOnSingleRequest = async (tx, request, markupPercent) => {
+  const variant = await loadVariantForBill(tx, request.variant_id);
+  const qty = Number(request.quantity) || 0;
+  return snapshotFranchiseTransferPricing(variant, qty, markupPercent);
+};
+
+
+
+const SINGLE_BILL_INCLUDE = {
+  from_warehouse: { select: WAREHOUSE_INVOICE_SELECT },
+  to_shop: {
+    select: {
+      shop_id: true,
+      shop_code: true,
+      shop_name: true,
+      address: true,
+      city: true,
+      pincode: true,
+      phone: true,
+      email: true,
+      state_code: true,
+      shop_type: true,
+    },
+  },
+  variant: {
+    select: {
+      sku: true,
+      product_code: true,
+      warranty: true,
+      attributes: true,
+      product: {
+        select: {
+          name: true,
+          brand_name: true,
+          hsn_code: true,
+          gst_percent: true,
+          gst_type: true,
+          warranty: true,
+        },
+      },
+    },
+  },
 };
 
 
@@ -850,7 +915,111 @@ const TransferBillService = {
 
 
 
+  async prepareFranchiseApproveSingle(tx, request, transferBillType) {
+    if (!isFranchiseWhToShopTransfer(request)) return null;
+
+    assertFranchiseBillType(transferBillType);
+
+    const wh = await tx.warehouse.findUnique({
+      where: { warehouse_id: request.from_warehouse_id },
+      select: WAREHOUSE_INVOICE_SELECT,
+    });
+    if (!wh) {
+      throw new AppError('Source warehouse not found', 404, 'WAREHOUSE_NOT_FOUND');
+    }
+
+    if (transferBillType === 'GST_INVOICE') {
+      assertWarehouseGstForInvoice(wh);
+      if (request.to_shop_id) {
+        const shopGst = await loadFranchiseShopGst(request.to_shop_id, tx);
+        assertFranchiseShopGstForInvoice(shopGst);
+      }
+    }
+
+    const markup = await AppSettingsService.getFranchiseMarkupPercent();
+    const franchiseSnap = await snapshotFranchiseOnSingleRequest(tx, request, markup);
+
+    const billNumber = await generateTransferBillNumber(tx, wh.warehouse_code);
+
+    return {
+      transfer_bill_type: transferBillType,
+      transfer_bill_number: billNumber,
+      transfer_bill_generated_at: new Date(),
+      ...franchiseSnap,
+    };
+  },
+
+
+
+  async buildSingleTransferBillDocument(requestId) {
+    const request = await prisma.transferRequest.findUnique({
+      where: { request_id: requestId },
+      include: SINGLE_BILL_INCLUDE,
+    });
+
+    if (!request) throw new AppError('Transfer request not found', 404, 'TRANSFER_REQUEST_NOT_FOUND');
+    if (!request.transfer_bill_type || !request.transfer_bill_number) {
+      throw new AppError('Transfer bill has not been generated for this request', 409, 'TRANSFER_BILL_NOT_FOUND');
+    }
+    if (!isFranchiseWhToShopTransfer(request)) {
+      throw new AppError('Not a franchise transfer bill', 400, 'NOT_FRANCHISE_TRANSFER_BILL');
+    }
+
+    if (request.transfer_bill_type === 'GST_INVOICE') {
+      assertWarehouseGstForInvoice(request.from_warehouse);
+    }
+
+    let shopGst = null;
+    if (request.transfer_bill_type === 'GST_INVOICE' && request.to_shop_id) {
+      shopGst = await loadFranchiseShopGst(request.to_shop_id);
+      assertFranchiseShopGstForInvoice(shopGst);
+    }
+
+    const { issuer, recipient } = buildIssuerRecipient(request, shopGst);
+    const lines = buildBillLinesFromSingle(request, request.transfer_bill_type);
+    if (!lines.length) {
+      throw new AppError('Transfer bill has no line items', 400, 'TRANSFER_BILL_EMPTY');
+    }
+
+    const totals = computeBillTotals(lines, request.transfer_bill_type);
+
+    return {
+      document_number: request.transfer_bill_number,
+      transfer_bill_type: request.transfer_bill_type,
+      request_type: request.request_type,
+      request_type_label: REQUEST_TYPE_LABELS[request.request_type] || request.request_type,
+      status: request.status,
+      document_date: request.transfer_bill_generated_at || request.approved_at,
+      tracking_number: request.tracking_number,
+      request_id: request.request_id,
+      request_number: request.request_number,
+      issuer,
+      recipient,
+      from_label: issuer.name,
+      to_label: recipient?.name,
+      remarks: request.request_remarks,
+      is_franchise_bill: true,
+      bill_format: 'FRANCHISE_TRANSFER_BILL',
+      lines,
+      franchise_bill_totals: totals,
+      public_token: signSingleTransferBillToken(request.request_id),
+    };
+  },
+
+
+
+  async computeFranchiseBillTotalsFromSingle(request) {
+    if (!request?.transfer_bill_type || !request?.transfer_bill_number) return null;
+    const lines = buildBillLinesFromSingle(request, request.transfer_bill_type);
+    if (!lines.length) return null;
+    return computeBillTotals(lines, request.transfer_bill_type);
+  },
+
+
+
   signBulkTransferBillToken,
+
+  signSingleTransferBillToken,
 
 };
 

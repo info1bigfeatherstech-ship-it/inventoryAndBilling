@@ -36,6 +36,7 @@ const {
   formatTransferRequestForUser,
   formatTransferRequestsForUser,
 } = require('../../utils/franchiseTransferPricing.utils');
+const TransferBillService = require('./transferBill.service');
 
 const TX_OPTIONS = { isolationLevel: 'Serializable', maxWait: 10000, timeout: 30000 };
 
@@ -77,6 +78,9 @@ const REQUEST_SELECT = {
   franchise_mrp_snapshot: true,
   franchise_unit_price_snapshot: true,
   franchise_line_value_snapshot: true,
+  transfer_bill_type: true,
+  transfer_bill_number: true,
+  transfer_bill_generated_at: true,
   created_at: true,
   updated_at: true,
   variant: {
@@ -97,6 +101,8 @@ const REQUEST_SELECT = {
           brand_name: true,
           warehouse_id: true,
           hsn_code: true,
+          gst_percent: true,
+          gst_type: true,
           expenses: true,
           warranty: true,
         },
@@ -629,24 +635,38 @@ const TransferRequestService = {
   /**
    * Approve a transfer request (source approval).
    */
-  async approveRequest(requestId, _data, user) {
+  async approveRequest(requestId, data, user) {
     try {
       const existing = await loadRequestOrThrow(requestId);
       assertStatus(existing, ['REQUESTED'], 'Only REQUESTED requests can be approved');
       await validateRolePermissions('approve', existing, user);
 
-      const updated = await prisma.transferRequest.update({
-        where: { request_id: requestId },
-        data: {
-          status: 'APPROVED',
-          approved_by: user.userId,
-          approved_at: new Date(),
-        },
-        select: REQUEST_SELECT,
-      });
+      const updated = await prisma.$transaction(async (tx) => {
+        const locked = await tx.transferRequest.findUnique({ where: { request_id: requestId } });
+        if (locked.status !== 'REQUESTED') {
+          throw new AppError('Only REQUESTED requests can be approved', 409, 'INVALID_TRANSFER_STATUS');
+        }
+
+        const billMeta = await TransferBillService.prepareFranchiseApproveSingle(
+          tx,
+          locked,
+          data.transfer_bill_type
+        );
+
+        return tx.transferRequest.update({
+          where: { request_id: requestId },
+          data: {
+            status: 'APPROVED',
+            approved_by: user.userId,
+            approved_at: new Date(),
+            ...(billMeta || {}),
+          },
+          select: REQUEST_SELECT,
+        });
+      }, TX_OPTIONS);
 
       logger.info('Transfer request approved', { request_id: requestId, user_id: user.userId });
-      return updated;
+      return formatTransferRequestForUser(updated, user);
     } catch (err) {
       logger.error('approveRequest failed', { requestId, error: err.message, stack: err.stack });
       throw err;
@@ -709,17 +729,19 @@ const TransferRequestService = {
             select: { shop_type: true },
           });
           if (isFranchiseShopType(destShop?.shop_type)) {
-            const markup = await AppSettingsService.getFranchiseMarkupPercent();
-            const pricingVariant = await tx.productVariant.findUnique({
-              where: { variant_id: locked.variant_id },
-              select: {
-                mrp: true,
-                purchase_price: true,
-                expenses: true,
-                product: { select: { expenses: true } },
-              },
-            });
-            franchiseSnap = snapshotFranchiseTransferPricing(pricingVariant, locked.quantity, markup);
+            if (locked.franchise_unit_price_snapshot == null) {
+              const markup = await AppSettingsService.getFranchiseMarkupPercent();
+              const pricingVariant = await tx.productVariant.findUnique({
+                where: { variant_id: locked.variant_id },
+                select: {
+                  mrp: true,
+                  purchase_price: true,
+                  expenses: true,
+                  product: { select: { expenses: true } },
+                },
+              });
+              franchiseSnap = snapshotFranchiseTransferPricing(pricingVariant, locked.quantity, markup);
+            }
           }
         }
 

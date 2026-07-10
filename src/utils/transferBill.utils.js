@@ -29,14 +29,22 @@ const generateTransferBillNumber = async (tx, warehouseCode) => {
   const endOfDay = new Date(startOfDay);
   endOfDay.setDate(endOfDay.getDate() + 1);
 
-  const count = await tx.bulkTransferRequest.count({
-    where: {
-      transfer_bill_generated_at: { gte: startOfDay, lt: endOfDay },
-      transfer_bill_number: { startsWith: prefix },
-    },
-  });
+  const [bulkCount, singleCount] = await Promise.all([
+    tx.bulkTransferRequest.count({
+      where: {
+        transfer_bill_generated_at: { gte: startOfDay, lt: endOfDay },
+        transfer_bill_number: { startsWith: prefix },
+      },
+    }),
+    tx.transferRequest.count({
+      where: {
+        transfer_bill_generated_at: { gte: startOfDay, lt: endOfDay },
+        transfer_bill_number: { startsWith: prefix },
+      },
+    }),
+  ]);
 
-  return `${prefix}${String(count + 1).padStart(3, '0')}`;
+  return `${prefix}${String(bulkCount + singleCount + 1).padStart(3, '0')}`;
 };
 
 const TRANSFER_BILL_READY_STATUSES = new Set([

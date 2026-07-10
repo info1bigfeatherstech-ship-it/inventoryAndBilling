@@ -267,6 +267,18 @@ const assertFranchiseSnapshotsReady = (record, lines) => {
 const TransferChallanService = {
   async buildSingleRequestChallan(requestId, user) {
     const request = await TransferRequestService.getRequestById(requestId, user);
+
+    if (request.transfer_bill_number && request.transfer_bill_type) {
+      if (!TRANSFER_BILL_READY_STATUSES.has(request.status)) {
+        throw new AppError(
+          'Transfer bill is available after approval',
+          409,
+          'TRANSFER_BILL_NOT_READY'
+        );
+      }
+      return TransferBillService.buildSingleTransferBillDocument(requestId);
+    }
+
     if (!CHALLAN_PRINT_STATUSES.has(request.status)) {
       throw new AppError(
         'Challan is available after dispatch (DISPATCHED or later)',

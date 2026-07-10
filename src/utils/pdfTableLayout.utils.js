@@ -300,14 +300,13 @@ const drawTransferHeader = (doc, docPayload) => {
   drawLabelValue(doc, rxPad, ry, 'Challan No', docPayload.document_number, rxW);
   ry += 11;
   if (docPayload.transfer_bill_type) {
-    drawLabelValue(
-      doc,
-      rxPad,
-      ry,
-      'Bill Type',
-      docPayload.transfer_bill_type === 'GST_INVOICE' ? 'GST Invoice' : 'Non-GST Invoice',
-      rxW
-    );
+    const billTypeLabel =
+      docPayload.transfer_bill_type === 'GST_INVOICE'
+        ? 'GST Invoice'
+        : docPayload.transfer_bill_type === 'ESTIMATE_INVOICE'
+          ? 'Receipt'
+          : 'Non-GST Invoice';
+    drawLabelValue(doc, rxPad, ry, 'Bill Type', billTypeLabel, rxW);
     ry += 11;
   }
   drawLabelValue(doc, rxPad, ry, 'Date', fmtDate(docPayload.document_date), rxW);
