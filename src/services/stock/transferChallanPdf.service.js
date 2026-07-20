@@ -56,6 +56,14 @@ const {
 
   drawTableHeaderLabel,
 
+  drawWrappedTextBlock,
+
+  drawLabelValueBlock,
+
+  measureWrappedTextBlock,
+
+  measureLabelValueBlock,
+
   drawTotalLine,
 
   drawGstAddLine,
@@ -642,21 +650,39 @@ const buildFranchiseBillPdf = (pdf, doc) => {
 
   y += 4;
 
-
-
-  const infoH = 120;
-
-  strokeRect(pdf, M, y, W, infoH);
-
-  pdf.moveTo(MID, y).lineTo(MID, y + infoH).strokeColor('#333').lineWidth(0.6).stroke();
-
-
-
   const lx = M;
 
   const rx = MID;
 
   const colW = HALF;
+
+  const billToName = isGst
+    ? recipient.legal_name || recipient.name || doc.to_label
+    : recipient.name || doc.to_label;
+
+  const textW = colW - 12;
+  const leftStartY = y + 19;
+  let leftContentH = isGst
+    ? measureLabelValueBlock(pdf, 'M/S', billToName, textW)
+    : measureWrappedTextBlock(pdf, billToName, textW);
+  leftContentH += measureWrappedTextBlock(pdf, recipient.address, textW);
+  leftContentH += measureWrappedTextBlock(pdf, [recipient.city, recipient.pincode].filter(Boolean).join(', '), textW);
+  leftContentH += measureLabelValueBlock(pdf, 'Mobile', recipient.phone, textW);
+  if (isGst) {
+    leftContentH += measureLabelValueBlock(pdf, 'GSTIN', recipient.gstin, textW);
+    leftContentH += measureLabelValueBlock(pdf, 'State', formatStateLabel(recipient.state_code), textW);
+  }
+
+  const rightStartY = y + 14;
+  const rightContentH = 11 * 6 + 26;
+  const infoH = Math.max(120, Math.ceil(Math.max(
+    leftStartY - y + leftContentH,
+    rightStartY - y + rightContentH
+  )));
+
+  strokeRect(pdf, M, y, W, infoH);
+
+  pdf.moveTo(MID, y).lineTo(MID, y + infoH).strokeColor('#333').lineWidth(0.6).stroke();
 
 
 
@@ -676,51 +702,27 @@ const buildFranchiseBillPdf = (pdf, doc) => {
 
 
 
-  let ly = y + 19;
+  let ly = leftStartY;
 
   pdf.fontSize(FIELD_SIZE).font('Helvetica');
 
-  const billToName = isGst
-    ? recipient.legal_name || recipient.name || doc.to_label
-    : recipient.name || doc.to_label;
   if (isGst) {
-    drawLabelValue(pdf, lx + 6, ly, 'M/S', billToName, colW - 12);
-    ly += 11;
+    ly = drawLabelValueBlock(pdf, lx + 6, ly, 'M/S', billToName, textW);
   } else {
-    pdf.text(displayVal(billToName), lx + 6, ly, { width: colW - 12 });
-    ly += 11;
+    ly = drawWrappedTextBlock(pdf, lx + 6, ly, billToName, textW);
   }
 
-  if (recipient.address) {
-
-    pdf.text(recipient.address, lx + 6, ly, { width: colW - 12 });
-
-    ly += 11;
-
-  }
+  if (recipient.address) ly = drawWrappedTextBlock(pdf, lx + 6, ly, recipient.address, textW);
 
   const recipientCity = [recipient.city, recipient.pincode].filter(Boolean).join(', ');
 
-  if (recipientCity) {
+  if (recipientCity) ly = drawWrappedTextBlock(pdf, lx + 6, ly, recipientCity, textW);
 
-    pdf.text(recipientCity, lx + 6, ly, { width: colW - 12 });
-
-    ly += 11;
-
-  }
-
-  drawLabelValue(pdf, lx + 6, ly, 'Mobile', recipient.phone, colW - 12);
-
-  ly += 11;
+  ly = drawLabelValueBlock(pdf, lx + 6, ly, 'Mobile', recipient.phone, textW);
 
   if (isGst) {
-
-    drawLabelValue(pdf, lx + 6, ly, 'GSTIN', recipient.gstin, colW - 12);
-
-    ly += 11;
-
-    drawLabelValue(pdf, lx + 6, ly, 'State', formatStateLabel(recipient.state_code), colW - 12);
-
+    ly = drawLabelValueBlock(pdf, lx + 6, ly, 'GSTIN', recipient.gstin, textW);
+    ly = drawLabelValueBlock(pdf, lx + 6, ly, 'State', formatStateLabel(recipient.state_code), textW);
   }
 
 
