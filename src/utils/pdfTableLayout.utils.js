@@ -57,6 +57,46 @@ const drawLabelValue = (doc, x, y, label, value, maxW = 240, size = FIELD_SIZE) 
   });
 };
 
+const measureWrappedTextBlock = (doc, text, maxW, { size = FIELD_SIZE, font = 'Helvetica', gap = 2 } = {}) => {
+  const content = displayVal(text);
+  if (!content) return 0;
+  doc.fontSize(size).font(font);
+  return doc.heightOfString(content, { width: Math.max(20, maxW) }) + gap;
+};
+
+const drawWrappedTextBlock = (doc, x, y, text, maxW, { size = FIELD_SIZE, font = 'Helvetica', gap = 2 } = {}) => {
+  const content = displayVal(text);
+  if (!content) return y;
+  doc.fontSize(size).font(font);
+  const width = Math.max(20, maxW);
+  doc.text(content, x, y, { width });
+  return y + doc.heightOfString(content, { width }) + gap;
+};
+
+const measureLabelValueBlock = (doc, label, value, maxW = 240, size = FIELD_SIZE, gap = 2) => {
+  const labelText = `${label} : `;
+  doc.fontSize(size).font('Helvetica-Bold');
+  const labelW = doc.widthOfString(labelText);
+  const labelH = doc.heightOfString(labelText, { width: Math.max(20, labelW) });
+  doc.font('Helvetica').fontSize(size);
+  const valueH = doc.heightOfString(displayVal(value), { width: Math.max(20, maxW - labelW) });
+  return Math.max(labelH, valueH) + gap;
+};
+
+const drawLabelValueBlock = (doc, x, y, label, value, maxW = 240, size = FIELD_SIZE, gap = 2) => {
+  const labelText = `${label} : `;
+  doc.fontSize(size).font('Helvetica-Bold');
+  const labelW = doc.widthOfString(labelText);
+  const labelH = doc.heightOfString(labelText, { width: Math.max(20, labelW) });
+  doc.text(labelText, x, y, { lineBreak: false });
+  doc.font('Helvetica').fontSize(size);
+  const valueW = Math.max(20, maxW - labelW);
+  const valueText = displayVal(value);
+  const valueH = doc.heightOfString(valueText, { width: valueW });
+  doc.text(valueText, x + labelW, y, { width: valueW });
+  return y + Math.max(labelH, valueH) + gap;
+};
+
 const drawCenteredSegments = (doc, y, segments) => {
   let totalW = 0;
   const sized = segments.map((seg) => {
@@ -264,13 +304,27 @@ const drawTransferHeader = (doc, docPayload) => {
   doc.moveTo(M, y).lineTo(R, y).strokeColor('#333').lineWidth(0.75).stroke();
   y += 4;
 
-  const infoH = 120;
-  strokeRect(doc, M, y, W, infoH);
-  doc.moveTo(MID, y).lineTo(MID, y + infoH).strokeColor('#333').lineWidth(0.6).stroke();
-
   const lx = M;
   const rx = MID;
   const colW = HALF;
+  const textW = colW - 12;
+  const leftStartY = y + 19;
+  let leftContentH = measureWrappedTextBlock(doc, recipient.name || docPayload.to_label, textW);
+  leftContentH += measureWrappedTextBlock(doc, recipient.address, textW);
+  leftContentH += measureWrappedTextBlock(doc, [recipient.city, recipient.pincode].filter(Boolean).join(', '), textW);
+  leftContentH += measureLabelValueBlock(doc, 'Mobile', recipient.phone, textW);
+
+  const rightStartY = y + 14;
+  let rightContentH = 11 * 5;
+  if (docPayload.transfer_bill_type) rightContentH += 11;
+  rightContentH += 26;
+
+  const infoH = Math.max(120, Math.ceil(Math.max(
+    leftStartY - y + leftContentH,
+    rightStartY - y + rightContentH
+  )));
+  strokeRect(doc, M, y, W, infoH);
+  doc.moveTo(MID, y).lineTo(MID, y + infoH).strokeColor('#333').lineWidth(0.6).stroke();
   const billToX = lx + 6;
   const billToY = y + 5;
   doc.fontSize(FIELD_SIZE).font('Helvetica-Bold');
@@ -279,20 +333,12 @@ const drawTransferHeader = (doc, docPayload) => {
   drawManualUnderline(doc, billToX, billToY, billToText);
   doc.text(' :', billToX + doc.widthOfString(billToText), billToY, { lineBreak: false });
 
-  let ly = y + 19;
-  doc.fontSize(FIELD_SIZE).font('Helvetica');
-  doc.text(displayVal(recipient.name || docPayload.to_label), lx + 6, ly, { width: colW - 12 });
-  ly += 11;
-  if (recipient.address) {
-    doc.text(recipient.address, lx + 6, ly, { width: colW - 12 });
-    ly += 11;
-  }
+  let ly = leftStartY;
+  ly = drawWrappedTextBlock(doc, lx + 6, ly, recipient.name || docPayload.to_label, textW);
+  if (recipient.address) ly = drawWrappedTextBlock(doc, lx + 6, ly, recipient.address, textW);
   const recipientCity = [recipient.city, recipient.pincode].filter(Boolean).join(', ');
-  if (recipientCity) {
-    doc.text(recipientCity, lx + 6, ly, { width: colW - 12 });
-    ly += 11;
-  }
-  drawLabelValue(doc, lx + 6, ly, 'Mobile', recipient.phone, colW - 12);
+  if (recipientCity) ly = drawWrappedTextBlock(doc, lx + 6, ly, recipientCity, textW);
+  drawLabelValue(doc, lx + 6, ly, 'Mobile', recipient.phone, textW);
 
   const rxPad = rx + 6;
   const rxW = colW - 12;
@@ -412,6 +458,10 @@ module.exports = {
   drawStackedHeader,
   drawFitCellText,
   drawTableHeaderLabel,
+  drawWrappedTextBlock,
+  drawLabelValueBlock,
+  measureWrappedTextBlock,
+  measureLabelValueBlock,
   drawTransferHeader,
   drawTransferFooter,
   drawPaginatedTable,
