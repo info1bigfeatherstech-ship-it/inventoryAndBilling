@@ -188,7 +188,20 @@ class Config {
   }
 
   get CORS_ALLOWED_HEADERS() {
-    return ['Content-Type', 'Authorization', 'X-Request-ID'];
+    return ['Content-Type', 'Authorization', 'X-Request-ID', 'X-Api-Key', 'Idempotency-Key'];
+  }
+
+  /**
+   * Shared secret for e-comm / wholesale → inventory internal stock APIs.
+   * When empty, internal stock routes refuse requests (503) — safe default for live.
+   */
+  get INTERNAL_STOCK_API_KEY() {
+    return String(process.env.INTERNAL_STOCK_API_KEY || '').trim();
+  }
+
+  get INTERNAL_STOCK_BATCH_MAX_CODES() {
+    const n = parseInt(process.env.INTERNAL_STOCK_BATCH_MAX_CODES, 10);
+    return Number.isFinite(n) && n > 0 ? Math.min(n, 500) : 200;
   }
 
   // Rate Limiting

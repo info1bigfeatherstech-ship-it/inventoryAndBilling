@@ -35,6 +35,7 @@ const dashboardRoutes = require('./dashboard/dashboard.routes');
 const syncRoutes = require('./sync/sync.routes');
 const backupRoutes = require('./backup/backup.routes');
 const appSettingsRoutes = require('./settings/appSettings.routes');
+const onlineStockRoutes = require('./stock/onlineStock.routes');
 
 // API info route
 router.get('/', (req, res) => {
@@ -70,6 +71,10 @@ router.get('/', (req, res) => {
       bills: 'POST /api/v1/bills',
       creditNotes: 'POST /api/v1/credit-notes',
       debitNotes: 'POST /api/v1/debit-notes',
+      internalStockBatch: 'POST /api/v1/internal/stock/batch',
+      internalStockReserve: 'POST /api/v1/internal/stock/reserve',
+      internalStockRelease: 'POST /api/v1/internal/stock/release',
+      internalStockCommit: 'POST /api/v1/internal/stock/commit',
     },
     requestId: req.id,
   });
@@ -119,6 +124,7 @@ v1Router.use('/dashboard', dashboardRoutes);
 v1Router.use('/sync', syncRoutes);
 v1Router.use('/backups', backupRoutes);
 v1Router.use('/settings', appSettingsRoutes);
+v1Router.use('/internal/stock', onlineStockRoutes);
 // Mount versioned routes
 router.use('/v1', v1Router);
 

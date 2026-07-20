@@ -28,6 +28,7 @@ Source: `src/routes/index.routes.js`
 | `/shop-stocks` | `shop/shopStock.routes.js` | [stock-movement-routes.md](./stock-movement-routes.md) |
 | `/stock` | `stock/stockTransfer.routes.js` | [stock-movement-routes.md](./stock-movement-routes.md) |
 | `/stock/ledger` | `stock/stockLedger.routes.js` | [stock-movement-routes.md](./stock-movement-routes.md) |
+| `/internal/stock` | `stock/onlineStock.routes.js` | [online-stock-internal-api.md](./online-stock-internal-api.md) · [e-comm handoff](./online-stock-ecomm-handoff.md) |
 
 **Note:** Register `/product-stocks` before `/products` in the app router so paths do not collide.
 

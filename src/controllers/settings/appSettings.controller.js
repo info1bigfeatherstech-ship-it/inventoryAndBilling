@@ -20,6 +20,24 @@ const AppSettingsController = {
       data,
     });
   }),
+
+  getOnlineStockSettings: asyncHandler(async (req, res) => {
+    const data = await AppSettingsService.getOnlineStockSettings();
+    return successResponse(res, req, {
+      statusCode: 200,
+      message: 'Online stock settings fetched successfully',
+      data,
+    });
+  }),
+
+  updateOnlineStockSettings: asyncHandler(async (req, res) => {
+    const data = await AppSettingsService.updateOnlineStockSettings(req.body, req.user);
+    return successResponse(res, req, {
+      statusCode: 200,
+      message: 'Online stock settings updated successfully',
+      data,
+    });
+  }),
 };
 
 module.exports = AppSettingsController;

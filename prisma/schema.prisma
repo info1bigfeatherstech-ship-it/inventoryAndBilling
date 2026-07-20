@@ -265,6 +265,9 @@ model Warehouse {
   bulk_transfers_to    BulkTransferRequest[] @relation("BulkTransferToWarehouse")
   warehouse_expenses   WarehouseExpense[]
   vendor_payments      VendorPayment[]
+  /// Online / e-comm fulfillment warehouse when selected in AppSettings.
+  online_fulfillment_settings AppSettings[] @relation("OnlineFulfillmentWarehouse")
+  online_stock_reservations   OnlineStockReservation[]
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
@@ -534,6 +537,7 @@ model ProductVariant {
   debit_note_lines    DebitNoteLineItem[] @relation("DebitNoteLineVariant")
   purchase_items      PurchaseItem[]
   inward_items_mapped InwardReceiptItem[] @relation("InwardMappedVariant")
+  online_stock_reservation_lines OnlineStockReservationLine[]
 
   @@unique([product_id, sku])
   @@unique([product_id, product_code])
@@ -569,6 +573,8 @@ model ProductStock {
   warehouse_id String
 
   quantity Int @default(0)
+  /// Held for unpaid online orders. Free sellable = quantity - quantity_reserved.
+  quantity_reserved Int @default(0)
 
   low_stock_threshold Int?
 
@@ -1581,11 +1587,58 @@ model AppSettings {
   transfer_invoice_address     String?
   transfer_invoice_city        String?
   transfer_invoice_phone       String?
+  /// Single warehouse used as e-comm / wholesale online stock source of truth.
+  online_warehouse_id      String?
+  online_warehouse         Warehouse? @relation("OnlineFulfillmentWarehouse", fields: [online_warehouse_id], references: [warehouse_id], onDelete: SetNull)
   updated_by               String?
   created_at               DateTime @default(now())
   updated_at               DateTime @updatedAt
 
+  @@index([online_warehouse_id])
   @@map("app_settings")
+}
+
+/// Idempotent online order stock holds (e-comm / wholesale → inventory).
+enum OnlineStockReservationStatus {
+  HELD
+  COMMITTED
+  RELEASED
+}
+
+model OnlineStockReservation {
+  reservation_id String @id @default(cuid())
+  /// External order id from e-comm / wholesale — unique for idempotency.
+  order_id       String @unique
+  /// e.g. ecomm | wholesale
+  storefront     String
+  status         OnlineStockReservationStatus @default(HELD)
+  warehouse_id   String
+  warehouse      Warehouse @relation(fields: [warehouse_id], references: [warehouse_id], onDelete: Restrict)
+  lines          OnlineStockReservationLine[]
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+  committed_at   DateTime?
+  released_at    DateTime?
+
+  @@index([warehouse_id, status])
+  @@map("online_stock_reservations")
+}
+
+model OnlineStockReservationLine {
+  line_id         String @id @default(cuid())
+  reservation_id  String
+  product_code    String
+  variant_id      String
+  quantity        Int
+  /// Per-batch hold map: [{ stock_id, quantity }] — required for safe release/commit.
+  allocations     Json?
+  reservation     OnlineStockReservation @relation(fields: [reservation_id], references: [reservation_id], onDelete: Cascade)
+  variant         ProductVariant         @relation(fields: [variant_id], references: [variant_id], onDelete: Restrict)
+
+  @@index([reservation_id])
+  @@index([variant_id])
+  @@index([product_code])
+  @@map("online_stock_reservation_lines")
 }
 
 model BackupClientSettings {

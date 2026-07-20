@@ -1,4 +1,5 @@
 const { AppError } = require('../errors/AppError');
+const { freeQuantityOnRow, getWarehouseFreeAvailable } = require('./warehouseFreeStock.utils');
 
 /**
  * Normalize batch for storage and lookups. Empty string = no specific batch on request.
@@ -16,36 +17,12 @@ const warehouseStockBaseWhere = (variantId, warehouseId) => ({
 });
 
 /**
- * Available quantity for dispatch validation.
+ * Available (free / unreserved) quantity for dispatch validation.
  * - Explicit batch: that batch row only.
- * - Unspecified batch: sum of all rows with quantity > 0 (matches stock-search aggregate).
+ * - Unspecified batch: sum of free qty across rows (quantity - quantity_reserved).
  */
-const getWarehouseStockAvailable = async (tx, variantId, warehouseId, batchNumber) => {
-  const batch = normalizeBatch(batchNumber);
-
-  if (isBatchSpecified(batch)) {
-    const row = await tx.productStock.findUnique({
-      where: {
-        variant_id_warehouse_id_batch_number: {
-          variant_id: variantId,
-          warehouse_id: warehouseId,
-          batch_number: batch,
-        },
-      },
-      select: { quantity: true },
-    });
-    return row?.quantity ?? 0;
-  }
-
-  const result = await tx.productStock.aggregate({
-    where: {
-      ...warehouseStockBaseWhere(variantId, warehouseId),
-      quantity: { gt: 0 },
-    },
-    _sum: { quantity: true },
-  });
-  return result._sum.quantity ?? 0;
-};
+const getWarehouseStockAvailable = async (tx, variantId, warehouseId, batchNumber) =>
+  getWarehouseFreeAvailable(tx, variantId, warehouseId, batchNumber);
 
 /**
  * @throws {AppError} INSUFFICIENT_STOCK
@@ -74,9 +51,9 @@ const assertWarehouseStockAvailable = async (tx, variantId, warehouseId, quantit
 };
 
 /**
- * Deduct warehouse stock.
+ * Deduct warehouse stock from free (unreserved) quantity only.
  * - Explicit batch: single-row decrement (strict).
- * - Unspecified batch: FIFO across rows with quantity > 0 (expiry, then oldest update).
+ * - Unspecified batch: FIFO across rows with free quantity > 0.
  */
 const deductWarehouseStock = async (tx, variantId, warehouseId, quantity, batchNumber) => {
   const batch = normalizeBatch(batchNumber);
@@ -93,7 +70,7 @@ const deductWarehouseStock = async (tx, variantId, warehouseId, quantity, batchN
       },
     });
 
-    const available = row?.quantity ?? 0;
+    const available = freeQuantityOnRow(row);
     if (available < qty) {
       throw new AppError(
         `Insufficient warehouse stock in batch "${batch}". Available: ${available}, requested: ${qty}`,
@@ -114,7 +91,6 @@ const deductWarehouseStock = async (tx, variantId, warehouseId, quantity, batchN
   const stocks = await tx.productStock.findMany({
     where: {
       ...warehouseStockBaseWhere(variantId, warehouseId),
-      quantity: { gt: 0 },
     },
     orderBy: [{ expiry_date: 'asc' }, { updated_at: 'asc' }],
   });
@@ -122,7 +98,10 @@ const deductWarehouseStock = async (tx, variantId, warehouseId, quantity, batchN
   for (const stock of stocks) {
     if (remaining <= 0) break;
 
-    const deductQty = Math.min(stock.quantity, remaining);
+    const free = freeQuantityOnRow(stock);
+    if (free <= 0) continue;
+
+    const deductQty = Math.min(free, remaining);
     await tx.productStock.update({
       where: { stock_id: stock.stock_id },
       data: { quantity: { decrement: deductQty } },

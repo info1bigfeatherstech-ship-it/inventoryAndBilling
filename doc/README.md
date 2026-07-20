@@ -38,6 +38,8 @@ Give clients the **[client-templates/](./client-templates/)** folder — CSV sam
 | Products | [product-routes.md](./product-routes.md) — **FE/QA guide** (variants, images, multipart) | `/api/v1/products` |
 | Product stock | [product-stock-routes.md](./product-stock-routes.md) | `/api/v1/product-stocks` |
 | Stock movement | [stock-movement-routes.md](./stock-movement-routes.md) | `/api/v1/shops`, `/shop-stocks`, `/stock` |
+| Online stock (e-comm internal) | [online-stock-internal-api.md](./online-stock-internal-api.md) | `/api/v1/internal/stock` |
+| E-comm handoff summary | [online-stock-ecomm-handoff.md](./online-stock-ecomm-handoff.md) | — |
 | ERP gaps & roadmap | [erp-implementation-checklist.md](./erp-implementation-checklist.md) | — |
 | Media / env | [media-and-env.md](./media-and-env.md) | — |
 

@@ -203,6 +203,15 @@ const printStartupBanner = (options = {}) => {
       )
     );
     right.push(kvRow('R2', r2Line, 6));
+
+    const stockKeySet = Boolean(String(process.env.INTERNAL_STOCK_API_KEY || '').trim());
+    right.push(
+      kvRow(
+        'ONSTOCK',
+        stockKeySet ? colorize('API_KEY_SET', ansi.green) : colorize('API_KEY_OFF', ansi.gray),
+        6
+      )
+    );
   }
 
   const banner = makeBox(appName, left, right);
