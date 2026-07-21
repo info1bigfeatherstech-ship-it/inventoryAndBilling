@@ -1,6 +1,9 @@
 /**
- * Franchise transfer pricing — calculated at runtime from variant cost + org markup %.
- * f.price is never stored on Product / ProductVariant master records.
+ * Franchise transfer pricing — calculated at runtime; never stored on Product / ProductVariant masters.
+ *
+ * F.Price = totalCost + max(0, specialPrice - totalCost) × markup%
+ * where totalCost = purchase_price + expenses
+ * markup% is org setting: 20 | 40 | 60
  */
 const { roundMoney } = require('./billing.utils');
 
@@ -26,19 +29,31 @@ const resolveVariantBaseCost = (variant) => {
   return roundMoney(Math.max(0, unit));
 };
 
+const resolveVariantSpecialPrice = (variant) => {
+  if (!variant) return 0;
+  const special = Number(variant.special_price);
+  return roundMoney(Math.max(0, Number.isFinite(special) ? special : 0));
+};
+
 /**
- * Franchise unit price per variant: base + markup% of base.
+ * Franchise unit price per variant.
+ * Markup % applies to (special − totalCost), then added to totalCost.
+ * If special ≤ totalCost, gap is treated as 0 (no error) → F.Price = totalCost.
+ *
  * @param {object} variant
  * @param {number} markupPercent
  */
 const calculateFranchiseUnitPrice = (variant, markupPercent) => {
-  const base = resolveVariantBaseCost(variant);
+  const totalCost = resolveVariantBaseCost(variant);
+  const special = resolveVariantSpecialPrice(variant);
   const pct = resolveFranchiseMarkupPercent(markupPercent);
-  return roundMoney(base * (1 + pct / 100));
+  const gap = Math.max(0, special - totalCost);
+  const markupAmount = roundMoney(gap * (pct / 100));
+  return roundMoney(totalCost + markupAmount);
 };
 
 /**
- * Snapshot franchise pricing on a transfer line at dispatch.
+ * Snapshot franchise pricing on a transfer line at approve / dispatch.
  */
 const snapshotFranchiseTransferPricing = (variant, quantity, markupPercent) => {
   const qty = Number(quantity);
@@ -64,6 +79,7 @@ module.exports = {
   DEFAULT_FRANCHISE_MARKUP_PERCENT,
   resolveFranchiseMarkupPercent,
   resolveVariantBaseCost,
+  resolveVariantSpecialPrice,
   calculateFranchiseUnitPrice,
   snapshotFranchiseTransferPricing,
   isWarehouseInternalRole,
