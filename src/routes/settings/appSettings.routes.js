@@ -7,6 +7,7 @@ const { validateRequest } = require('../../middlewares/validation.middleware');
 const {
   updateFranchiseSettingsValidator,
   updateOnlineStockSettingsValidator,
+  updateCompanyInvoiceSettingsValidator,
 } = require('../../validators/settings/appSettings.validators');
 
 const READ_ROLES = ['SUPER_ADMIN', 'WH_MANAGER', 'WH_STOCK_LISTER', 'SHOP_OWNER', 'SHOP_MANAGER'];
@@ -39,6 +40,20 @@ router.put(
   updateOnlineStockSettingsValidator,
   validateRequest,
   AppSettingsController.updateOnlineStockSettings
+);
+
+router.get(
+  '/company',
+  authorizeRoles('SUPER_ADMIN'),
+  AppSettingsController.getCompanyInvoiceSettings
+);
+
+router.put(
+  '/company',
+  authorizeRoles('SUPER_ADMIN'),
+  updateCompanyInvoiceSettingsValidator,
+  validateRequest,
+  AppSettingsController.updateCompanyInvoiceSettings
 );
 
 module.exports = router;

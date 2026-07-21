@@ -38,6 +38,24 @@ const AppSettingsController = {
       data,
     });
   }),
+
+  getCompanyInvoiceSettings: asyncHandler(async (req, res) => {
+    const data = await AppSettingsService.getCompanyInvoiceSettings();
+    return successResponse(res, req, {
+      statusCode: 200,
+      message: 'Company details fetched successfully',
+      data,
+    });
+  }),
+
+  updateCompanyInvoiceSettings: asyncHandler(async (req, res) => {
+    const data = await AppSettingsService.updateCompanyInvoiceSettings(req.body, req.user);
+    return successResponse(res, req, {
+      statusCode: 200,
+      message: 'Company details updated successfully',
+      data,
+    });
+  }),
 };
 
 module.exports = AppSettingsController;

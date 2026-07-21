@@ -29,7 +29,38 @@ const updateOnlineStockSettingsValidator = [
     }),
 ];
 
+const updateCompanyInvoiceSettingsValidator = [
+  body('transfer_invoice_legal_name').optional({ nullable: true }).isString().trim().isLength({ max: 200 }),
+  body('transfer_invoice_gstin')
+    .optional({ nullable: true })
+    .isString()
+    .trim()
+    .custom((value) => {
+      if (value == null || value === '') return true;
+      const g = String(value).trim().toUpperCase();
+      if (!/^[0-9A-Z]{15}$/.test(g)) {
+        throw new Error('transfer_invoice_gstin must be a valid 15-character GSTIN');
+      }
+      return true;
+    }),
+  body('transfer_invoice_state_code')
+    .optional({ nullable: true })
+    .isString()
+    .trim()
+    .custom((value) => {
+      if (value == null || value === '') return true;
+      if (!/^\d{2}$/.test(String(value).trim())) {
+        throw new Error('transfer_invoice_state_code must be a 2-digit GST state code');
+      }
+      return true;
+    }),
+  body('transfer_invoice_address').optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
+  body('transfer_invoice_city').optional({ nullable: true }).isString().trim().isLength({ max: 100 }),
+  body('transfer_invoice_phone').optional({ nullable: true }).isString().trim().isLength({ max: 30 }),
+];
+
 module.exports = {
   updateFranchiseSettingsValidator,
   updateOnlineStockSettingsValidator,
+  updateCompanyInvoiceSettingsValidator,
 };

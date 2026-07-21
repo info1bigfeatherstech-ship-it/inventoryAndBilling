@@ -5,6 +5,7 @@ const {
   DEFAULT_FRANCHISE_MARKUP_PERCENT,
   resolveFranchiseMarkupPercent,
 } = require('../../utils/franchisePrice.utils');
+const { normalizeStateCode, stateCodeFromGstin } = require('../../utils/billing.utils');
 
 const SETTINGS_ID = 'default';
 
@@ -15,6 +16,22 @@ const ONLINE_WAREHOUSE_SELECT = {
   city: true,
   is_active: true,
 };
+
+const trimOrNull = (value) => {
+  if (value == null) return null;
+  const s = String(value).trim();
+  return s ? s : null;
+};
+
+const formatCompanyInvoiceSettings = (row) => ({
+  transfer_invoice_legal_name: row.transfer_invoice_legal_name ?? null,
+  transfer_invoice_gstin: row.transfer_invoice_gstin ?? null,
+  transfer_invoice_state_code: row.transfer_invoice_state_code ?? null,
+  transfer_invoice_address: row.transfer_invoice_address ?? null,
+  transfer_invoice_city: row.transfer_invoice_city ?? null,
+  transfer_invoice_phone: row.transfer_invoice_phone ?? null,
+  updated_at: row.updated_at,
+});
 
 const getOrCreateSettings = async () => {
   let row = await prisma.appSettings.findUnique({
@@ -96,6 +113,46 @@ const resolveOnlineWarehouseId = async () => {
   }
 
   return row.online_warehouse_id;
+};
+
+/**
+ * Company legal identity for stock-transfer bills (all warehouses share this).
+ * Does not mutate warehouse rows.
+ */
+const getCompanyInvoiceIdentity = async () => {
+  const row = await getOrCreateSettings();
+  const gstin = trimOrNull(row.transfer_invoice_gstin)?.toUpperCase() || null;
+  const legalName = trimOrNull(row.transfer_invoice_legal_name);
+  const stateFromField = normalizeStateCode(row.transfer_invoice_state_code);
+  const stateCode = stateFromField || stateCodeFromGstin(gstin) || null;
+
+  return {
+    legal_name: legalName,
+    gstin,
+    state_code: stateCode,
+    address: trimOrNull(row.transfer_invoice_address),
+    city: trimOrNull(row.transfer_invoice_city),
+    phone: trimOrNull(row.transfer_invoice_phone),
+  };
+};
+
+const assertCompanyGstForTransferInvoice = async () => {
+  const company = await getCompanyInvoiceIdentity();
+  if (!company.gstin || company.gstin.length < 15) {
+    throw new AppError(
+      'GST transfer bill requires company GSTIN. Set it in Settings → Company Details (Super Admin).',
+      409,
+      'COMPANY_GSTIN_NOT_CONFIGURED'
+    );
+  }
+  if (!company.legal_name) {
+    throw new AppError(
+      'GST transfer bill requires company legal name. Set it in Settings → Company Details (Super Admin).',
+      409,
+      'COMPANY_LEGAL_NAME_NOT_CONFIGURED'
+    );
+  }
+  return company;
 };
 
 const AppSettingsService = {
@@ -191,7 +248,69 @@ const AppSettingsService = {
     return formatOnlineWarehouseSettings(row);
   },
 
+  async getCompanyInvoiceSettings() {
+    const row = await getOrCreateSettings();
+    return formatCompanyInvoiceSettings(row);
+  },
+
+  async updateCompanyInvoiceSettings(payload = {}, user) {
+    if (user?.role !== 'SUPER_ADMIN') {
+      throw new AppError('Only super admin can update company details', 403, 'FORBIDDEN');
+    }
+
+    const updateData = { updated_by: user.userId };
+    const fields = [
+      'transfer_invoice_legal_name',
+      'transfer_invoice_gstin',
+      'transfer_invoice_state_code',
+      'transfer_invoice_address',
+      'transfer_invoice_city',
+      'transfer_invoice_phone',
+    ];
+
+    for (const key of fields) {
+      if (!Object.prototype.hasOwnProperty.call(payload, key)) continue;
+      let value = trimOrNull(payload[key]);
+      if (key === 'transfer_invoice_gstin' && value) {
+        value = value.toUpperCase();
+        if (!/^[0-9A-Z]{15}$/.test(value)) {
+          throw new AppError('GSTIN must be a valid 15-character GSTIN', 400, 'INVALID_GSTIN');
+        }
+      }
+      if (key === 'transfer_invoice_state_code' && value) {
+        value = normalizeStateCode(value);
+        if (!value) {
+          throw new AppError('state_code must be a 2-digit GST state code', 400, 'INVALID_STATE_CODE');
+        }
+      }
+      updateData[key] = value;
+    }
+
+    if (
+      updateData.transfer_invoice_gstin &&
+      !updateData.transfer_invoice_state_code &&
+      !Object.prototype.hasOwnProperty.call(payload, 'transfer_invoice_state_code')
+    ) {
+      const derived = stateCodeFromGstin(updateData.transfer_invoice_gstin);
+      if (derived) updateData.transfer_invoice_state_code = derived;
+    }
+
+    const row = await prisma.appSettings.upsert({
+      where: { id: SETTINGS_ID },
+      create: {
+        id: SETTINGS_ID,
+        franchise_markup_percent: DEFAULT_FRANCHISE_MARKUP_PERCENT,
+        ...updateData,
+      },
+      update: updateData,
+    });
+
+    return formatCompanyInvoiceSettings(row);
+  },
+
   resolveOnlineWarehouseId,
+  getCompanyInvoiceIdentity,
+  assertCompanyGstForTransferInvoice,
 };
 
 module.exports = AppSettingsService;

@@ -10,10 +10,6 @@ const {
 
   buildTaxSummaryFromLines,
 
-  normalizeStateCode,
-
-  stateCodeFromGstin,
-
   normalizeProductGstType,
 
 } = require('../../utils/billing.utils');
@@ -84,37 +80,7 @@ const getApprovedQty = (item) => {
 
 
 
-const resolveWarehouseStateCode = (warehouse) => {
-
-  const fromField = normalizeStateCode(warehouse?.state_code);
-
-  if (fromField) return fromField;
-
-  return stateCodeFromGstin(warehouse?.gstin);
-
-};
-
-
-
-const assertWarehouseGstForInvoice = (warehouse) => {
-
-  const gstin = warehouse?.gstin?.trim()?.toUpperCase() || '';
-
-  if (!gstin || gstin.length < 15) {
-
-    throw new AppError(
-
-      'GST transfer bill requires warehouse GSTIN. Edit the source warehouse and add GSTIN before approving.',
-
-      409,
-
-      'WAREHOUSE_GSTIN_NOT_CONFIGURED'
-
-    );
-
-  }
-
-};
+const assertCompanyGstForInvoice = async () => AppSettingsService.assertCompanyGstForTransferInvoice();
 
 
 
@@ -484,13 +450,21 @@ const computeBillTotals = (lines, billType) => {
 
 
 
-const buildIssuerRecipient = (record, shopGst = null) => {
+/**
+ * Issuer legal name + GSTIN come from company (AppSettings).
+ * Location ID / warehouse name / address / manager stay warehouse-level.
+ */
+const buildIssuerRecipient = async (record, shopGst = null, company = null) => {
 
   const wh = record.from_warehouse;
 
   const shop = record.to_shop;
 
-  const gstin = wh?.gstin?.trim()?.toUpperCase() || '';
+  const companyIdentity = company || (await AppSettingsService.getCompanyInvoiceIdentity());
+
+  const companyLegalName = companyIdentity.legal_name?.trim() || '';
+
+  const gstin = companyIdentity.gstin?.trim()?.toUpperCase() || '';
 
   const recipientGstin = shopGst?.gst_number?.trim()?.toUpperCase() || '';
 
@@ -504,7 +478,11 @@ const buildIssuerRecipient = (record, shopGst = null) => {
 
       code: wh?.warehouse_code || '',
 
-      name: wh?.legal_name?.trim() || wh?.warehouse_name || 'Warehouse',
+      /** Big title on PDF — company legal name (falls back to warehouse name if unset). */
+      name: companyLegalName || wh?.warehouse_name || 'Company',
+
+      /** Location line "Name :" — always the warehouse display name. */
+      location_name: wh?.warehouse_name || '',
 
       gstin,
 
@@ -512,9 +490,9 @@ const buildIssuerRecipient = (record, shopGst = null) => {
 
       city: wh?.city || '',
 
-      state_code: resolveWarehouseStateCode(wh) || '',
+      state_code: companyIdentity.state_code || '',
 
-      phone: '',
+      phone: companyIdentity.phone || '',
 
       manager_name: wh?.manager_name || null,
 
@@ -674,7 +652,7 @@ const TransferBillService = {
 
     if (transferBillType === 'GST_INVOICE') {
 
-      assertWarehouseGstForInvoice(wh);
+      await assertCompanyGstForInvoice();
 
       if (bulk.to_shop_id) {
 
@@ -818,7 +796,7 @@ const TransferBillService = {
 
     if (bulk.transfer_bill_type === 'GST_INVOICE') {
 
-      assertWarehouseGstForInvoice(bulk.from_warehouse);
+      await assertCompanyGstForInvoice();
 
     }
 
@@ -836,7 +814,7 @@ const TransferBillService = {
 
 
 
-    const { issuer, recipient } = buildIssuerRecipient(bulk, shopGst);
+    const { issuer, recipient } = await buildIssuerRecipient(bulk, shopGst);
 
     const lines = buildBillLines(bulk.items, bulk.transfer_bill_type);
 
@@ -934,7 +912,7 @@ const TransferBillService = {
     }
 
     if (transferBillType === 'GST_INVOICE') {
-      assertWarehouseGstForInvoice(wh);
+      await assertCompanyGstForInvoice();
       if (request.to_shop_id) {
         const shopGst = await loadFranchiseShopGst(request.to_shop_id, tx);
         assertFranchiseShopGstForInvoice(shopGst);
@@ -971,7 +949,7 @@ const TransferBillService = {
     }
 
     if (request.transfer_bill_type === 'GST_INVOICE') {
-      assertWarehouseGstForInvoice(request.from_warehouse);
+      await assertCompanyGstForInvoice();
     }
 
     let shopGst = null;
@@ -980,7 +958,7 @@ const TransferBillService = {
       assertFranchiseShopGstForInvoice(shopGst);
     }
 
-    const { issuer, recipient } = buildIssuerRecipient(request, shopGst);
+    const { issuer, recipient } = await buildIssuerRecipient(request, shopGst);
     const lines = buildBillLinesFromSingle(request, request.transfer_bill_type);
     if (!lines.length) {
       throw new AppError('Transfer bill has no line items', 400, 'TRANSFER_BILL_EMPTY');

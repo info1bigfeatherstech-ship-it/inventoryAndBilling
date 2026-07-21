@@ -285,7 +285,7 @@ const drawTransferHeader = (doc, docPayload) => {
     { text: 'Location ID : ', bold: true },
     { text: displayVal(issuer.code), bold: false },
     { text: '  |  Name : ', bold: true },
-    { text: displayVal(issuer.name), bold: false },
+    { text: displayVal(issuer.location_name || issuer.name), bold: false },
   ]);
   y += 12;
   const addrParts = [issuer.address, issuer.city].filter(Boolean).join(', ');
