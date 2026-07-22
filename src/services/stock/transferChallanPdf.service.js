@@ -775,7 +775,7 @@ const buildFranchiseBillPdf = (pdf, doc) => {
 
   strokeRect(pdf, rx + 6, payBoxY, colW - 12, payBoxH);
 
-  drawLabelValue(pdf, rx + 10, payBoxY + 6, 'Mode of Payment', 'Stock Transfer', colW - 20, payFontSize);
+  drawLabelValue(pdf, rx + 10, payBoxY + 6, 'Mode of Payment', '', colW - 20, payFontSize);
 
 
 

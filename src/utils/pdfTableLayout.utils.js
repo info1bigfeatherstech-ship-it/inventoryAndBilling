@@ -368,7 +368,7 @@ const drawTransferHeader = (doc, docPayload) => {
   const payBoxH = 20;
   const payBoxY = ry + 6;
   strokeRect(doc, rx + 6, payBoxY, colW - 12, payBoxH);
-  drawLabelValue(doc, rx + 10, payBoxY + 6, 'Mode', 'Stock Transfer', colW - 20, payFontSize);
+  drawLabelValue(doc, rx + 10, payBoxY + 6, 'Mode of Payment', '', colW - 20, payFontSize);
 
   return y + infoH;
 };
