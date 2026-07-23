@@ -40,7 +40,7 @@ const {
 
   drawLabelValue,
 
-  drawCenteredSegments,
+  drawCenteredKeyedPairs,
 
   drawManualUnderline,
 
@@ -169,9 +169,9 @@ const buildFranchiseGstCols = () => [
   { key: 'gst', label: 'GST %', w: 30 },
   { key: 'qty', label: 'Qty', w: 24 },
   { key: 'mrp', label: 'MRP', w: PRICE_COL_W },
-  { key: 'fprice', labelLines: ['Franchise', 'Price'], w: PRICE_COL_W },
-  { key: 'lmrp', labelLines: ['Line', 'MRP'], w: PRICE_COL_W },
-  { key: 'lfr', labelLines: ['Line', 'Franchise', 'Price'], w: PRICE_COL_W },
+  { key: 'special', labelLines: ['Spl/Sale', 'Price'], w: PRICE_COL_W },
+  { key: 'fprice', labelLines: ['F.', 'Price'], w: PRICE_COL_W },
+  { key: 'tfprice', labelLines: ['Total', 'F. Price'], w: PRICE_COL_W },
 ];
 
 const buildFranchiseNonGstCols = () => [
@@ -181,16 +181,16 @@ const buildFranchiseNonGstCols = () => [
   { key: 'warranty', label: 'Warranty', w: 48 },
   { key: 'qty', label: 'Qty', w: 26 },
   { key: 'mrp', label: 'MRP', w: 65 },
-  { key: 'fprice', labelLines: ['Franchise', 'Price'], w: 65 },
-  { key: 'lmrp', labelLines: ['Line', 'MRP'], w: 65 },
-  { key: 'lfr', labelLines: ['Line', 'Franchise', 'Price'], w: 65 },
+  { key: 'special', labelLines: ['Spl/Sale', 'Price'], w: 65 },
+  { key: 'fprice', labelLines: ['F.', 'Price'], w: 65 },
+  { key: 'tfprice', labelLines: ['Total', 'F. Price'], w: 65 },
 ];
 
 const getFranchiseGstCols = () => buildFranchiseGstCols();
 
 const getFranchiseNonGstCols = () => buildFranchiseNonGstCols();
 
-const isPriceCol = (key) => ['mrp', 'fprice', 'lmrp', 'lfr'].includes(key);
+const isPriceCol = (key) => ['mrp', 'special', 'fprice', 'tfprice'].includes(key);
 
 const isCompactCol = (key) => ['sno', 'brand', 'warranty', 'hsn', 'gst', 'qty'].includes(key);
 
@@ -210,11 +210,11 @@ const cellValueForLine = (line, col, rowIndex) => {
       return String(line.quantity);
     case 'mrp':
       return fmtNum(line.unit_mrp);
+    case 'special':
+      return fmtNum(line.unit_special_price);
     case 'fprice':
       return fmtNum(line.unit_franchise_price);
-    case 'lmrp':
-      return fmtNum(line.line_mrp_total);
-    case 'lfr':
+    case 'tfprice':
       return fmtNum(line.line_franchise_total);
     default:
       return '';
@@ -623,24 +623,29 @@ const buildFranchiseBillPdf = (pdf, doc) => {
     pdf.fontSize(16).font('Helvetica-Bold');
     pdf.text(issuerName, M, y, { width: W, align: 'center' });
     y += 18;
-    drawCenteredSegments(pdf, y, [
-      { text: 'Location ID : ', bold: true },
-      { text: displayVal(issuer.code), bold: false },
-      { text: '  |  Name : ', bold: true },
-      { text: displayVal(issuer.location_name || issuer.name), bold: false },
+
+    y = drawCenteredKeyedPairs(pdf, y, [
+      { label: 'Location ID : ', value: displayVal(issuer.code) || '—' },
+      { label: 'Location Name : ', value: displayVal(issuer.location_name || issuer.name) || '—' },
     ]);
-    y += 12;
+
     const addrParts = [issuer.address, issuer.city].filter(Boolean).join(', ');
     if (addrParts) {
-      pdf.fontSize(FIELD_SIZE).font('Helvetica').text(addrParts, M, y, { width: W, align: 'center' });
-      y += 11;
+      pdf.fontSize(FIELD_SIZE).font('Helvetica');
+      const addrH = pdf.heightOfString(addrParts, { width: W, align: 'center' });
+      pdf.text(addrParts, M, y, { width: W, align: 'center' });
+      y += Math.max(11, addrH + 2);
     }
-    if (issuer.manager_name) {
-      pdf.fontSize(FIELD_SIZE).font('Helvetica').text(`Manager : ${issuer.manager_name}`, M, y, {
-        width: W,
-        align: 'center',
-      });
-      y += 12;
+
+    const contactPairs = [];
+    if (displayVal(issuer.phone)) {
+      contactPairs.push({ label: 'Phone : ', value: displayVal(issuer.phone) });
+    }
+    if (displayVal(issuer.email)) {
+      contactPairs.push({ label: 'Email : ', value: displayVal(issuer.email) });
+    }
+    if (contactPairs.length) {
+      y = drawCenteredKeyedPairs(pdf, y, contactPairs);
     }
   }
 
@@ -673,8 +678,27 @@ const buildFranchiseBillPdf = (pdf, doc) => {
     leftContentH += measureLabelValueBlock(pdf, 'State', formatStateLabel(recipient.state_code), textW);
   }
 
+  const dispatchCode = normalizeStateCode(issuer.state_code);
+  const supplyCode = normalizeStateCode(recipient.state_code);
+  const showStateCode = isGst;
+  const posName = displayVal(formatCityStateLabel(recipient.city, supplyCode, { withCode: showStateCode }));
+  const dispatchName = displayVal(formatCityStateLabel(issuer.city, dispatchCode, { withCode: showStateCode }));
+  const dispatchedBy = displayVal(issuer.manager_name);
+
   const rightStartY = y + 14;
-  const rightContentH = 11 * 6 + 26;
+  const rxMeasureW = colW - 12;
+  let rightContentH = 0;
+  rightContentH += measureLabelValueBlock(pdf, 'Invoice No', doc.document_number, rxMeasureW);
+  rightContentH += measureLabelValueBlock(pdf, 'Date', fmtDate(doc.document_date), rxMeasureW);
+  rightContentH += measureLabelValueBlock(pdf, 'E-Way Bill No', doc.tracking_number || '', rxMeasureW);
+  rightContentH += measureLabelValueBlock(pdf, 'Place of Supply', posName, rxMeasureW);
+  rightContentH += measureLabelValueBlock(pdf, 'Place of Dispatch', dispatchName, rxMeasureW);
+  if (dispatchedBy) {
+    rightContentH += measureLabelValueBlock(pdf, 'Dispatched by', dispatchedBy, rxMeasureW);
+  }
+  rightContentH += measureLabelValueBlock(pdf, 'Transport', '', rxMeasureW);
+  rightContentH += 26; // payment box + gap
+
   const infoH = Math.max(120, Math.ceil(Math.max(
     leftStartY - y + leftContentH,
     rightStartY - y + rightContentH
@@ -727,43 +751,21 @@ const buildFranchiseBillPdf = (pdf, doc) => {
 
 
 
-  const dispatchCode = normalizeStateCode(issuer.state_code);
-  const supplyCode = normalizeStateCode(recipient.state_code);
-  const showStateCode = isGst;
-  const posName = displayVal(formatCityStateLabel(recipient.city, supplyCode, { withCode: showStateCode }));
-  const dispatchName = displayVal(formatCityStateLabel(issuer.city, dispatchCode, { withCode: showStateCode }));
-
-
-
   const rxPad = rx + 6;
 
   const rxW = colW - 12;
 
   let ry = y + 14;
 
-  drawLabelValue(pdf, rxPad, ry, 'Invoice No', doc.document_number, rxW);
-
-  ry += 11;
-
-  drawLabelValue(pdf, rxPad, ry, 'Date', fmtDate(doc.document_date), rxW);
-
-  ry += 11;
-
-  drawLabelValue(pdf, rxPad, ry, 'E-Way Bill No', doc.tracking_number || '', rxW);
-
-  ry += 11;
-
-  drawLabelValue(pdf, rxPad, ry, 'Place of Supply', posName, rxW);
-
-  ry += 11;
-
-  drawLabelValue(pdf, rxPad, ry, 'Place of Dispatch', dispatchName, rxW);
-
-  ry += 11;
-
-  drawLabelValue(pdf, rxPad, ry, 'Transport', '', rxW);
-
-  ry += 11;
+  ry = drawLabelValueBlock(pdf, rxPad, ry, 'Invoice No', doc.document_number, rxW);
+  ry = drawLabelValueBlock(pdf, rxPad, ry, 'Date', fmtDate(doc.document_date), rxW);
+  ry = drawLabelValueBlock(pdf, rxPad, ry, 'E-Way Bill No', doc.tracking_number || '', rxW);
+  ry = drawLabelValueBlock(pdf, rxPad, ry, 'Place of Supply', posName, rxW);
+  ry = drawLabelValueBlock(pdf, rxPad, ry, 'Place of Dispatch', dispatchName, rxW);
+  if (dispatchedBy) {
+    ry = drawLabelValueBlock(pdf, rxPad, ry, 'Dispatched by', dispatchedBy, rxW);
+  }
+  ry = drawLabelValueBlock(pdf, rxPad, ry, 'Transport', '', rxW);
 
 
 
@@ -771,7 +773,7 @@ const buildFranchiseBillPdf = (pdf, doc) => {
 
   const payBoxH = 20;
 
-  const payBoxY = ry + 6;
+  const payBoxY = Math.min(ry + 4, y + infoH - payBoxH - 4);
 
   strokeRect(pdf, rx + 6, payBoxY, colW - 12, payBoxH);
 

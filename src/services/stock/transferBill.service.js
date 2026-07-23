@@ -150,6 +150,8 @@ const loadVariantForBill = async (tx, variantId) =>
 
       mrp: true,
 
+      special_price: true,
+
       purchase_price: true,
 
       expenses: true,
@@ -340,6 +342,8 @@ const buildBillLines = (items, billType) => {
 
       unit_mrp: unitMrp,
 
+      unit_special_price: Number(item.variant?.special_price) || 0,
+
       unit_franchise_price: unitFranchise,
 
       line_mrp_total: lineMrp,
@@ -374,6 +378,10 @@ const computeBillTotals = (lines, billType) => {
 
   const franchiseSubtotal = roundMoney(lines.reduce((s, l) => s + l.line_franchise_total, 0));
 
+  const specialSubtotal = roundMoney(
+    lines.reduce((s, l) => s + roundMoney((Number(l.unit_special_price) || 0) * (Number(l.quantity) || 0)), 0)
+  );
+
 
 
   if (billType !== 'GST_INVOICE') {
@@ -381,6 +389,8 @@ const computeBillTotals = (lines, billType) => {
     return {
 
       mrp_subtotal: mrpSubtotal,
+
+      special_subtotal: specialSubtotal,
 
       franchise_subtotal: franchiseSubtotal,
 
@@ -424,6 +434,8 @@ const computeBillTotals = (lines, billType) => {
 
     mrp_subtotal: mrpSubtotal,
 
+    special_subtotal: specialSubtotal,
+
     franchise_subtotal: franchiseSubtotal,
 
     discount: roundMoney(mrpSubtotal - franchiseSubtotal),
@@ -451,8 +463,9 @@ const computeBillTotals = (lines, billType) => {
 
 
 /**
- * Issuer legal name + GSTIN come from company (AppSettings).
- * Location ID / warehouse name / address / manager stay warehouse-level.
+ * Issuer legal name + GSTIN + phone/email come from company (AppSettings).
+ * Location ID / name / address / city / state / manager stay warehouse-level
+ * (Place of Dispatch must reflect the dispatching warehouse).
  */
 const buildIssuerRecipient = async (record, shopGst = null, company = null) => {
 
@@ -481,7 +494,7 @@ const buildIssuerRecipient = async (record, shopGst = null, company = null) => {
       /** Big title on PDF — company legal name (falls back to warehouse name if unset). */
       name: companyLegalName || wh?.warehouse_name || 'Company',
 
-      /** Location line "Name :" — always the warehouse display name. */
+      /** Location line "Location Name :" — always the warehouse display name. */
       location_name: wh?.warehouse_name || '',
 
       gstin,
@@ -490,9 +503,12 @@ const buildIssuerRecipient = async (record, shopGst = null, company = null) => {
 
       city: wh?.city || '',
 
-      state_code: companyIdentity.state_code || '',
+      /** Place of Dispatch state — warehouse state (fallback company only if WH unset). */
+      state_code: wh?.state_code || companyIdentity.state_code || '',
 
       phone: companyIdentity.phone || '',
+
+      email: companyIdentity.email || '',
 
       manager_name: wh?.manager_name || null,
 
@@ -579,6 +595,7 @@ const SINGLE_BILL_INCLUDE = {
       product_code: true,
       warranty: true,
       attributes: true,
+      special_price: true,
       product: {
         select: {
           name: true,
@@ -745,6 +762,8 @@ const TransferBillService = {
                 warranty: true,
 
                 attributes: true,
+
+                special_price: true,
 
                 product: {
 

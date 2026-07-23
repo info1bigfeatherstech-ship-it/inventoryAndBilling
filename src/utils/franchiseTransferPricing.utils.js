@@ -30,10 +30,17 @@ const resolveFranchiseMrp = (snapshots, variant) => {
   return variant?.mrp != null ? roundMoney(Number(variant.mrp)) : null;
 };
 
+const resolveSpecialPrice = (variant) => {
+  if (variant?.special_price == null || variant.special_price === '') return null;
+  const n = Number(variant.special_price);
+  return Number.isFinite(n) ? roundMoney(n) : null;
+};
+
 const buildFranchisePricingBlock = ({ snapshots, variant, quantity, markupPercent }) => {
   const qty = Number(quantity) || 0;
   const franchiseUnit = resolveFranchiseUnitPrice(snapshots, variant, markupPercent);
   const mrp = resolveFranchiseMrp(snapshots, variant);
+  const specialPrice = resolveSpecialPrice(variant);
   const lineFranchise =
     snapshots?.franchise_line_value_snapshot != null
       ? snapshots.franchise_line_value_snapshot
@@ -41,9 +48,11 @@ const buildFranchisePricingBlock = ({ snapshots, variant, quantity, markupPercen
 
   return {
     mrp,
+    special_price: specialPrice,
     franchise_unit_price: franchiseUnit,
     franchise_line_value: lineFranchise,
     mrp_line_value: mrp != null ? roundMoney(mrp * qty) : null,
+    special_line_value: specialPrice != null ? roundMoney(specialPrice * qty) : null,
     markup_percent: snapshots?.franchise_markup_percent_snapshot ?? markupPercent,
   };
 };
@@ -180,8 +189,12 @@ const formatBulkTransferRequest = (bulk, user, markupPercent) => {
     const franchiseSubtotal = roundMoney(
       totalsSource.reduce((sum, item) => sum + (item.franchise_pricing?.franchise_line_value || 0), 0)
     );
+    const specialSubtotal = roundMoney(
+      totalsSource.reduce((sum, item) => sum + (item.franchise_pricing?.special_line_value || 0), 0)
+    );
     franchiseBillTotals = {
       mrp_subtotal: mrpSubtotal,
+      special_subtotal: specialSubtotal,
       franchise_subtotal: franchiseSubtotal,
       discount: roundMoney(mrpSubtotal - franchiseSubtotal),
       final_amount: franchiseSubtotal,

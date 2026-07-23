@@ -1587,6 +1587,8 @@ model AppSettings {
   transfer_invoice_address     String?
   transfer_invoice_city        String?
   transfer_invoice_phone       String?
+  /// Company contact email printed on stock-transfer bill headers (optional).
+  transfer_invoice_email       String?
   /// Single warehouse used as e-comm / wholesale online stock source of truth.
   online_warehouse_id      String?
   online_warehouse         Warehouse? @relation("OnlineFulfillmentWarehouse", fields: [online_warehouse_id], references: [warehouse_id], onDelete: SetNull)

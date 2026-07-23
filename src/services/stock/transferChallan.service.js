@@ -140,6 +140,7 @@ const buildFranchiseLinesFromSingleRequest = (request) => {
       : request.quantity;
   const unitMrp = Number(request.franchise_mrp_snapshot) || 0;
   const unitFranchise = Number(request.franchise_unit_price_snapshot) || 0;
+  const unitSpecial = Number(request.variant?.special_price) || 0;
   const lineMrp = roundMoney(unitMrp * qty);
   const lineFranchise = roundMoney(unitFranchise * qty);
   return [
@@ -150,6 +151,7 @@ const buildFranchiseLinesFromSingleRequest = (request) => {
       batch_number: request.batch_number || '',
       quantity: qty,
       unit_mrp: unitMrp,
+      unit_special_price: unitSpecial,
       unit_franchise_price: unitFranchise,
       line_mrp_total: lineMrp,
       line_franchise_total: lineFranchise,
@@ -203,6 +205,7 @@ const buildFranchiseLinesFromBulk = (bulk) =>
       const qty = resolveBulkLineQty(bulk, item);
       const unitMrp = Number(item.franchise_mrp_snapshot) || 0;
       const unitFranchise = Number(item.franchise_unit_price_snapshot) || 0;
+      const unitSpecial = Number(item.variant?.special_price) || 0;
       const lineMrp = roundMoney(unitMrp * qty);
       const lineFranchise = roundMoney(unitFranchise * qty);
       return {
@@ -212,6 +215,7 @@ const buildFranchiseLinesFromBulk = (bulk) =>
         batch_number: item.batch_number || '',
         quantity: qty,
         unit_mrp: unitMrp,
+        unit_special_price: unitSpecial,
         unit_franchise_price: unitFranchise,
         line_mrp_total: lineMrp,
         line_franchise_total: lineFranchise,
@@ -226,8 +230,16 @@ const computeFranchiseBillTotals = (lines) => {
   const franchiseSubtotal = roundMoney(
     lines.reduce((sum, line) => sum + (Number(line.line_franchise_total) || 0), 0)
   );
+  const specialSubtotal = roundMoney(
+    lines.reduce(
+      (sum, line) =>
+        sum + roundMoney((Number(line.unit_special_price) || 0) * (Number(line.quantity) || 0)),
+      0
+    )
+  );
   return {
     mrp_subtotal: mrpSubtotal,
+    special_subtotal: specialSubtotal,
     franchise_subtotal: franchiseSubtotal,
     discount: roundMoney(mrpSubtotal - franchiseSubtotal),
     final_amount: franchiseSubtotal,

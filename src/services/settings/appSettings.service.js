@@ -30,6 +30,7 @@ const formatCompanyInvoiceSettings = (row) => ({
   transfer_invoice_address: row.transfer_invoice_address ?? null,
   transfer_invoice_city: row.transfer_invoice_city ?? null,
   transfer_invoice_phone: row.transfer_invoice_phone ?? null,
+  transfer_invoice_email: row.transfer_invoice_email ?? null,
   updated_at: row.updated_at,
 });
 
@@ -133,6 +134,7 @@ const getCompanyInvoiceIdentity = async () => {
     address: trimOrNull(row.transfer_invoice_address),
     city: trimOrNull(row.transfer_invoice_city),
     phone: trimOrNull(row.transfer_invoice_phone),
+    email: trimOrNull(row.transfer_invoice_email),
   };
 };
 
@@ -266,6 +268,7 @@ const AppSettingsService = {
       'transfer_invoice_address',
       'transfer_invoice_city',
       'transfer_invoice_phone',
+      'transfer_invoice_email',
     ];
 
     for (const key of fields) {
@@ -282,6 +285,13 @@ const AppSettingsService = {
         if (!value) {
           throw new AppError('state_code must be a 2-digit GST state code', 400, 'INVALID_STATE_CODE');
         }
+      }
+      if (key === 'transfer_invoice_email' && value) {
+        // Practical email check (optional field — blank clears to null).
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) || value.length > 120) {
+          throw new AppError('Company email must be a valid email address', 400, 'INVALID_EMAIL');
+        }
+        value = value.toLowerCase();
       }
       updateData[key] = value;
     }

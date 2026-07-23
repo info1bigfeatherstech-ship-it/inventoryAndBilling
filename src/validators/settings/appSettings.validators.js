@@ -57,6 +57,18 @@ const updateCompanyInvoiceSettingsValidator = [
   body('transfer_invoice_address').optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
   body('transfer_invoice_city').optional({ nullable: true }).isString().trim().isLength({ max: 100 }),
   body('transfer_invoice_phone').optional({ nullable: true }).isString().trim().isLength({ max: 30 }),
+  body('transfer_invoice_email')
+    .optional({ nullable: true })
+    .isString()
+    .trim()
+    .custom((value) => {
+      if (value == null || value === '') return true;
+      const email = String(value).trim();
+      if (email.length > 120 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        throw new Error('transfer_invoice_email must be a valid email address');
+      }
+      return true;
+    }),
 ];
 
 module.exports = {

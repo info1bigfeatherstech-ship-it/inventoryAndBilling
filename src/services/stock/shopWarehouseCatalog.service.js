@@ -221,14 +221,21 @@ const ShopWarehouseCatalogService = {
         selectable: warehouseAvailable > 0,
       };
 
+      // Special / sale price is visible to franchise shop managers so they can
+      // compare F.Price (landed cost) vs max sellable Special Price.
+      variantPayload.special_price = variant.special_price;
+
       if (isFranchiseShop) {
         variantPayload.franchise_unit_price = calculateFranchiseUnitPrice(variant, franchiseMarkup);
       }
-      if (!franchiseShopViewer) {
-        variantPayload.special_price = variant.special_price;
-        if (isFranchiseShop && isWarehouseInternalRole(user?.role)) {
-          variantPayload.purchase_price = variant.purchase_price;
-        }
+
+      // Purchase price stays warehouse-internal only (never expose to franchise shop viewers).
+      if (
+        !franchiseShopViewer &&
+        isFranchiseShop &&
+        isWarehouseInternalRole(user?.role)
+      ) {
+        variantPayload.purchase_price = variant.purchase_price;
       }
 
       const productId = variant.product_id;

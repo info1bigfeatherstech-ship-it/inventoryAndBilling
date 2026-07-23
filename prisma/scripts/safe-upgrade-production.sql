@@ -59,3 +59,6 @@ WHERE "wholesale_price" IS NULL;
 
 ALTER TABLE "products" ALTER COLUMN "wholesale_price" SET NOT NULL;
 ALTER TABLE "ProductVariant" ALTER COLUMN "wholesale_price" SET NOT NULL;
+
+-- Company invoice email (optional — stock transfer bill header contact)
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "transfer_invoice_email" TEXT;

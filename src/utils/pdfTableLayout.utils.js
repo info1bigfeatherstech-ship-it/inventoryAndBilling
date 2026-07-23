@@ -111,6 +111,48 @@ const drawCenteredSegments = (doc, y, segments) => {
     doc.text(seg.text, sx, y, { lineBreak: false });
     sx += seg.w;
   }
+  return totalW;
+};
+
+/**
+ * Centered "Label : value | Label : value" where labels are bold.
+ * If the line is wider than the page content width, each pair is drawn on its own centered line.
+ */
+const drawCenteredKeyedPairs = (doc, y, pairs, { size = FIELD_SIZE, lineGap = 12 } = {}) => {
+  const usable = (pairs || []).filter((p) => p && p.label);
+  if (!usable.length) return y;
+
+  const buildSegments = (list) => {
+    const segs = [];
+    list.forEach((pair, i) => {
+      if (i > 0) segs.push({ text: '  |  ', bold: false, size });
+      segs.push({ text: pair.label, bold: true, size });
+      segs.push({ text: displayVal(pair.value) || '—', bold: false, size });
+    });
+    return segs;
+  };
+
+  const measureWidth = (segs) => {
+    let totalW = 0;
+    for (const seg of segs) {
+      doc.font(seg.bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(seg.size || size);
+      totalW += doc.widthOfString(seg.text);
+    }
+    return totalW;
+  };
+
+  const oneLine = buildSegments(usable);
+  if (measureWidth(oneLine) <= W || usable.length === 1) {
+    drawCenteredSegments(doc, y, oneLine);
+    return y + lineGap;
+  }
+
+  let cy = y;
+  for (const pair of usable) {
+    drawCenteredSegments(doc, cy, buildSegments([pair]));
+    cy += lineGap;
+  }
+  return cy;
 };
 
 const strokeRect = (doc, x, y, w, h, color = '#333333') => {
@@ -281,24 +323,26 @@ const drawTransferHeader = (doc, docPayload) => {
   doc.fontSize(16).font('Helvetica-Bold');
   doc.text(issuer.name || docPayload.from_label || 'Warehouse', M, y, { width: W, align: 'center' });
   y += 18;
-  drawCenteredSegments(doc, y, [
-    { text: 'Location ID : ', bold: true },
-    { text: displayVal(issuer.code), bold: false },
-    { text: '  |  Name : ', bold: true },
-    { text: displayVal(issuer.location_name || issuer.name), bold: false },
+  y = drawCenteredKeyedPairs(doc, y, [
+    { label: 'Location ID : ', value: displayVal(issuer.code) || '—' },
+    { label: 'Location Name : ', value: displayVal(issuer.location_name || issuer.name) || '—' },
   ]);
-  y += 12;
   const addrParts = [issuer.address, issuer.city].filter(Boolean).join(', ');
   if (addrParts) {
-    doc.fontSize(FIELD_SIZE).font('Helvetica').text(addrParts, M, y, { width: W, align: 'center' });
-    y += 11;
+    doc.fontSize(FIELD_SIZE).font('Helvetica');
+    const addrH = doc.heightOfString(addrParts, { width: W, align: 'center' });
+    doc.text(addrParts, M, y, { width: W, align: 'center' });
+    y += Math.max(11, addrH + 2);
   }
-  if (issuer.manager_name) {
-    doc.fontSize(FIELD_SIZE).font('Helvetica').text(`Manager : ${issuer.manager_name}`, M, y, {
-      width: W,
-      align: 'center',
-    });
-    y += 12;
+  const contactPairs = [];
+  if (displayVal(issuer.phone)) {
+    contactPairs.push({ label: 'Phone : ', value: displayVal(issuer.phone) });
+  }
+  if (displayVal(issuer.email)) {
+    contactPairs.push({ label: 'Email : ', value: displayVal(issuer.email) });
+  }
+  if (contactPairs.length) {
+    y = drawCenteredKeyedPairs(doc, y, contactPairs);
   }
 
   doc.moveTo(M, y).lineTo(R, y).strokeColor('#333').lineWidth(0.75).stroke();
@@ -451,6 +495,7 @@ module.exports = {
   truncateProductName,
   drawLabelValue,
   drawCenteredSegments,
+  drawCenteredKeyedPairs,
   drawManualUnderline,
   strokeRect,
   strokeTableGrid,
