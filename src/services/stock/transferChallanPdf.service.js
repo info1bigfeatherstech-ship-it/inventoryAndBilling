@@ -170,8 +170,9 @@ const buildFranchiseGstCols = () => [
   { key: 'qty', label: 'Qty', w: 24 },
   { key: 'mrp', label: 'MRP', w: PRICE_COL_W },
   { key: 'special', labelLines: ['Spl/Sale', 'Price'], w: PRICE_COL_W },
-  { key: 'fprice', labelLines: ['F.', 'Price'], w: PRICE_COL_W },
-  { key: 'tfprice', labelLines: ['Total', 'F. Price'], w: PRICE_COL_W },
+  // Stacked like old bills — full "Franchise Price" without shrinking font.
+  { key: 'fprice', labelLines: ['Franchise', 'Price'], w: PRICE_COL_W },
+  { key: 'tfprice', labelLines: ['Total', 'Franchise', 'Price'], w: PRICE_COL_W },
 ];
 
 const buildFranchiseNonGstCols = () => [
@@ -182,8 +183,8 @@ const buildFranchiseNonGstCols = () => [
   { key: 'qty', label: 'Qty', w: 26 },
   { key: 'mrp', label: 'MRP', w: 65 },
   { key: 'special', labelLines: ['Spl/Sale', 'Price'], w: 65 },
-  { key: 'fprice', labelLines: ['F.', 'Price'], w: 65 },
-  { key: 'tfprice', labelLines: ['Total', 'F. Price'], w: 65 },
+  { key: 'fprice', labelLines: ['Franchise', 'Price'], w: 65 },
+  { key: 'tfprice', labelLines: ['Total', 'Franchise', 'Price'], w: 65 },
 ];
 
 const getFranchiseGstCols = () => buildFranchiseGstCols();
@@ -227,7 +228,8 @@ const drawFranchiseTable = (pdf, startY, cols, lines, isGst) => {
 
   const rowH = 38;
 
-  const headerH = 30;
+  // Enough for 3-line stacked headers (e.g. Total / Franchise / Price) at 7.5pt.
+  const headerH = 34;
 
   const colWidths = cols.map((c) => c.w);
 
@@ -788,15 +790,6 @@ const buildFranchiseBillPdf = (pdf, doc) => {
   const cols = isGst ? getFranchiseGstCols() : getFranchiseNonGstCols();
   y = drawFranchiseTable(pdf, y, cols, lines, isGst);
   y = drawShopStyleFooter(pdf, y, doc, { isGst, isEstimate, issuerName, totals, lines });
-
-
-
-  if (doc.remarks) {
-
-    pdf.fontSize(7).font('Helvetica').text(`Remarks: ${doc.remarks}`, M, pdf.y, { width: W });
-
-  }
-
 };
 
 
@@ -912,15 +905,6 @@ const buildCostChallanPdf = (pdf, doc) => {
   y += finH;
 
   drawTransferFooter(pdf, y, issuerName, { totalAmount: totalValue });
-
-
-
-  if (doc.remarks) {
-
-    pdf.fontSize(7).font('Helvetica').text(`Remarks: ${doc.remarks}`, M, pdf.y, { width: W });
-
-  }
-
 };
 
 
