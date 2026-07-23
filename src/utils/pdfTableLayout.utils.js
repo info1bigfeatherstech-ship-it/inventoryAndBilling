@@ -219,6 +219,26 @@ const drawFitCellText = (doc, text, x, y, w, h, { align = 'center', bold = false
   doc.text(str, tx, ty, { lineBreak: false });
 };
 
+/**
+ * Multi-line cell text at fixed font size (no shrink).
+ * Long brand / warranty names wrap to the next line inside the cell.
+ */
+const drawWrappedCellText = (doc, text, x, y, w, h, { align = 'center', bold = false, size = 7.5, pad = 3 } = {}) => {
+  const str = String(text ?? '').trim() || '-';
+  const innerW = Math.max(1, w - pad * 2);
+  const innerH = Math.max(1, h - pad * 2);
+  doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(size);
+  const measuredH = doc.heightOfString(str, { width: innerW, align });
+  const textH = Math.min(innerH, measuredH);
+  const ty = y + pad + Math.max(0, (innerH - textH) / 2);
+  doc.text(str, x + pad, ty, {
+    width: innerW,
+    height: innerH,
+    align,
+    lineGap: 1,
+  });
+};
+
 const drawTableHeaderLabel = (doc, x, y, w, h, col, { size = 7.5 } = {}) => {
   if (col.labelLines?.length) {
     drawStackedHeader(doc, x, y, w, h, col.labelLines, { size });
@@ -227,13 +247,13 @@ const drawTableHeaderLabel = (doc, x, y, w, h, col, { size = 7.5 } = {}) => {
   drawFitCellText(doc, col.label, x, y, w, h, { align: 'center', bold: true, size });
 };
 
-const drawProductCellAttributes = (doc, x, y, colW, attributes) => {
+const drawProductCellAttributes = (doc, x, y, colW, attributes, { size = 6.4 } = {}) => {
   const parts = parseAttributes(attributes) || [];
   if (!parts.length) return;
 
   const pad = 3;
   const textX = x + pad;
-  doc.fontSize(6.4);
+  doc.fontSize(size);
   let cursorX = textX;
 
   parts.forEach((attr, i) => {
@@ -248,14 +268,14 @@ const drawProductCellAttributes = (doc, x, y, colW, attributes) => {
   });
 };
 
-const drawGstAddLine = (doc, tx, ty, tw, taxPart, value) => {
-  doc.font('Helvetica-Bold').fontSize(FIELD_SIZE);
+const drawGstAddLine = (doc, tx, ty, tw, taxPart, value, { size = FIELD_SIZE } = {}) => {
+  doc.font('Helvetica-Bold').fontSize(size);
   const addText = 'Add';
   doc.text(addText, tx, ty, { lineBreak: false });
-  drawManualUnderline(doc, tx, ty, addText);
+  drawManualUnderline(doc, tx, ty, addText, { size });
   const addW = doc.widthOfString(addText);
   doc.text(` : ${taxPart}`, tx + addW, ty, { lineBreak: false });
-  doc.font('Helvetica').fontSize(FIELD_SIZE);
+  doc.font('Helvetica').fontSize(size);
   doc.text(value, tx + 130, ty, { width: tw - 130, align: 'right' });
   return ty + ROW_STEP;
 };
@@ -503,6 +523,7 @@ module.exports = {
   cellText,
   drawStackedHeader,
   drawFitCellText,
+  drawWrappedCellText,
   drawTableHeaderLabel,
   drawWrappedTextBlock,
   drawLabelValueBlock,

@@ -54,6 +54,8 @@ const {
 
   drawFitCellText,
 
+  drawWrappedCellText,
+
   drawTableHeaderLabel,
 
   drawWrappedTextBlock,
@@ -71,6 +73,9 @@ const {
   drawProductCellAttributes,
 
 } = require('../../utils/pdfTableLayout.utils');
+
+/** Bill To / invoice meta + post-payable footer — +1pt vs default FIELD_SIZE (8). */
+const DETAIL_SIZE = FIELD_SIZE + 1;
 
 
 
@@ -193,7 +198,11 @@ const getFranchiseNonGstCols = () => buildFranchiseNonGstCols();
 
 const isPriceCol = (key) => ['mrp', 'special', 'fprice', 'tfprice'].includes(key);
 
-const isCompactCol = (key) => ['sno', 'brand', 'warranty', 'hsn', 'gst', 'qty'].includes(key);
+/** Short numeric / code cols — single line, may shrink slightly. */
+const isCompactCol = (key) => ['sno', 'hsn', 'gst', 'qty'].includes(key);
+
+/** Text cols that must keep font size and wrap to next line. */
+const isWrapTextCol = (key) => ['brand', 'warranty'].includes(key);
 
 const cellValueForLine = (line, col, rowIndex) => {
   switch (col.key) {
@@ -226,10 +235,11 @@ const cellValueForLine = (line, col, rowIndex) => {
 
 const drawFranchiseTable = (pdf, startY, cols, lines, isGst) => {
 
-  const rowH = 38;
+  const cellSize = DETAIL_SIZE;
+  const rowH = 40;
 
-  // Enough for 3-line stacked headers (e.g. Total / Franchise / Price) at 7.5pt.
-  const headerH = 34;
+  // Stacked headers (Total / Franchise / Price) at DETAIL_SIZE.
+  const headerH = 38;
 
   const colWidths = cols.map((c) => c.w);
 
@@ -243,7 +253,7 @@ const drawFranchiseTable = (pdf, startY, cols, lines, isGst) => {
 
     for (const col of cols) {
 
-      drawTableHeaderLabel(pdf, cx, tableY, col.w, headerH, col, { size: 7.5 });
+      drawTableHeaderLabel(pdf, cx, tableY, col.w, headerH, col, { size: cellSize });
 
       cx += col.w;
 
@@ -271,23 +281,25 @@ const drawFranchiseTable = (pdf, startY, cols, lines, isGst) => {
 
         if (i === productColIndex) {
 
-          pdf.font('Helvetica').fontSize(7.5);
+          pdf.font('Helvetica').fontSize(cellSize);
 
-          pdf.text(name, cx + 3, rowY + 3, { width: Math.max(1, col.w - 6), height: 9, align: 'left' });
+          pdf.text(name, cx + 3, rowY + 3, { width: Math.max(1, col.w - 6), height: 11, align: 'left' });
 
           const code = displayVal(line.product_code);
 
           if (code) {
 
-            pdf.font('Helvetica').fontSize(6.5).fillColor('#444');
+            pdf.font('Helvetica').fontSize(cellSize - 1).fillColor('#444');
 
-            pdf.text(code, cx + 3, rowY + 13, { width: Math.max(1, col.w - 6), align: 'left', lineBreak: false });
+            pdf.text(code, cx + 3, rowY + 14, { width: Math.max(1, col.w - 6), align: 'left', lineBreak: false });
 
             pdf.fillColor('#000');
 
           }
 
-          drawProductCellAttributes(pdf, cx, rowY + (code ? 22 : 13), col.w, line.attributes);
+          drawProductCellAttributes(pdf, cx, rowY + (code ? 24 : 14), col.w, line.attributes, {
+            size: cellSize - 1.5,
+          });
 
         } else if (isPriceCol(col.key)) {
 
@@ -297,7 +309,19 @@ const drawFranchiseTable = (pdf, startY, cols, lines, isGst) => {
 
             bold: false,
 
-            size: 7.5,
+            size: cellSize,
+
+          });
+
+        } else if (isWrapTextCol(col.key)) {
+
+          drawWrappedCellText(pdf, cellValueForLine(line, col, globalIdx), cx, rowY, col.w, rowH, {
+
+            align: 'center',
+
+            bold: false,
+
+            size: cellSize,
 
           });
 
@@ -309,7 +333,7 @@ const drawFranchiseTable = (pdf, startY, cols, lines, isGst) => {
 
             bold: false,
 
-            size: 7.5,
+            size: cellSize,
 
           });
 
@@ -321,7 +345,7 @@ const drawFranchiseTable = (pdf, startY, cols, lines, isGst) => {
 
             bold: false,
 
-            size: 7.5,
+            size: cellSize,
 
           });
 
@@ -421,11 +445,17 @@ const drawShopStyleFooter = (pdf, y, doc, { isGst, isEstimate = false, issuerNam
 
 
 
-  ty = drawTotalLine(pdf, tx, ty, tw, 'Sub Total', fmtNum(subTotal));
+  ty = drawTotalLine(pdf, tx, ty, tw, 'Sub Total', fmtNum(subTotal), {
+    labelSize: DETAIL_SIZE,
+    valueSize: DETAIL_SIZE,
+  });
 
   if (mrpDiscount > 0) {
 
-    ty = drawTotalLine(pdf, tx, ty, tw, 'MRP Discount', `- ${fmtNum(mrpDiscount)}`);
+    ty = drawTotalLine(pdf, tx, ty, tw, 'MRP Discount', `- ${fmtNum(mrpDiscount)}`, {
+      labelSize: DETAIL_SIZE,
+      valueSize: DETAIL_SIZE,
+    });
 
   }
 
@@ -433,7 +463,10 @@ const drawShopStyleFooter = (pdf, y, doc, { isGst, isEstimate = false, issuerNam
 
   if (isGst) {
 
-    ty = drawTotalLine(pdf, tx, ty, tw, 'Total Amount', fmtNum(taxableAmount));
+    ty = drawTotalLine(pdf, tx, ty, tw, 'Total Amount', fmtNum(taxableAmount), {
+      labelSize: DETAIL_SIZE,
+      valueSize: DETAIL_SIZE,
+    });
 
 
 
@@ -441,19 +474,25 @@ const drawShopStyleFooter = (pdf, y, doc, { isGst, isEstimate = false, issuerNam
 
       if (gstSplit.cgst > 0) {
 
-        ty = drawGstAddLine(pdf, tx, ty, tw, `CGST (${taxRates.cgstPercent}%)`, `+ ${fmtNum(gstSplit.cgst)}`);
+        ty = drawGstAddLine(pdf, tx, ty, tw, `CGST (${taxRates.cgstPercent}%)`, `+ ${fmtNum(gstSplit.cgst)}`, {
+          size: DETAIL_SIZE,
+        });
 
       }
 
       if (gstSplit.sgst > 0) {
 
-        ty = drawGstAddLine(pdf, tx, ty, tw, `SGST (${taxRates.sgstPercent}%)`, `+ ${fmtNum(gstSplit.sgst)}`);
+        ty = drawGstAddLine(pdf, tx, ty, tw, `SGST (${taxRates.sgstPercent}%)`, `+ ${fmtNum(gstSplit.sgst)}`, {
+          size: DETAIL_SIZE,
+        });
 
       }
 
     } else if (gstSplit.igst > 0) {
 
-      ty = drawGstAddLine(pdf, tx, ty, tw, `IGST (${taxRates.igstPercent}%)`, `+ ${fmtNum(gstSplit.igst)}`);
+      ty = drawGstAddLine(pdf, tx, ty, tw, `IGST (${taxRates.igstPercent}%)`, `+ ${fmtNum(gstSplit.igst)}`, {
+        size: DETAIL_SIZE,
+      });
 
     }
 
@@ -461,7 +500,15 @@ const drawShopStyleFooter = (pdf, y, doc, { isGst, isEstimate = false, issuerNam
 
     if (gstAmount > 0) {
 
-      ty = drawTotalLine(pdf, tx, ty, tw, `Total Tax Amount (${taxRates.totalPercent}%)`, fmtNum(gstAmount));
+      ty = drawTotalLine(
+        pdf,
+        tx,
+        ty,
+        tw,
+        `Total Tax Amount (${taxRates.totalPercent}%)`,
+        fmtNum(gstAmount),
+        { labelSize: DETAIL_SIZE, valueSize: DETAIL_SIZE }
+      );
 
       ty += 2;
 
@@ -491,13 +538,13 @@ const drawShopStyleFooter = (pdf, y, doc, { isGst, isEstimate = false, issuerNam
 
   const wordsPadTop = 6;
 
-  const wordsH = 32;
+  const wordsH = 36;
 
   strokeRect(pdf, M, y, W, wordsH);
 
-  pdf.fontSize(8).font('Helvetica-Bold').text('Total Amount (in words) :', M + 6, y + wordsPadTop);
+  pdf.fontSize(9).font('Helvetica-Bold').text('Total Amount (in words) :', M + 6, y + wordsPadTop);
 
-  pdf.font('Helvetica').fontSize(8);
+  pdf.font('Helvetica').fontSize(9);
 
   pdf.text(amountInWords(finalAmount), M + 6, y + wordsPadTop + SECTION_LABEL_GAP, {
 
@@ -511,10 +558,10 @@ const drawShopStyleFooter = (pdf, y, doc, { isGst, isEstimate = false, issuerNam
 
   if (!isEstimate) {
     const declPadTop = 6;
-    const declH = 40;
+    const declH = 44;
     strokeRect(pdf, M, y, W, declH);
-    pdf.fontSize(8).font('Helvetica-Bold').text('Declaration :', M + 6, y + declPadTop);
-    pdf.font('Helvetica').fontSize(7);
+    pdf.fontSize(9).font('Helvetica-Bold').text('Declaration :', M + 6, y + declPadTop);
+    pdf.font('Helvetica').fontSize(8);
     pdf.text(
       'We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.',
       M + 6,
@@ -523,7 +570,7 @@ const drawShopStyleFooter = (pdf, y, doc, { isGst, isEstimate = false, issuerNam
     );
     y += declH;
 
-    const footH = 72;
+    const footH = 76;
     strokeRect(pdf, M, y, W, footH);
     pdf.moveTo(MID, y).lineTo(MID, y + footH).stroke();
 
@@ -532,15 +579,15 @@ const drawShopStyleFooter = (pdf, y, doc, { isGst, isEstimate = false, issuerNam
     const footPadTop = 6;
 
     if (!isGst) {
-      pdf.fontSize(7.5).font('Helvetica-Bold').text('Note:', M + 6, y + footPadTop);
-      pdf.font('Helvetica').fontSize(7);
+      pdf.fontSize(8.5).font('Helvetica-Bold').text('Note:', M + 6, y + footPadTop);
+      pdf.font('Helvetica').fontSize(8);
       pdf.text('1. Keep the bill for warranty or guarantee purpose.', M + 6, y + footPadTop + NOTE_LABEL_GAP, {
         width: HALF - 12,
         lineGap: 1,
       });
     } else {
-      pdf.fontSize(7.5).font('Helvetica-Bold').text('Terms & Conditions :', M + 6, y + footPadTop);
-      pdf.font('Helvetica').fontSize(7);
+      pdf.fontSize(8.5).font('Helvetica-Bold').text('Terms & Conditions :', M + 6, y + footPadTop);
+      pdf.font('Helvetica').fontSize(8);
       const terms = [
         '1. E. & O.E.',
         '2. Subject to local jurisdiction only.',
@@ -549,28 +596,28 @@ const drawShopStyleFooter = (pdf, y, doc, { isGst, isEstimate = false, issuerNam
       let tcy = y + footPadTop + SECTION_LABEL_GAP;
       for (const t of terms) {
         pdf.text(t, M + 6, tcy, { width: HALF - 12, lineGap: 1 });
-        tcy += ROW_STEP;
+        tcy += ROW_STEP + 1;
       }
     }
 
-    pdf.fontSize(8).font('Helvetica-Bold').text(`For ${issuerName || 'Warehouse'}`, rx + 6, y + 6);
+    pdf.fontSize(9).font('Helvetica-Bold').text(`For ${issuerName || 'Warehouse'}`, rx + 6, y + 6);
     const stampX = rx + colW - 62;
     const stampY = y + 18;
     pdf.save().dash(3, { space: 2 }).lineWidth(0.6).strokeColor('#999');
     pdf.rect(stampX, stampY, 48, 36).stroke();
     pdf.undash().restore();
-    pdf.fontSize(6.5).font('Helvetica').fillColor('#888');
+    pdf.fontSize(7.5).font('Helvetica').fillColor('#888');
     pdf.text('Seal / Stamp', stampX, stampY + 14, { width: 48, align: 'center' });
     pdf.fillColor('#000');
     pdf.moveTo(rx + 6, y + footH - 14).lineTo(R - 8, y + footH - 14).stroke();
-    pdf.fontSize(7).font('Helvetica-Oblique').text('Authorised Signatory', rx + 6, y + footH - 12);
+    pdf.fontSize(8).font('Helvetica-Oblique').text('Authorised Signatory', rx + 6, y + footH - 12);
 
     y += footH + 8;
   } else {
     y += 8;
   }
 
-  pdf.fontSize(7).font('Helvetica-Oblique').fillColor('#666');
+  pdf.fontSize(8).font('Helvetica-Oblique').fillColor('#666');
   pdf.text('This is a computer generated invoice.', M, y, { width: W, align: 'center' });
   pdf.fillColor('#000').font('Helvetica');
 
@@ -629,15 +676,15 @@ const buildFranchiseBillPdf = (pdf, doc) => {
     y = drawCenteredKeyedPairs(pdf, y, [
       { label: 'Location ID : ', value: displayVal(issuer.code) || '—' },
       { label: 'Location Name : ', value: displayVal(issuer.location_name || issuer.name) || '—' },
-    ]);
+    ], { size: DETAIL_SIZE, lineGap: 13 });
 
     // Header address only — do not append city (often already inside the address text).
     const addrParts = displayVal(issuer.address);
     if (addrParts) {
-      pdf.fontSize(FIELD_SIZE).font('Helvetica');
+      pdf.fontSize(DETAIL_SIZE).font('Helvetica');
       const addrH = pdf.heightOfString(addrParts, { width: W, align: 'center' });
       pdf.text(addrParts, M, y, { width: W, align: 'center' });
-      y += Math.max(11, addrH + 2);
+      y += Math.max(12, addrH + 2);
     }
 
     const contactPairs = [];
@@ -648,7 +695,7 @@ const buildFranchiseBillPdf = (pdf, doc) => {
       contactPairs.push({ label: 'Email : ', value: displayVal(issuer.email) });
     }
     if (contactPairs.length) {
-      y = drawCenteredKeyedPairs(pdf, y, contactPairs);
+      y = drawCenteredKeyedPairs(pdf, y, contactPairs, { size: DETAIL_SIZE, lineGap: 13 });
     }
   }
 
@@ -669,16 +716,27 @@ const buildFranchiseBillPdf = (pdf, doc) => {
     : recipient.name || doc.to_label;
 
   const textW = colW - 12;
-  const leftStartY = y + 19;
+  const leftStartY = y + 20;
   let leftContentH = isGst
-    ? measureLabelValueBlock(pdf, 'M/S', billToName, textW)
-    : measureWrappedTextBlock(pdf, billToName, textW);
-  leftContentH += measureWrappedTextBlock(pdf, recipient.address, textW);
-  leftContentH += measureWrappedTextBlock(pdf, [recipient.city, recipient.pincode].filter(Boolean).join(', '), textW);
-  leftContentH += measureLabelValueBlock(pdf, 'Mobile', recipient.phone, textW);
+    ? measureLabelValueBlock(pdf, 'M/S', billToName, textW, DETAIL_SIZE)
+    : measureWrappedTextBlock(pdf, billToName, textW, { size: DETAIL_SIZE });
+  leftContentH += measureWrappedTextBlock(pdf, recipient.address, textW, { size: DETAIL_SIZE });
+  leftContentH += measureWrappedTextBlock(
+    pdf,
+    [recipient.city, recipient.pincode].filter(Boolean).join(', '),
+    textW,
+    { size: DETAIL_SIZE }
+  );
+  leftContentH += measureLabelValueBlock(pdf, 'Mobile', recipient.phone, textW, DETAIL_SIZE);
   if (isGst) {
-    leftContentH += measureLabelValueBlock(pdf, 'GSTIN', recipient.gstin, textW);
-    leftContentH += measureLabelValueBlock(pdf, 'State', formatStateLabel(recipient.state_code), textW);
+    leftContentH += measureLabelValueBlock(pdf, 'GSTIN', recipient.gstin, textW, DETAIL_SIZE);
+    leftContentH += measureLabelValueBlock(
+      pdf,
+      'State',
+      formatStateLabel(recipient.state_code),
+      textW,
+      DETAIL_SIZE
+    );
   }
 
   const dispatchCode = normalizeStateCode(issuer.state_code);
@@ -691,16 +749,16 @@ const buildFranchiseBillPdf = (pdf, doc) => {
   const rightStartY = y + 14;
   const rxMeasureW = colW - 12;
   let rightContentH = 0;
-  rightContentH += measureLabelValueBlock(pdf, 'Invoice No', doc.document_number, rxMeasureW);
-  rightContentH += measureLabelValueBlock(pdf, 'Date', fmtDate(doc.document_date), rxMeasureW);
-  rightContentH += measureLabelValueBlock(pdf, 'E-Way Bill No', doc.tracking_number || '', rxMeasureW);
-  rightContentH += measureLabelValueBlock(pdf, 'Place of Supply', posName, rxMeasureW);
-  rightContentH += measureLabelValueBlock(pdf, 'Place of Dispatch', dispatchName, rxMeasureW);
+  rightContentH += measureLabelValueBlock(pdf, 'Invoice No', doc.document_number, rxMeasureW, DETAIL_SIZE);
+  rightContentH += measureLabelValueBlock(pdf, 'Date', fmtDate(doc.document_date), rxMeasureW, DETAIL_SIZE);
+  rightContentH += measureLabelValueBlock(pdf, 'E-Way Bill No', doc.tracking_number || '', rxMeasureW, DETAIL_SIZE);
+  rightContentH += measureLabelValueBlock(pdf, 'Place of Supply', posName, rxMeasureW, DETAIL_SIZE);
+  rightContentH += measureLabelValueBlock(pdf, 'Place of Dispatch', dispatchName, rxMeasureW, DETAIL_SIZE);
   if (dispatchedBy) {
-    rightContentH += measureLabelValueBlock(pdf, 'Dispatched by', dispatchedBy, rxMeasureW);
+    rightContentH += measureLabelValueBlock(pdf, 'Dispatched by', dispatchedBy, rxMeasureW, DETAIL_SIZE);
   }
-  rightContentH += measureLabelValueBlock(pdf, 'Transport', '', rxMeasureW);
-  rightContentH += 26; // payment box + gap
+  rightContentH += measureLabelValueBlock(pdf, 'Transport', '', rxMeasureW, DETAIL_SIZE);
+  rightContentH += 28; // payment box + gap
 
   const infoH = Math.max(120, Math.ceil(Math.max(
     leftStartY - y + leftContentH,
@@ -717,13 +775,13 @@ const buildFranchiseBillPdf = (pdf, doc) => {
 
   const billToY = y + 5;
 
-  pdf.fontSize(FIELD_SIZE).font('Helvetica-Bold');
+  pdf.fontSize(DETAIL_SIZE).font('Helvetica-Bold');
 
   const billToText = 'Bill To';
 
   pdf.text(billToText, billToX, billToY, { lineBreak: false });
 
-  drawManualUnderline(pdf, billToX, billToY, billToText);
+  drawManualUnderline(pdf, billToX, billToY, billToText, { size: DETAIL_SIZE });
 
   pdf.text(' :', billToX + pdf.widthOfString(billToText), billToY, { lineBreak: false });
 
@@ -731,25 +789,29 @@ const buildFranchiseBillPdf = (pdf, doc) => {
 
   let ly = leftStartY;
 
-  pdf.fontSize(FIELD_SIZE).font('Helvetica');
+  pdf.fontSize(DETAIL_SIZE).font('Helvetica');
 
   if (isGst) {
-    ly = drawLabelValueBlock(pdf, lx + 6, ly, 'M/S', billToName, textW);
+    ly = drawLabelValueBlock(pdf, lx + 6, ly, 'M/S', billToName, textW, DETAIL_SIZE);
   } else {
-    ly = drawWrappedTextBlock(pdf, lx + 6, ly, billToName, textW);
+    ly = drawWrappedTextBlock(pdf, lx + 6, ly, billToName, textW, { size: DETAIL_SIZE });
   }
 
-  if (recipient.address) ly = drawWrappedTextBlock(pdf, lx + 6, ly, recipient.address, textW);
+  if (recipient.address) {
+    ly = drawWrappedTextBlock(pdf, lx + 6, ly, recipient.address, textW, { size: DETAIL_SIZE });
+  }
 
   const recipientCity = [recipient.city, recipient.pincode].filter(Boolean).join(', ');
 
-  if (recipientCity) ly = drawWrappedTextBlock(pdf, lx + 6, ly, recipientCity, textW);
+  if (recipientCity) {
+    ly = drawWrappedTextBlock(pdf, lx + 6, ly, recipientCity, textW, { size: DETAIL_SIZE });
+  }
 
-  ly = drawLabelValueBlock(pdf, lx + 6, ly, 'Mobile', recipient.phone, textW);
+  ly = drawLabelValueBlock(pdf, lx + 6, ly, 'Mobile', recipient.phone, textW, DETAIL_SIZE);
 
   if (isGst) {
-    ly = drawLabelValueBlock(pdf, lx + 6, ly, 'GSTIN', recipient.gstin, textW);
-    ly = drawLabelValueBlock(pdf, lx + 6, ly, 'State', formatStateLabel(recipient.state_code), textW);
+    ly = drawLabelValueBlock(pdf, lx + 6, ly, 'GSTIN', recipient.gstin, textW, DETAIL_SIZE);
+    ly = drawLabelValueBlock(pdf, lx + 6, ly, 'State', formatStateLabel(recipient.state_code), textW, DETAIL_SIZE);
   }
 
 
@@ -760,21 +822,21 @@ const buildFranchiseBillPdf = (pdf, doc) => {
 
   let ry = y + 14;
 
-  ry = drawLabelValueBlock(pdf, rxPad, ry, 'Invoice No', doc.document_number, rxW);
-  ry = drawLabelValueBlock(pdf, rxPad, ry, 'Date', fmtDate(doc.document_date), rxW);
-  ry = drawLabelValueBlock(pdf, rxPad, ry, 'E-Way Bill No', doc.tracking_number || '', rxW);
-  ry = drawLabelValueBlock(pdf, rxPad, ry, 'Place of Supply', posName, rxW);
-  ry = drawLabelValueBlock(pdf, rxPad, ry, 'Place of Dispatch', dispatchName, rxW);
+  ry = drawLabelValueBlock(pdf, rxPad, ry, 'Invoice No', doc.document_number, rxW, DETAIL_SIZE);
+  ry = drawLabelValueBlock(pdf, rxPad, ry, 'Date', fmtDate(doc.document_date), rxW, DETAIL_SIZE);
+  ry = drawLabelValueBlock(pdf, rxPad, ry, 'E-Way Bill No', doc.tracking_number || '', rxW, DETAIL_SIZE);
+  ry = drawLabelValueBlock(pdf, rxPad, ry, 'Place of Supply', posName, rxW, DETAIL_SIZE);
+  ry = drawLabelValueBlock(pdf, rxPad, ry, 'Place of Dispatch', dispatchName, rxW, DETAIL_SIZE);
   if (dispatchedBy) {
-    ry = drawLabelValueBlock(pdf, rxPad, ry, 'Dispatched by', dispatchedBy, rxW);
+    ry = drawLabelValueBlock(pdf, rxPad, ry, 'Dispatched by', dispatchedBy, rxW, DETAIL_SIZE);
   }
-  ry = drawLabelValueBlock(pdf, rxPad, ry, 'Transport', '', rxW);
+  ry = drawLabelValueBlock(pdf, rxPad, ry, 'Transport', '', rxW, DETAIL_SIZE);
 
 
 
-  const payFontSize = 9;
+  const payFontSize = DETAIL_SIZE + 1;
 
-  const payBoxH = 20;
+  const payBoxH = 22;
 
   const payBoxY = Math.min(ry + 4, y + infoH - payBoxH - 4);
 
