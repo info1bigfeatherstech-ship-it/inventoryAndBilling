@@ -233,7 +233,16 @@ const cellValueForLine = (line, col, rowIndex) => {
 
 
 
-const drawFranchiseTable = (pdf, startY, cols, lines, isGst) => {
+const estimateShopStyleFooterHeight = ({ isGst = false, isEstimate = false } = {}) => {
+  const finH = isGst ? 118 : 68;
+  const wordsH = 36;
+  if (isEstimate) return finH + wordsH + 24;
+  const declH = 44;
+  const footH = 76;
+  return finH + wordsH + declH + footH + 24;
+};
+
+const drawFranchiseTable = (pdf, startY, cols, lines, { isGst = false, isEstimate = false } = {}) => {
 
   const cellSize = DETAIL_SIZE;
   const rowH = 40;
@@ -244,6 +253,16 @@ const drawFranchiseTable = (pdf, startY, cols, lines, isGst) => {
   const colWidths = cols.map((c) => c.w);
 
   const productColIndex = cols.findIndex((c) => c.isProduct);
+
+  // A4 usable bottom (leave bottom margin M).
+  const pageBottom = () => pdf.page.height - M;
+  const footerReserve = estimateShopStyleFooterHeight({ isGst, isEstimate });
+
+  const maxRowsForPage = (pageTableY, { reserveFooter = false } = {}) => {
+    const reserve = reserveFooter ? footerReserve : 8;
+    const available = pageBottom() - pageTableY - headerH - reserve;
+    return Math.max(1, Math.floor(available / rowH));
+  };
 
 
 
@@ -367,8 +386,6 @@ const drawFranchiseTable = (pdf, startY, cols, lines, isGst) => {
 
   const tableStartY = startY;
 
-  const itemsPerPage = Math.max(1, Math.floor((620 - tableStartY - headerH) / rowH));
-
   let itemIdx = 0;
 
   let y = startY;
@@ -389,9 +406,24 @@ const drawFranchiseTable = (pdf, startY, cols, lines, isGst) => {
 
   while (itemIdx < lines.length) {
 
-    const chunk = lines.slice(itemIdx, itemIdx + itemsPerPage);
-
     const pageTableY = itemIdx === 0 ? tableStartY : M;
+    const remaining = lines.length - itemIdx;
+
+    // Prefer packing rows + footer on this page when possible; otherwise fill the page.
+    const withFooter = maxRowsForPage(pageTableY, { reserveFooter: true });
+    const fillPage = maxRowsForPage(pageTableY, { reserveFooter: false });
+
+    let take;
+    if (remaining <= withFooter) {
+      take = remaining;
+    } else if (remaining <= fillPage) {
+      // All remaining rows fit; footer will move to next page.
+      take = remaining;
+    } else {
+      take = fillPage;
+    }
+
+    const chunk = lines.slice(itemIdx, itemIdx + take);
 
     strokeTableGrid(pdf, M, pageTableY, colWidths, headerH, rowH, chunk.length);
 
@@ -864,7 +896,13 @@ const buildFranchiseBillPdf = (pdf, doc) => {
 
 
   const cols = isGst ? getFranchiseGstCols() : getFranchiseNonGstCols();
-  y = drawFranchiseTable(pdf, y, cols, lines, isGst);
+  y = drawFranchiseTable(pdf, y, cols, lines, { isGst, isEstimate });
+
+  const footerH = estimateShopStyleFooterHeight({ isGst, isEstimate });
+  if (y + footerH > pdf.page.height - M) {
+    pdf.addPage();
+    y = M;
+  }
   y = drawShopStyleFooter(pdf, y, doc, { isGst, isEstimate, issuerName, totals, lines });
 };
 
