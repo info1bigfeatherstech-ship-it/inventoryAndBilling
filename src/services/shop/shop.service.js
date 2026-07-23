@@ -87,32 +87,69 @@ const attachDefaultGstFields = (shop) => {
   };
 };
 
+/**
+ * Soft-clear default GST for a shop (no hard delete — bills/banks may reference rows).
+ * Clears is_default + is_active so attachDefaultGstFields returns null.
+ */
+const clearShopDefaultGst = async (shopId, tx = prisma) => {
+  const defaults = await tx.shopGstRegistration.findMany({
+    where: { shop_id: shopId, is_default: true },
+    select: { gst_config_id: true },
+  });
+  if (!defaults.length) return;
+
+  const ids = defaults.map((row) => row.gst_config_id);
+  await tx.shopGstRegistration.updateMany({
+    where: { gst_config_id: { in: ids } },
+    data: { is_default: false, is_active: false },
+  });
+  await tx.shopBankAccount.updateMany({
+    where: { gst_config_id: { in: ids }, is_active: true },
+    data: { is_active: false, is_default: false },
+  });
+};
+
 const upsertShopDefaultGst = async (shopId, gstNumber, legalName, tx = prisma) => {
   const gst = assertValidGstNumber(gstNumber);
+
+  // Prefer reactivating an existing row for this GSTIN (e.g. after a clear).
+  const byNumber = await tx.shopGstRegistration.findUnique({
+    where: { shop_id_gst_number: { shop_id: shopId, gst_number: gst } },
+    select: { gst_config_id: true, is_default: true, is_active: true },
+  });
+  if (byNumber) {
+    await tx.shopGstRegistration.updateMany({
+      where: {
+        shop_id: shopId,
+        is_default: true,
+        gst_config_id: { not: byNumber.gst_config_id },
+      },
+      data: { is_default: false },
+    });
+    await tx.shopGstRegistration.update({
+      where: { gst_config_id: byNumber.gst_config_id },
+      data: {
+        is_default: true,
+        is_active: true,
+        ...(legalName ? { legal_name: legalName } : {}),
+      },
+    });
+    return byNumber.gst_config_id;
+  }
+
   const existing = await tx.shopGstRegistration.findFirst({
     where: { shop_id: shopId, is_default: true },
     select: { gst_config_id: true, gst_number: true },
   });
 
   if (existing) {
-    if (existing.gst_number !== gst) {
-      const conflict = await tx.shopGstRegistration.findUnique({
-        where: { shop_id_gst_number: { shop_id: shopId, gst_number: gst } },
-        select: { gst_config_id: true },
-      });
-      if (conflict && conflict.gst_config_id !== existing.gst_config_id) {
-        throw new AppError(`GSTIN "${gst}" is already registered for this shop`, 409, 'SHOP_GST_EXISTS');
-      }
-      await tx.shopGstRegistration.update({
-        where: { gst_config_id: existing.gst_config_id },
-        data: { gst_number: gst, legal_name: legalName ?? undefined },
-      });
-    } else if (legalName) {
-      await tx.shopGstRegistration.update({
-        where: { gst_config_id: existing.gst_config_id },
-        data: { legal_name: legalName },
-      });
-    }
+    const data = { is_active: true };
+    if (existing.gst_number !== gst) data.gst_number = gst;
+    if (legalName) data.legal_name = legalName;
+    await tx.shopGstRegistration.update({
+      where: { gst_config_id: existing.gst_config_id },
+      data,
+    });
     return existing.gst_config_id;
   }
 
@@ -127,6 +164,16 @@ const upsertShopDefaultGst = async (shopId, gstNumber, legalName, tx = prisma) =
     select: { gst_config_id: true },
   });
   return created.gst_config_id;
+};
+
+/** Set GST when non-empty; clear default GST when null/blank. */
+const syncShopDefaultGst = async (shopId, gstNumber, legalName, tx = prisma) => {
+  const trimmed = gstNumber == null ? '' : String(gstNumber).trim();
+  if (!trimmed) {
+    await clearShopDefaultGst(shopId, tx);
+    return null;
+  }
+  return upsertShopDefaultGst(shopId, trimmed, legalName, tx);
 };
 
 const buildShopWhere = (filters = {}, user) => {
@@ -441,8 +488,8 @@ const ShopService = {
       }
     }
 
-    if (Object.prototype.hasOwnProperty.call(data, 'gst_number') && data.gst_number?.trim()) {
-      await upsertShopDefaultGst(shopId, data.gst_number, data.shop_name || updated.shop_name);
+    if (Object.prototype.hasOwnProperty.call(data, 'gst_number')) {
+      await syncShopDefaultGst(shopId, data.gst_number, data.shop_name || updated.shop_name);
     }
 
     const withGst = await prisma.shop.findUnique({
@@ -500,8 +547,8 @@ const ShopService = {
       });
     }
 
-    if (Object.prototype.hasOwnProperty.call(data, 'gst_number') && data.gst_number?.trim()) {
-      await upsertShopDefaultGst(shop.shop_id, data.gst_number, shop.shop_name);
+    if (Object.prototype.hasOwnProperty.call(data, 'gst_number')) {
+      await syncShopDefaultGst(shop.shop_id, data.gst_number, shop.shop_name);
     }
 
     return this.getShopByOwnerId(ownerUserId, { userShopId: shop.shop_id, repair: false });
