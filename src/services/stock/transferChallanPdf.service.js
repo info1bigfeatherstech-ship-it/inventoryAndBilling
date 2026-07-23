@@ -660,10 +660,10 @@ const buildFranchiseBillPdf = (pdf, doc) => {
   // Title above company name: GST INVOICE / Invoice / Receipt
   if (isEstimate) {
     pdf.fontSize(16).font('Helvetica-Bold');
-    pdf.text('Receipt', M, y, { width: W, align: 'center' });
+    pdf.text('RECEIPT', M, y, { width: W, align: 'center' });
     y += 34;
   } else {
-    const billTitle = isGst ? 'GST INVOICE' : 'Invoice';
+    const billTitle = isGst ? 'GST INVOICE' : 'INVOICE';
     const billTitleSize = 11;
     pdf.fontSize(billTitleSize).font('Helvetica-Bold');
     const billTitleW = pdf.widthOfString(billTitle);
