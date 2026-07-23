@@ -642,49 +642,58 @@ const buildFranchiseBillPdf = (pdf, doc) => {
 
   let y = M;
 
+  const headerLineGap = 15;
+
   if (isGst && issuer.gstin) {
-    drawLabelValue(pdf, M, y, 'GSTIN', issuer.gstin, HALF);
-    pdf.fontSize(7.5).font('Helvetica').text('Original / Duplicate / Triplicate', M, y, {
+    drawLabelValue(pdf, M, y, 'GSTIN', issuer.gstin, HALF, DETAIL_SIZE);
+    pdf.fontSize(DETAIL_SIZE).font('Helvetica').text('Original / Duplicate / Triplicate', M, y, {
       width: W,
       align: 'right',
     });
-    y += 16;
+    y += 18;
+  } else if (!isEstimate) {
+    y += 6;
   } else {
     y += 4;
   }
 
-  if (isGst) {
-    const gstTitleSize = 11;
-    pdf.fontSize(gstTitleSize).font('Helvetica-Bold');
-    const gstTitle = 'GST INVOICE';
-    const gstTitleW = pdf.widthOfString(gstTitle);
-    const gstTitleX = M + (W - gstTitleW) / 2;
-    pdf.text(gstTitle, gstTitleX, y, { lineBreak: false });
-    drawManualUnderline(pdf, gstTitleX, y, gstTitle, { size: gstTitleSize, offset: 12 });
-    y += 18;
-  }
-
+  // Title above company name: GST INVOICE / Invoice / Receipt
   if (isEstimate) {
     pdf.fontSize(16).font('Helvetica-Bold');
     pdf.text('Receipt', M, y, { width: W, align: 'center' });
     y += 34;
   } else {
+    const billTitle = isGst ? 'GST INVOICE' : 'Invoice';
+    const billTitleSize = 11;
+    pdf.fontSize(billTitleSize).font('Helvetica-Bold');
+    const billTitleW = pdf.widthOfString(billTitle);
+    const billTitleX = M + (W - billTitleW) / 2;
+    pdf.text(billTitle, billTitleX, y, { lineBreak: false });
+    drawManualUnderline(pdf, billTitleX, y, billTitle, { size: billTitleSize, offset: 12 });
+    // Extra space between title and company name
+    y += 22;
+
     pdf.fontSize(16).font('Helvetica-Bold');
     pdf.text(issuerName, M, y, { width: W, align: 'center' });
-    y += 18;
+    y += 20;
 
-    y = drawCenteredKeyedPairs(pdf, y, [
-      { label: 'Location ID : ', value: displayVal(issuer.code) || '—' },
-      { label: 'Location Name : ', value: displayVal(issuer.location_name || issuer.name) || '—' },
-    ], { size: DETAIL_SIZE, lineGap: 13 });
+    y = drawCenteredKeyedPairs(
+      pdf,
+      y,
+      [
+        { label: 'Location ID : ', value: displayVal(issuer.code) || '—' },
+        { label: 'Location Name : ', value: displayVal(issuer.location_name || issuer.name) || '—' },
+      ],
+      { size: DETAIL_SIZE, lineGap: headerLineGap }
+    );
 
     // Header address only — do not append city (often already inside the address text).
     const addrParts = displayVal(issuer.address);
     if (addrParts) {
       pdf.fontSize(DETAIL_SIZE).font('Helvetica');
-      const addrH = pdf.heightOfString(addrParts, { width: W, align: 'center' });
-      pdf.text(addrParts, M, y, { width: W, align: 'center' });
-      y += Math.max(12, addrH + 2);
+      const addrH = pdf.heightOfString(addrParts, { width: W, align: 'center', lineGap: 2 });
+      pdf.text(addrParts, M, y, { width: W, align: 'center', lineGap: 2 });
+      y += Math.max(headerLineGap, addrH + 4);
     }
 
     const contactPairs = [];
@@ -695,7 +704,10 @@ const buildFranchiseBillPdf = (pdf, doc) => {
       contactPairs.push({ label: 'Email : ', value: displayVal(issuer.email) });
     }
     if (contactPairs.length) {
-      y = drawCenteredKeyedPairs(pdf, y, contactPairs, { size: DETAIL_SIZE, lineGap: 13 });
+      y = drawCenteredKeyedPairs(pdf, y, contactPairs, {
+        size: DETAIL_SIZE,
+        lineGap: headerLineGap,
+      });
     }
   }
 
@@ -741,9 +753,10 @@ const buildFranchiseBillPdf = (pdf, doc) => {
 
   const dispatchCode = normalizeStateCode(issuer.state_code);
   const supplyCode = normalizeStateCode(recipient.state_code);
-  const showStateCode = isGst;
-  const posName = displayVal(formatCityStateLabel(recipient.city, supplyCode, { withCode: showStateCode }));
-  const dispatchName = displayVal(formatCityStateLabel(issuer.city, dispatchCode, { withCode: showStateCode }));
+  // Place of Supply / Dispatch: city + state name only (no GST state code).
+  // State code stays only in Bill To → State.
+  const posName = displayVal(formatCityStateLabel(recipient.city, supplyCode, { withCode: false }));
+  const dispatchName = displayVal(formatCityStateLabel(issuer.city, dispatchCode, { withCode: false }));
   const dispatchedBy = displayVal(issuer.manager_name);
 
   const rightStartY = y + 14;
