@@ -631,7 +631,8 @@ const buildFranchiseBillPdf = (pdf, doc) => {
       { label: 'Location Name : ', value: displayVal(issuer.location_name || issuer.name) || '—' },
     ]);
 
-    const addrParts = [issuer.address, issuer.city].filter(Boolean).join(', ');
+    // Header address only — do not append city (often already inside the address text).
+    const addrParts = displayVal(issuer.address);
     if (addrParts) {
       pdf.fontSize(FIELD_SIZE).font('Helvetica');
       const addrH = pdf.heightOfString(addrParts, { width: W, align: 'center' });
