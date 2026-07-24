@@ -226,6 +226,7 @@ const bulkUpdateValidator = [
   body('items').isArray({ min: 1 }),
   body('items.*.product_id').isString().trim().notEmpty(),
   body('items.*.variant_id').optional().isString().trim().notEmpty(),
+  body('items.*.is_active').optional().isBoolean().toBoolean(),
 ];
 
 const bulkDeleteValidator = [

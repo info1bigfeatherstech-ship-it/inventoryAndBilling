@@ -1783,11 +1783,25 @@ const ProductService = {
     if (variantPayload.system_barcode) {
       variantPayload.system_barcode = normalizeCode(variantPayload.system_barcode);
       await assertSystemBarcodeAvailable(prisma, variantPayload.system_barcode, {
-        excludeVariantId: existing.variant_id,
+        excludeVariantId: current.variant_id,
       });
     }
     if (variantPayload.vendor_barcode) variantPayload.vendor_barcode = normalizeCode(variantPayload.vendor_barcode);
     if (variantPayload.attributes !== undefined) variantPayload.attributes = parseAttributes(variantPayload.attributes);
+
+    if (Object.prototype.hasOwnProperty.call(variantPayload, 'is_active')) {
+      const raw = variantPayload.is_active;
+      if (typeof raw === 'string') {
+        const s = raw.trim().toLowerCase();
+        if (s === 'true' || s === '1') variantPayload.is_active = true;
+        else if (s === 'false' || s === '0') variantPayload.is_active = false;
+        else {
+          throw new AppError('is_active must be a boolean', 400, 'INVALID_IS_ACTIVE');
+        }
+      } else {
+        variantPayload.is_active = Boolean(raw);
+      }
+    }
 
     const hasShippingField = ['weight', 'length', 'width', 'height'].some((k) =>
       Object.prototype.hasOwnProperty.call(variantPayload, k)
@@ -1816,6 +1830,38 @@ const ProductService = {
       }
     } else {
       validateVariantPricing(current);
+    }
+
+    // Deactivate guards — block unsafe state; do not silently reassign default.
+    const deactivating =
+      Object.prototype.hasOwnProperty.call(variantPayload, 'is_active') &&
+      variantPayload.is_active === false &&
+      current.is_active === true;
+
+    if (deactivating) {
+      const otherActiveCount = await prisma.productVariant.count({
+        where: {
+          product_id: productId,
+          variant_id: { not: variantId },
+          is_active: true,
+        },
+      });
+
+      if (otherActiveCount === 0) {
+        throw new AppError(
+          'Cannot deactivate the last active variant of this product. Activate another variant first, or archive the product.',
+          409,
+          'LAST_ACTIVE_VARIANT'
+        );
+      }
+
+      if (current.is_default === true) {
+        throw new AppError(
+          'Cannot deactivate the default variant while other variants are active. Set another variant as default first.',
+          409,
+          'DEFAULT_VARIANT_ACTIVE'
+        );
+      }
     }
 
     if (variantPayload.is_default === true) {
