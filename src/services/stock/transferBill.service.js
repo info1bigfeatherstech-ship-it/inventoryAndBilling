@@ -463,9 +463,8 @@ const computeBillTotals = (lines, billType) => {
 
 
 /**
- * Issuer legal name + GSTIN + phone/email come from company (AppSettings).
- * Location ID / name / address / city / state / manager stay warehouse-level
- * (Place of Dispatch must reflect the dispatching warehouse).
+ * Company block (all warehouses / GST + Non-GST bills): legal name, GSTIN, address, phone, email.
+ * Warehouse block (per dispatch WH): Location ID/Name, Place of Dispatch city/state, Dispatched by.
  */
 const buildIssuerRecipient = async (record, shopGst = null, company = null) => {
 
@@ -499,8 +498,10 @@ const buildIssuerRecipient = async (record, shopGst = null, company = null) => {
 
       gstin,
 
-      address: wh?.address || '',
+      /** Header address — company registered address (fallback WH only if company unset). */
+      address: companyIdentity.address || wh?.address || '',
 
+      /** Place of Dispatch city — dispatching warehouse. */
       city: wh?.city || '',
 
       /** Place of Dispatch state — warehouse state (fallback company only if WH unset). */
