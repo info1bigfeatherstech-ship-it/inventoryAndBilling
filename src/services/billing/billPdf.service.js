@@ -228,12 +228,12 @@ const renderGstTaxInvoice = (doc, bill, { isNonGst = false, isEstimate = false, 
   // Dispatch = shop master city + state only (never derive state from GSTIN — avoids Delhi + Haryana mismatch).
   const shopDispatchCode = normalizeStateCode(shop.state_code);
   const customerSupplyCode = normalizeStateCode(cust.state_code);
-  const showStateCode = !isNonGst;
+  // Place of Supply / Dispatch: city + state name only (no GST state code in parentheses).
   const posName = displayVal(
-    formatCityStateLabel(cust.city, customerSupplyCode, { withCode: showStateCode })
+    formatCityStateLabel(cust.city, customerSupplyCode, { withCode: false })
   );
   const dispatchName = displayVal(
-    formatCityStateLabel(shop.city, shopDispatchCode, { withCode: showStateCode })
+    formatCityStateLabel(shop.city, shopDispatchCode, { withCode: false })
   );
   // GST invoices always show shop bank details (cash / UPI / card / transfer) when configured
   const showBankDetails = !isNonGst && !isEstimate && !isNonListed && Boolean(bill.bank_account);
