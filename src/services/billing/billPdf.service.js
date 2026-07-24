@@ -724,6 +724,14 @@ const calculateThermalHeight = (bill) => {
   if (bill.bill_type === 'GST_INVOICE') {
     baseHeight += 40;
   }
+  // Extra page room when shop name / address wrap on ~28–40 chars per line (80mm).
+  const shop = bill.shop || {};
+  const shopName = String(shop.shop_name || '');
+  const addrLine = [shop.address, shop.city, shop.pincode].filter(Boolean).join(', ');
+  const wrapExtra =
+    Math.max(0, Math.ceil(shopName.length / 28) - 1) * 14 +
+    Math.max(0, Math.ceil(addrLine.length / 40) - 1) * 10;
+  baseHeight += wrapExtra;
   const itemHeight = items.reduce((sum, item) => {
     const metaLines = resolveLineMeta(item, { isNonListed: bill.bill_type === 'NON_LISTED_BILL' });
     let extra = 32;
@@ -802,6 +810,20 @@ const drawThermalSolidLine = (doc, y) => {
     .restore();
 };
 
+const THERMAL_TEXT_X = 12;
+const THERMAL_TEXT_W = 202.77;
+
+/**
+ * Draw text that may wrap on 80mm width, then advance y by actual rendered height.
+ * Fixes overlap when shop name / address wrap but callers used fixed y += N.
+ */
+const drawThermalBlockText = (doc, text, y, { size = 7.5, bold = false, align = 'center', gap = 3 } = {}) => {
+  if (text == null || String(text).trim() === '') return y;
+  doc.fontSize(size).font(bold ? 'Helvetica-Bold' : 'Helvetica');
+  doc.text(String(text), THERMAL_TEXT_X, y, { width: THERMAL_TEXT_W, align });
+  return doc.y + gap;
+};
+
 const drawThermalKeyValue = (doc, label, value, y) => {
   doc.font('Helvetica').fontSize(8);
   const valText = displayVal(value);
@@ -857,45 +879,34 @@ const renderThermalReceipt = (doc, bill, { isNonGst = false, isEstimate = false,
 
   let y = 12;
 
-  // Header Section (Centered)
+  // Header Section (Centered) — y advances by actual wrapped height (no overlap on long names/addresses)
   if (isEstimate || isNonListed) {
-    doc.fontSize(12).font('Helvetica-Bold').text('Receipt', 12, y, { width: 202.77, align: 'center' });
-    y += 16;
-    // Billed By right under Receipt title
+    y = drawThermalBlockText(doc, 'Receipt', y, { size: 12, bold: true, gap: 4 });
     if (bill.staff_code_value) {
-      doc.fontSize(7.5).font('Helvetica').text(`Billed By: ${bill.staff_code_value}`, 12, y, { width: 202.77, align: 'center' });
-      y += 10;
+      y = drawThermalBlockText(doc, `Billed By: ${bill.staff_code_value}`, y, { size: 7.5, gap: 3 });
     }
   } else {
-    doc.fontSize(12).font('Helvetica-Bold').text(shop.shop_name || 'Shop', 12, y, { width: 202.77, align: 'center' });
-    y += 15;
+    y = drawThermalBlockText(doc, shop.shop_name || 'Shop', y, { size: 12, bold: true, gap: 4 });
 
     const shopIdentity = [
       shop.shop_code ? `Shop ID: ${shop.shop_code}` : null,
       legalName ? `Shop Name: ${legalName}` : null,
     ].filter(Boolean).join(' | ');
     if (shopIdentity) {
-      doc.fontSize(7.5).font('Helvetica').text(shopIdentity, 12, y, { width: 202.77, align: 'center' });
-      y += 10;
+      y = drawThermalBlockText(doc, shopIdentity, y, { size: 7.5, gap: 3 });
     }
 
-    // Address parts
     const addrParts = [shop.address, shop.city, shop.pincode].filter(Boolean).join(', ');
     if (addrParts) {
-      doc.fontSize(7.5).font('Helvetica').text(addrParts, 12, y, { width: 202.77, align: 'center' });
-      y += 10;
+      y = drawThermalBlockText(doc, addrParts, y, { size: 7.5, gap: 3 });
     }
 
-    // Phone
     if (shop.phone) {
-      doc.fontSize(7.5).font('Helvetica').text(`Ph: ${shop.phone}`, 12, y, { width: 202.77, align: 'center' });
-      y += 10;
+      y = drawThermalBlockText(doc, `Ph: ${shop.phone}`, y, { size: 7.5, gap: 3 });
     }
 
-    // GSTIN
     if (gst) {
-      doc.fontSize(7.5).font('Helvetica-Bold').text(`GSTIN: ${gst}`, 12, y, { width: 202.77, align: 'center' });
-      y += 11;
+      y = drawThermalBlockText(doc, `GSTIN: ${gst}`, y, { size: 7.5, bold: true, gap: 4 });
     }
   }
 
@@ -903,15 +914,11 @@ const renderThermalReceipt = (doc, bill, { isNonGst = false, isEstimate = false,
   y += 5;
 
   if (!isEstimate && !isNonListed) {
-    // Title
     let title = 'INVOICE';
     if (!isNonGst) title = 'GST INVOICE';
-    doc.fontSize(9).font('Helvetica-Bold').text(title, 12, y, { width: 202.77, align: 'center' });
-    y += 11;
-    // Billed By right under INVOICE / GST INVOICE title
+    y = drawThermalBlockText(doc, title, y, { size: 9, bold: true, gap: 3 });
     if (bill.staff_code_value) {
-      doc.fontSize(7.5).font('Helvetica').text(`Billed By: ${bill.staff_code_value}`, 12, y, { width: 202.77, align: 'center' });
-      y += 10;
+      y = drawThermalBlockText(doc, `Billed By: ${bill.staff_code_value}`, y, { size: 7.5, gap: 3 });
     }
     drawThermalDashedLine(doc, y);
     y += 5;
@@ -929,19 +936,15 @@ const renderThermalReceipt = (doc, bill, { isNonGst = false, isEstimate = false,
   y += 5;
 
   // Bill To details
-  doc.font('Helvetica-Bold').fontSize(8).text('Bill To:', 12, y);
-  y += 10;
+  y = drawThermalBlockText(doc, 'Bill To:', y, { size: 8, bold: true, align: 'left', gap: 2 });
 
   const formattedCustName = displayLabel ? `${displayLabel}: ${customerDisplayName}` : customerDisplayName;
-  doc.font('Helvetica').fontSize(8).text(formattedCustName, 12, y, { width: 202.77 });
-  y += 10;
+  y = drawThermalBlockText(doc, formattedCustName, y, { size: 8, align: 'left', gap: 2 });
   if (bill.customer_mobile) {
-    doc.text(`Mob: ${bill.customer_mobile}`, 12, y, { width: 202.77 });
-    y += 10;
+    y = drawThermalBlockText(doc, `Mob: ${bill.customer_mobile}`, y, { size: 8, align: 'left', gap: 2 });
   }
   if (!isNonGst && bill.customer_gstin) {
-    doc.text(`GSTIN: ${bill.customer_gstin}`, 12, y, { width: 202.77 });
-    y += 10;
+    y = drawThermalBlockText(doc, `GSTIN: ${bill.customer_gstin}`, y, { size: 8, align: 'left', gap: 2 });
   }
 
   drawThermalDashedLine(doc, y);
@@ -963,8 +966,7 @@ const renderThermalReceipt = (doc, bill, { isNonGst = false, isEstimate = false,
     const name = truncateProductName(resolveLineProductName(item));
     const metaLines = resolveLineMeta(item, { isNonListed });
 
-    doc.font('Helvetica-Bold').fontSize(8).text(name, 12, y, { width: 202.77 });
-    y += 10;
+    y = drawThermalBlockText(doc, name, y, { size: 8, bold: true, align: 'left', gap: 2 });
 
     metaLines.forEach((entry) => {
       if (entry.kind === 'attributes') {
@@ -1032,10 +1034,14 @@ const renderThermalReceipt = (doc, bill, { isNonGst = false, isEstimate = false,
   drawThermalDashedLine(doc, y);
   y += 5;
 
-  // Amount in words
+  // Amount in words (may wrap on narrow width)
   doc.font('Helvetica-Oblique').fontSize(7.5);
-  doc.text(amountInWords(bill.total_amount), 12, y, { width: 202.77, align: 'center' });
-  y += 15;
+  doc.text(amountInWords(bill.total_amount), THERMAL_TEXT_X, y, {
+    width: THERMAL_TEXT_W,
+    align: 'center',
+  });
+  y = doc.y + 4;
+  doc.font('Helvetica');
 
   drawThermalDashedLine(doc, y);
   y += 5;
