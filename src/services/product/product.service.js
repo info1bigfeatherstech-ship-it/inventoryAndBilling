@@ -18,7 +18,6 @@ const {
   productListCachePattern,
 } = require('../../utils/cache.utils');
 const MediaService = require('../storage/media.service');
-const { generateSystemBarcode } = require('../../utils/barcode.utils');
 const { withComputedPurchaseCode } = require('../../utils/purchaseCode.utils');
 const { resolveVariantByScanCode } = require('../../utils/variantScan.utils');
 const { assertVariantImageUploads } = require('../../utils/productMultipart.utils');
@@ -395,6 +394,40 @@ const sanitizeOptionalCategoryId = (value) => {
   return String(value).trim();
 };
 const normalizeSku = (value) => String(value || '').trim().toUpperCase();
+
+/** Match bulk listing: SKU-1221-1 from variant product_code 1221-1. */
+const buildDefaultVariantSku = (variantCode) => normalizeSku(`SKU-${normalizeCode(variantCode)}`);
+
+/** Strip optional bulk-style SKU- prefix before serial/base checks. */
+const skuCoreForSerialCheck = (sku) => {
+  const normalized = normalizeSku(sku);
+  return normalized.startsWith('SKU-') ? normalized.slice(4) : normalized;
+};
+
+/**
+ * App-level barcode uniqueness (no schema migration).
+ * system_barcode is nullable and not @@unique — check before write so listing stays collision-safe.
+ */
+const assertSystemBarcodeAvailable = async (db, barcode, { excludeVariantId } = {}) => {
+  const code = normalizeCode(barcode);
+  if (!code) return;
+
+  const existing = await db.productVariant.findFirst({
+    where: {
+      system_barcode: code,
+      ...(excludeVariantId ? { variant_id: { not: excludeVariantId } } : {}),
+    },
+    select: { variant_id: true, product_code: true },
+  });
+
+  if (existing) {
+    throw new AppError(
+      `system_barcode "${code}" is already used by variant "${existing.product_code}". Use a different barcode.`,
+      400,
+      'DUPLICATE_BARCODE'
+    );
+  }
+};
 
 /** Base product code only (7834). Strips accidental serial suffix (7834-1 → 7834). */
 const normalizeBaseProductCode = (value) => {
@@ -935,11 +968,11 @@ const assertVariantUsesProductBase = (variant, baseProductCode, indexLabel) => {
   }
 
   if (variant.sku) {
-    const sku = normalizeSku(variant.sku);
-    const serial = parseVariantSerial(sku, baseProductCode);
-    if (sku.includes('-') && !serial) {
+    const skuCore = skuCoreForSerialCheck(variant.sku);
+    const serial = parseVariantSerial(skuCore, baseProductCode);
+    if (skuCore.includes('-') && !serial) {
       throw new AppError(
-        `${indexLabel}: sku must follow "${baseProductCode}-<n>" when using serial pattern.`,
+        `${indexLabel}: sku must follow "${baseProductCode}-<n>" or "SKU-${baseProductCode}-<n>" when using serial pattern.`,
         400,
         'VARIANT_BASE_CODE_MISMATCH'
       );
@@ -970,16 +1003,19 @@ const buildVariantInput = async (tx, variant, {
   }
   const shipping = variantOnlyShipping ?? mergeVariantShipping(productShipping, variant);
 
+  // Unify with bulk: default barcode = variant product_code (1221-1), not random EAN-13.
   let systemBarcode = variant.system_barcode ? normalizeCode(variant.system_barcode) : null;
   if (!systemBarcode) {
-    systemBarcode = await generateSystemBarcode(tx);
+    systemBarcode = normalizeCode(variantCode);
   }
+  await assertSystemBarcodeAvailable(tx, systemBarcode);
 
   validateVariantPricing(prices, indexLabel);
   const priced = withComputedPurchaseCode(prices);
 
   const payload = {
-    sku: normalizeSku(variant.sku || variantCode),
+    // Unify with bulk: default SKU-1221-1 when client omits sku.
+    sku: normalizeSku(variant.sku || buildDefaultVariantSku(variantCode)),
     product_code: variantCode,
     system_barcode: systemBarcode,
     vendor_barcode: variant.vendor_barcode ? normalizeCode(variant.vendor_barcode) : null,
@@ -1290,12 +1326,15 @@ const uploadBulkVariantImages = async ({ warehouseId, productId, variantId, prod
 };
 
 const createBulkVariant = async ({ productId, variantData, warehouseId, productName }) => {
+  const productCode = normalizeCode(variantData.product_code);
+  await assertSystemBarcodeAvailable(prisma, productCode);
+
   const newVariant = await prisma.productVariant.create({
     data: {
       product_id: productId,
-      product_code: variantData.product_code,
-      system_barcode: variantData.product_code,
-      sku: `SKU-${variantData.product_code}`,
+      product_code: productCode,
+      system_barcode: productCode,
+      sku: buildDefaultVariantSku(productCode),
       attributes: variantData.attributes ?? null,
       mrp: variantData.mrp,
       special_price: variantData.special_price,
@@ -1743,6 +1782,9 @@ const ProductService = {
     }
     if (variantPayload.system_barcode) {
       variantPayload.system_barcode = normalizeCode(variantPayload.system_barcode);
+      await assertSystemBarcodeAvailable(prisma, variantPayload.system_barcode, {
+        excludeVariantId: existing.variant_id,
+      });
     }
     if (variantPayload.vendor_barcode) variantPayload.vendor_barcode = normalizeCode(variantPayload.vendor_barcode);
     if (variantPayload.attributes !== undefined) variantPayload.attributes = parseAttributes(variantPayload.attributes);
