@@ -286,6 +286,7 @@ const PRODUCT_LIST_SELECT = {
       width: true,
       height: true,
       is_default: true,
+      is_active: true,
       sort_order: true,
       images: { orderBy: { sort_order: 'asc' }, take: 1, select: { url: true } },
     },
