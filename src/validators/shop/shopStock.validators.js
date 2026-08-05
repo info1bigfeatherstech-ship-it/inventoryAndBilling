@@ -9,6 +9,7 @@ const listShopStocksValidator = [
   query('variant_id').optional().isString().trim().notEmpty(),
   query('min_quantity').optional().isInt({ min: 0 }).toInt(),
   query('low_stock_only').optional().isBoolean().toBoolean(),
+  query('search').optional().isString().trim().isLength({ min: 1, max: 200 }),
 ];
 
 const updateShopStockValidator = [

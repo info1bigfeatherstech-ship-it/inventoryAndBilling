@@ -1129,27 +1129,12 @@ const buildProductWhere = (query = {}, user) => {
   if (query.sub_category_id) where.sub_category_id = query.sub_category_id;
   if (query.primary_vendor_id) where.primary_vendor_id = query.primary_vendor_id;
 
+  // Inventory search: product name + product_code only (not title/SKU/barcode/purchase_code).
   if (query.search) {
     const search = String(query.search).trim();
     where.OR = [
       { name: { contains: search, mode: 'insensitive' } },
       { product_code: { contains: search, mode: 'insensitive' } },
-      { title: { contains: search, mode: 'insensitive' } },
-      {
-        variants: {
-          some: {
-            OR: [
-              { sku: { contains: search, mode: 'insensitive' } },
-              { product_code: { contains: search, mode: 'insensitive' } },
-              { system_barcode: { contains: search, mode: 'insensitive' } },
-              { vendor_barcode: { contains: search, mode: 'insensitive' } },
-              ...(Number.isFinite(Number(search)) && String(search).trim() !== ''
-                ? [{ purchase_code: Number(search) }]
-                : []),
-            ],
-          },
-        },
-      },
     ];
   }
 

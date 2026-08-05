@@ -129,6 +129,19 @@ const ShopStockService = {
       where.quantity_available = { gte: Number(query.min_quantity) };
     }
 
+    // Inventory Stock search: product name + product_code only (not SKU/barcode).
+    const search = query.search != null ? String(query.search).trim() : '';
+    if (search) {
+      where.variant = {
+        product: {
+          OR: [
+            { name: { contains: search, mode: 'insensitive' } },
+            { product_code: { contains: search, mode: 'insensitive' } },
+          ],
+        },
+      };
+    }
+
     if (query.low_stock_only === true || query.low_stock_only === 'true') {
       where.quantity_available = { lte: prisma.shopStock.fields?.low_stock_threshold };
       // Prisma doesn't support field compare easily — filter in app or raw
