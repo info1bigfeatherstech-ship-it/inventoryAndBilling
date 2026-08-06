@@ -181,6 +181,15 @@ class Config {
     return process.env.ADMIN_NAME || 'Super Admin';
   }
 
+  /**
+   * When true, startup bootstrap overwrites SUPER_ADMIN password from ADMIN_PASSWORD.
+   * Default false — UI/DB password changes must survive restarts/deploys.
+   */
+  get ADMIN_FORCE_PASSWORD_RESET() {
+    const v = String(process.env.ADMIN_FORCE_PASSWORD_RESET || '').trim().toLowerCase();
+    return v === '1' || v === 'true' || v === 'yes';
+  }
+
   // CORS
   get ALLOWED_ORIGINS() {
     const origins = process.env.ALLOWED_ORIGINS || '';
