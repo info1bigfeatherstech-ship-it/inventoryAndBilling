@@ -241,13 +241,13 @@ const BillingService = {
         );
       }
 
-      if (shop.shop_type === 'FRANCHISE') {
+      if (shop.shop_type === 'FRANCHISE' || shop.shop_type === 'OWNER') {
         for (const item of data.items) {
           if (item.price_type && item.price_type !== 'SPECIAL') {
             throw new AppError(
-              'Franchise shops must bill at special price only',
+              'This shop must bill at special price only',
               400,
-              'FRANCHISE_PRICE_TYPE_LOCKED'
+              'SHOP_PRICE_TYPE_LOCKED'
             );
           }
         }
