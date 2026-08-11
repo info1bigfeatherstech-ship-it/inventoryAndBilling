@@ -31,6 +31,7 @@ const SHOP_STOCK_SELECT = {
       expenses: true,
       warranty: true,
       purchase_code: true,
+      combo_eligible: true,
       images: {
         orderBy: { sort_order: 'asc' },
         take: 1,

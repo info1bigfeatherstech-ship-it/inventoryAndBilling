@@ -14,6 +14,8 @@ const ShopStockService = require('../shop/shopStock.service');
 const CustomerService = require('../customer/customer.service');
 const CreditNoteService = require('../creditNote/creditNote.service');
 const { generateBillPdf } = require('./billPdf.service');
+const ComboRuleService = require('../combo/comboRule.service');
+const { applyComboPricingToLines } = require('../../utils/comboPricing.utils');
 const {
   resolveBillingShopId,
   assertBillReadAccess,
@@ -128,6 +130,9 @@ const BILL_SELECT = {
       quantity: true,
       unit_price: true,
       mrp_unit_price: true,
+      special_unit_price: true,
+      combo_applied: true,
+      combo_unit_price: true,
       price_type: true,
       gst_percent: true,
       gst_type: true,
@@ -146,6 +151,7 @@ const BILL_SELECT = {
           product_code: true,
           attributes: true,
           product: { select: { product_id: true, name: true, brand_name: true, warranty: true } },
+          special_price: true,
         },
       },
       product: { select: { product_id: true, name: true, brand_name: true, warranty: true } },
@@ -193,6 +199,8 @@ const loadVariantsForBill = async (items) => {
       product_id: true,
       sku: true,
       mrp: true,
+      special_price: true,
+      combo_eligible: true,
       is_active: true,
       low_stock_threshold: true,
       product: {
@@ -270,6 +278,31 @@ const BillingService = {
 
       const variantMap = await loadVariantsForBill(data.items);
 
+      // Global combo rules — special-price based; only combo_eligible variants participate.
+      let comboPricedByKey = new Map();
+      try {
+        const activeComboRules = await ComboRuleService.listActiveRulesForBilling();
+        if (activeComboRules.length > 0) {
+          const comboInput = data.items.map((item, index) => {
+            const variant = variantMap.get(item.variant_id);
+            const priceType = item.price_type || 'SPECIAL';
+            const specialOnly = priceType === 'SPECIAL' || priceType === 'RETAIL';
+            return {
+              line_key: `${item.variant_id}__${index}`,
+              variant_id: item.variant_id,
+              quantity: Number(item.quantity),
+              special_price: Number(variant.special_price),
+              combo_eligible: specialOnly ? Boolean(variant.combo_eligible) : false,
+            };
+          });
+          const priced = applyComboPricingToLines(comboInput, activeComboRules);
+          comboPricedByKey = new Map(priced.map((row) => [row.line_key, row]));
+        }
+      } catch (comboErr) {
+        // Fail closed to client unit_price if combo engine errors — do not block billing.
+        logger.warn('Combo pricing skipped', { error: comboErr.message });
+      }
+
       let customerGstin = null;
       let companyNameSnapshot = null;
 
@@ -326,13 +359,26 @@ const BillingService = {
         shopStateCode,
       });
 
-      const computedLines = data.items.map((item) => {
+      const computedLines = data.items.map((item, index) => {
         const variant = variantMap.get(item.variant_id);
         const qty = Number(item.quantity);
         if (!Number.isInteger(qty) || qty <= 0) {
           throw new AppError('Item quantity must be a positive integer', 400, 'TRANSFER_QUANTITY_INVALID');
         }
-        const unitPrice = Number(item.unit_price);
+
+        const priceType = item.price_type || 'SPECIAL';
+        const comboRow = comboPricedByKey.get(`${item.variant_id}__${index}`);
+        let unitPrice = Number(item.unit_price);
+
+        // Server-authoritative pricing for SPECIAL: special_price + active combo rules.
+        if (priceType === 'SPECIAL' || priceType === 'RETAIL') {
+          if (comboRow && Number.isFinite(comboRow.unit_price)) {
+            unitPrice = Number(comboRow.unit_price);
+          } else if (Number.isFinite(Number(variant.special_price))) {
+            unitPrice = Number(variant.special_price);
+          }
+        }
+
         if (Number.isNaN(unitPrice) || unitPrice < 0) {
           throw new AppError('unit_price must be >= 0', 400, 'INVALID_UNIT_PRICE');
         }
@@ -357,12 +403,21 @@ const BillingService = {
           quantity: qty,
           unit_price: unitPrice,
           mrp_unit_price: Number(variant.mrp) || unitPrice,
-          price_type: item.price_type || 'SPECIAL',
+          special_unit_price: Number.isFinite(Number(variant.special_price))
+            ? Number(variant.special_price)
+            : unitPrice,
+          price_type: priceType,
           gst_percent: variant.product.gst_percent,
           gst_type: amounts.gst_type,
           hsn_code: variant.product.hsn_code,
           product_name: variant.product.name,
           low_stock_threshold: variant.low_stock_threshold,
+          combo_applied: Boolean(comboRow?.combo_applied),
+          combo_unit_price: comboRow?.combo_applied
+            ? (comboRow?.combo_unit_price != null
+              ? Number(comboRow.combo_unit_price)
+              : unitPrice)
+            : null,
           ...amounts,
         };
       });
@@ -490,6 +545,9 @@ const BillingService = {
                 quantity: line.quantity,
                 unit_price: line.unit_price,
                 mrp_unit_price: line.mrp_unit_price,
+                special_unit_price: line.special_unit_price ?? null,
+                combo_applied: Boolean(line.combo_applied),
+                combo_unit_price: line.combo_applied ? (line.combo_unit_price ?? null) : null,
                 price_type: line.price_type,
                 gst_percent: line.gst_percent,
                 gst_type: line.gst_type,
@@ -734,6 +792,9 @@ const BillingService = {
               quantity: line.quantity,
               unit_price: line.unit_price,
               mrp_unit_price: line.mrp_unit_price,
+              special_unit_price: line.unit_price,
+              combo_applied: false,
+              combo_unit_price: null,
               price_type: line.price_type,
               gst_percent: line.gst_percent,
               gst_type: line.gst_type,

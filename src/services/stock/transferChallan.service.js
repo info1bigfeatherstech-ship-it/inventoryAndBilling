@@ -142,7 +142,12 @@ const buildFranchiseLinesFromSingleRequest = (request) => {
   const unitFranchise = Number(request.franchise_unit_price_snapshot) || 0;
   const unitSpecial = Number(request.variant?.special_price) || 0;
   const lineMrp = roundMoney(unitMrp * qty);
-  const lineFranchise = roundMoney(unitFranchise * qty);
+  const lineFranchise =
+    request.franchise_line_value_snapshot != null &&
+    Number.isFinite(Number(request.franchise_line_value_snapshot))
+      ? roundMoney(Number(request.franchise_line_value_snapshot))
+      : roundMoney(unitFranchise * qty);
+  const comboApplied = request.franchise_combo_applied === true;
   return [
     {
       product_name: request.variant?.product?.name,
@@ -153,6 +158,11 @@ const buildFranchiseLinesFromSingleRequest = (request) => {
       unit_mrp: unitMrp,
       unit_special_price: unitSpecial,
       unit_franchise_price: unitFranchise,
+      unit_combo_price:
+        comboApplied && request.franchise_combo_unit_price != null
+          ? Number(request.franchise_combo_unit_price)
+          : null,
+      combo_applied: comboApplied,
       line_mrp_total: lineMrp,
       line_franchise_total: lineFranchise,
       ...lineMetaFromVariant(request.variant),
@@ -207,7 +217,12 @@ const buildFranchiseLinesFromBulk = (bulk) =>
       const unitFranchise = Number(item.franchise_unit_price_snapshot) || 0;
       const unitSpecial = Number(item.variant?.special_price) || 0;
       const lineMrp = roundMoney(unitMrp * qty);
-      const lineFranchise = roundMoney(unitFranchise * qty);
+      const lineFranchise =
+        item.franchise_line_value_snapshot != null &&
+        Number.isFinite(Number(item.franchise_line_value_snapshot))
+          ? roundMoney(Number(item.franchise_line_value_snapshot))
+          : roundMoney(unitFranchise * qty);
+      const comboApplied = item.franchise_combo_applied === true;
       return {
         product_name: item.variant?.product?.name,
         sku: item.variant?.sku || item.variant?.product_code,
@@ -217,6 +232,11 @@ const buildFranchiseLinesFromBulk = (bulk) =>
         unit_mrp: unitMrp,
         unit_special_price: unitSpecial,
         unit_franchise_price: unitFranchise,
+        unit_combo_price:
+          comboApplied && item.franchise_combo_unit_price != null
+            ? Number(item.franchise_combo_unit_price)
+            : null,
+        combo_applied: comboApplied,
         line_mrp_total: lineMrp,
         line_franchise_total: lineFranchise,
         ...lineMetaFromVariant(item.variant),

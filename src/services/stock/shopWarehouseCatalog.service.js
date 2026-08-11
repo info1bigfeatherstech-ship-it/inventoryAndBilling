@@ -122,6 +122,7 @@ const ShopWarehouseCatalogService = {
           system_barcode: true,
           mrp: true,
           special_price: true,
+          combo_eligible: true,
           purchase_price: true,
           expenses: true,
           product: {
@@ -224,6 +225,7 @@ const ShopWarehouseCatalogService = {
       // Special / sale price is visible to franchise shop managers so they can
       // compare F.Price (landed cost) vs max sellable Special Price.
       variantPayload.special_price = variant.special_price;
+      variantPayload.combo_eligible = variant.combo_eligible === true;
 
       if (isFranchiseShop) {
         variantPayload.franchise_unit_price = calculateFranchiseUnitPrice(variant, franchiseMarkup);

@@ -19,6 +19,7 @@ const {
 } = require('../../utils/cache.utils');
 const MediaService = require('../storage/media.service');
 const { withComputedPurchaseCode } = require('../../utils/purchaseCode.utils');
+const { parseComboEligible } = require('../../utils/comboPricing.utils');
 const { resolveVariantByScanCode } = require('../../utils/variantScan.utils');
 const { assertVariantImageUploads } = require('../../utils/productMultipart.utils');
 const CategoryService = require('../category/category.service');
@@ -217,6 +218,7 @@ const VARIANT_INCLUDE = {
     sort_order: true,
     is_default: true,
     is_active: true,
+    combo_eligible: true,
     remarks: true,
     created_at: true,
     updated_at: true,
@@ -287,6 +289,7 @@ const PRODUCT_LIST_SELECT = {
       height: true,
       is_default: true,
       is_active: true,
+      combo_eligible: true,
       sort_order: true,
       images: { orderBy: { sort_order: 'asc' }, take: 1, select: { url: true } },
     },
@@ -330,6 +333,7 @@ const PRODUCT_EXPORT_SELECT = {
       low_stock_threshold: true,
       remarks: true,
       is_active: true,
+      combo_eligible: true,
       images: { orderBy: { sort_order: 'asc' }, select: { url: true } },
     },
   },
@@ -1027,6 +1031,8 @@ const buildVariantInput = async (tx, variant, {
     sort_order: serial - 1,
     is_default: serial === 1,
     is_active: variant.is_active !== false,
+    // Opt-in only: true when explicitly set; otherwise false (existing/default safe).
+    combo_eligible: parseComboEligible(variant.combo_eligible),
     remarks: variant.remarks ?? null,
   };
 
@@ -1061,6 +1067,7 @@ const normalizeVariantsForCreate = async (tx, data, baseProductCode, pricingCont
             dimensions: data.dimensions,
             low_stock_threshold: data.low_stock_threshold,
             remarks: data.remarks,
+            combo_eligible: data.combo_eligible,
           },
         ];
 
@@ -1335,6 +1342,7 @@ const createBulkVariant = async ({ productId, variantData, warehouseId, productN
       height: variantData.height,
       low_stock_threshold: variantData.low_stock_threshold,
       remarks: variantData.remarks ?? null,
+      combo_eligible: parseComboEligible(variantData.combo_eligible),
     },
   });
 
@@ -1568,6 +1576,7 @@ const ProductService = {
       warranty: variant.warranty,
       purchase_code: variant.purchase_code,
       stock_available: stockAvailable,
+      combo_eligible: Boolean(variant.combo_eligible),
     };
 
     return await formatProductForUser(payload, user);
@@ -1753,6 +1762,7 @@ const ProductService = {
       'sort_order',
       'is_default',
       'is_active',
+      'combo_eligible',
       'remarks',
     ];
 
@@ -1761,6 +1771,10 @@ const ProductService = {
     }
     mapIncomingPriceFields(data, variantPayload);
     delete variantPayload.purchase_cost;
+
+    if (Object.prototype.hasOwnProperty.call(variantPayload, 'combo_eligible')) {
+      variantPayload.combo_eligible = parseComboEligible(variantPayload.combo_eligible);
+    }
 
     if (variantPayload.sku) {
       variantPayload.sku = normalizeSku(variantPayload.sku);
@@ -2244,6 +2258,7 @@ const ProductService = {
         description: row.description || null,
         brand_name: row.brand_name || 'Generic',
         remarks: row.remarks || null,
+        combo_eligible: row.combo_eligible,
         imageFolderPath,
       });
 

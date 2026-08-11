@@ -14,7 +14,11 @@ const {
 
 } = require('../../utils/billing.utils');
 
-const { isFranchiseWhToShopTransfer } = require('../../utils/franchiseTransferPricing.utils');
+const {
+  isFranchiseWhToShopTransfer,
+  buildFranchiseSnapshotsWithCombo,
+  emptyFranchiseComboFields,
+} = require('../../utils/franchiseTransferPricing.utils');
 
 const {
 
@@ -23,6 +27,10 @@ const {
   isFranchiseShopType,
 
 } = require('../../utils/franchisePrice.utils');
+
+const ComboRuleService = require('../combo/comboRule.service');
+
+const logger = require('../../utils/logger.utils');
 
 const AppSettingsService = require('../settings/appSettings.service');
 
@@ -152,6 +160,8 @@ const loadVariantForBill = async (tx, variantId) =>
 
       special_price: true,
 
+      combo_eligible: true,
+
       purchase_price: true,
 
       expenses: true,
@@ -198,6 +208,8 @@ const snapshotFranchiseOnApprovedItems = async (tx, bulk, markupPercent) => {
 
 
 
+  const activeLines = [];
+
   for (const item of items) {
 
     const qty = getApprovedQty(item);
@@ -218,6 +230,8 @@ const snapshotFranchiseOnApprovedItems = async (tx, bulk, markupPercent) => {
 
           franchise_line_value_snapshot: null,
 
+          ...emptyFranchiseComboFields(),
+
         },
 
       });
@@ -230,11 +244,51 @@ const snapshotFranchiseOnApprovedItems = async (tx, bulk, markupPercent) => {
 
     const variant = await loadVariantForBill(tx, item.variant_id);
 
-    const franchiseSnap = snapshotFranchiseTransferPricing(variant, qty, markupPercent);
+    activeLines.push({ key: item.bulk_item_id, quantity: qty, variant, item });
+
+  }
+
+
+
+  let rules = [];
+
+  try {
+
+    rules = await ComboRuleService.listActiveRulesForBilling();
+
+  } catch (err) {
+
+    logger.warn('Franchise transfer combo rules skipped', { error: err.message });
+
+    rules = [];
+
+  }
+
+
+
+  const snaps = buildFranchiseSnapshotsWithCombo(
+
+    activeLines.map((l) => ({ key: l.key, quantity: l.quantity, variant: l.variant })),
+
+    markupPercent,
+
+    rules
+
+  );
+
+
+
+  for (const line of activeLines) {
+
+    const franchiseSnap =
+
+      snaps.get(String(line.key)) ||
+
+      snapshotFranchiseTransferPricing(line.variant, line.quantity, markupPercent);
 
     await tx.bulkTransferRequestItem.update({
 
-      where: { bulk_item_id: item.bulk_item_id },
+      where: { bulk_item_id: line.item.bulk_item_id },
 
       data: franchiseSnap,
 
@@ -286,7 +340,20 @@ const buildBillLines = (items, billType) => {
 
     const lineMrp = roundMoney(unitMrp * qty);
 
-    const lineFranchise = roundMoney(unitFranchise * qty);
+    const lineFranchise =
+      item.franchise_line_value_snapshot != null &&
+      Number.isFinite(Number(item.franchise_line_value_snapshot))
+        ? roundMoney(Number(item.franchise_line_value_snapshot))
+        : roundMoney(unitFranchise * qty);
+
+    const chargedUnit = qty > 0 ? roundMoney(lineFranchise / qty) : unitFranchise;
+
+    const comboApplied = item.franchise_combo_applied === true;
+
+    const unitComboPrice =
+      comboApplied && item.franchise_combo_unit_price != null
+        ? Number(item.franchise_combo_unit_price)
+        : null;
 
 
 
@@ -308,7 +375,7 @@ const buildBillLines = (items, billType) => {
 
       quantity: qty,
 
-      unitPrice: unitFranchise,
+      unitPrice: chargedUnit,
 
       gstPercent,
 
@@ -345,6 +412,14 @@ const buildBillLines = (items, billType) => {
       unit_special_price: Number(item.variant?.special_price) || 0,
 
       unit_franchise_price: unitFranchise,
+
+      unit_combo_price: unitComboPrice,
+
+      combo_applied: comboApplied,
+
+      combo_units: item.franchise_combo_units != null ? Number(item.franchise_combo_units) : null,
+
+      normal_units: item.franchise_normal_units != null ? Number(item.franchise_normal_units) : null,
 
       line_mrp_total: lineMrp,
 
@@ -557,6 +632,11 @@ const buildBillLinesFromSingle = (request, billType) => {
         approved_quantity: qty,
         franchise_mrp_snapshot: request.franchise_mrp_snapshot,
         franchise_unit_price_snapshot: request.franchise_unit_price_snapshot,
+        franchise_line_value_snapshot: request.franchise_line_value_snapshot,
+        franchise_combo_applied: request.franchise_combo_applied,
+        franchise_combo_unit_price: request.franchise_combo_unit_price,
+        franchise_combo_units: request.franchise_combo_units,
+        franchise_normal_units: request.franchise_normal_units,
         variant: request.variant,
       },
     ],
@@ -569,7 +649,22 @@ const buildBillLinesFromSingle = (request, billType) => {
 const snapshotFranchiseOnSingleRequest = async (tx, request, markupPercent) => {
   const variant = await loadVariantForBill(tx, request.variant_id);
   const qty = Number(request.quantity) || 0;
-  return snapshotFranchiseTransferPricing(variant, qty, markupPercent);
+  let rules = [];
+  try {
+    rules = await ComboRuleService.listActiveRulesForBilling();
+  } catch (err) {
+    logger.warn('Franchise transfer combo rules skipped (single)', { error: err.message });
+    rules = [];
+  }
+  const snaps = buildFranchiseSnapshotsWithCombo(
+    [{ key: request.request_id || 'single', quantity: qty, variant }],
+    markupPercent,
+    rules
+  );
+  return (
+    snaps.get(String(request.request_id || 'single')) ||
+    snapshotFranchiseTransferPricing(variant, qty, markupPercent)
+  );
 };
 
 

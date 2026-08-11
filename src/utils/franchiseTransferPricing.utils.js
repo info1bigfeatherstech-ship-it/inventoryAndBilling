@@ -2,10 +2,86 @@ const AppSettingsService = require('../services/settings/appSettings.service');
 const { signBulkTransferBillToken, signSingleTransferBillToken } = require('./transferBillToken.utils');
 const {
   calculateFranchiseUnitPrice,
+  snapshotFranchiseTransferPricing,
   isFranchiseShopType,
   isWarehouseInternalRole,
 } = require('./franchisePrice.utils');
+const { applyComboPricingToLines } = require('./comboPricing.utils');
 const { roundMoney } = require('./billing.utils');
+
+/**
+ * Build franchise snapshots for transfer lines, applying global combo set-math.
+ * Grouping uses special_price; leftover units settle at F.Price (normal_unit_price).
+ * Fail-soft: on combo errors returns pure F.Price snapshots.
+ *
+ * @param {Array<{ key: string, quantity: number, variant: object }>} lines
+ * @param {number} markupPercent
+ * @param {Array} rules
+ * @returns {Map<string, object>}
+ */
+const buildFranchiseSnapshotsWithCombo = (lines, markupPercent, rules = []) => {
+  const result = new Map();
+  const safeLines = Array.isArray(lines) ? lines : [];
+
+  const comboInput = [];
+  for (const line of safeLines) {
+    const qty = Math.max(0, Math.floor(Number(line.quantity) || 0));
+    const snap = snapshotFranchiseTransferPricing(line.variant, qty, markupPercent);
+    const base = {
+      ...snap,
+      franchise_combo_applied: false,
+      franchise_combo_unit_price: null,
+      franchise_combo_units: 0,
+      franchise_normal_units: qty,
+    };
+    result.set(String(line.key), base);
+    if (qty <= 0) continue;
+    comboInput.push({
+      line_key: String(line.key),
+      variant_id: line.variant?.variant_id,
+      quantity: qty,
+      special_price: Number(line.variant?.special_price) || 0,
+      normal_unit_price: snap.franchise_unit_price_snapshot,
+      combo_eligible: line.variant?.combo_eligible === true,
+    });
+  }
+
+  if (!comboInput.length || !Array.isArray(rules) || !rules.length) {
+    return result;
+  }
+
+  try {
+    const priced = applyComboPricingToLines(comboInput, rules);
+    for (const row of priced) {
+      const existing = result.get(String(row.line_key));
+      if (!existing) continue;
+      if (!row.combo_applied) {
+        existing.franchise_combo_applied = false;
+        existing.franchise_combo_unit_price = null;
+        existing.franchise_combo_units = 0;
+        existing.franchise_normal_units = row.quantity;
+        continue;
+      }
+      existing.franchise_line_value_snapshot = row.line_total;
+      existing.franchise_combo_applied = true;
+      existing.franchise_combo_unit_price =
+        row.combo_unit_price != null ? Number(row.combo_unit_price) : null;
+      existing.franchise_combo_units = Number(row.combo_units) || 0;
+      existing.franchise_normal_units = Number(row.normal_units) || 0;
+    }
+  } catch {
+    // Keep pure F.Price snapshots — do not fail transfer approve/dispatch.
+  }
+
+  return result;
+};
+
+const emptyFranchiseComboFields = () => ({
+  franchise_combo_applied: false,
+  franchise_combo_unit_price: null,
+  franchise_combo_units: null,
+  franchise_normal_units: null,
+});
 
 const isFranchiseWhToShopTransfer = (record) =>
   record?.request_type === 'WH_TO_SHOP' && isFranchiseShopType(record?.to_shop?.shop_type);
@@ -54,6 +130,13 @@ const buildFranchisePricingBlock = ({ snapshots, variant, quantity, markupPercen
     mrp_line_value: mrp != null ? roundMoney(mrp * qty) : null,
     special_line_value: specialPrice != null ? roundMoney(specialPrice * qty) : null,
     markup_percent: snapshots?.franchise_markup_percent_snapshot ?? markupPercent,
+    combo_applied: snapshots?.franchise_combo_applied === true,
+    combo_unit_price:
+      snapshots?.franchise_combo_applied === true && snapshots?.franchise_combo_unit_price != null
+        ? Number(snapshots.franchise_combo_unit_price)
+        : null,
+    combo_units: snapshots?.franchise_combo_units != null ? Number(snapshots.franchise_combo_units) : null,
+    normal_units: snapshots?.franchise_normal_units != null ? Number(snapshots.franchise_normal_units) : null,
   };
 };
 
@@ -257,4 +340,6 @@ module.exports = {
   formatTransferRequestForUser,
   formatBulkTransferRequestForUser,
   buildFranchisePricingBlock,
+  buildFranchiseSnapshotsWithCombo,
+  emptyFranchiseComboFields,
 };

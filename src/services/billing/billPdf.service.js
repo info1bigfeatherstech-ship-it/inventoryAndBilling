@@ -133,6 +133,31 @@ const lineMrp = (item) => {
   return Number(item.unit_price) || 0;
 };
 
+const lineSpecialPrice = (item) => {
+  const snap = item.special_unit_price;
+  if (snap != null && Number.isFinite(Number(snap)) && Number(snap) >= 0) {
+    return Number(snap);
+  }
+  const fromVariant = item.variant?.special_price;
+  if (fromVariant != null && Number.isFinite(Number(fromVariant)) && Number(fromVariant) >= 0) {
+    return Number(fromVariant);
+  }
+  return Number(item.unit_price) || 0;
+};
+
+const lineComboPrice = (item) => {
+  if (!item?.combo_applied) return null;
+  if (item.combo_unit_price != null && Number.isFinite(Number(item.combo_unit_price))) {
+    return Number(item.combo_unit_price);
+  }
+  return Number(item.unit_price) || 0;
+};
+
+const formatComboPriceCell = (item) => {
+  const combo = lineComboPrice(item);
+  return combo == null ? '' : fmtNum(combo);
+};
+
 const lineSpecialTotal = (item) =>
   roundMoney((Number(item.unit_price) || 0) * (Number(item.quantity) || 0));
 
@@ -140,9 +165,9 @@ const calcMrpDiscount = (items) => {
   let total = 0;
   for (const item of items || []) {
     const mrp = lineMrp(item);
-    const special = Number(item.unit_price) || 0;
+    const charged = Number(item.unit_price) || 0;
     const qty = Number(item.quantity) || 0;
-    total = roundMoney(total + Math.max(0, mrp - special) * qty);
+    total = roundMoney(total + Math.max(0, mrp - charged) * qty);
   }
   return total;
 };
@@ -219,6 +244,7 @@ const drawWatermark = (doc, text) => {
 const renderGstTaxInvoice = (doc, bill, { isNonGst = false, isEstimate = false, isNonListed = false } = {}) => {
   const shop = bill.shop || {};
   const items = bill.items || [];
+  const showComboPriceCol = items.some((item) => item?.combo_applied === true);
   const gst = shopGstin(bill);
   const legalName = bill.gst_config?.legal_name?.trim() || shop.shop_name || '';
   const mrpDiscount = calcMrpDiscount(items);
@@ -442,27 +468,52 @@ const renderGstTaxInvoice = (doc, bill, { isNonGst = false, isEstimate = false, 
 
   // ── Product table (full grid borders) ──
   const cols = isNonGst
-    ? [
-      { label: 'S.No.', w: 24 },
-      { label: 'Product Name', w: 130 },
-      { label: 'Brand', w: 44 },
-      { label: 'Warranty', w: 44 },
-      { label: 'Qty', w: 28 },
-      { label: 'MRP', w: 60 },
-      { label: 'Special Price', w: 68 },
-      { label: 'Total', w: W - 24 - 130 - 44 - 44 - 28 - 60 - 68 },
-    ]
-    : [
-      { label: 'S.No.', w: 24 },
-      { label: 'Product Name', w: 110 },
-      { label: 'Brand', w: 40 },
-      { label: 'Warranty', w: 40 },
-      { label: 'HSN Code', w: 40 },
-      { label: 'Qty', w: 28 },
-      { label: 'MRP', w: 60 },
-      { label: 'Special Price', w: 68 },
-      { label: 'Total', w: W - 24 - 110 - 40 - 40 - 40 - 28 - 60 - 68 },
-    ];
+    ? showComboPriceCol
+      ? [
+        { label: 'S.No.', w: 22 },
+        { label: 'Product Name', w: 108 },
+        { label: 'Brand', w: 38 },
+        { label: 'Warranty', w: 38 },
+        { label: 'Qty', w: 24 },
+        { label: 'MRP', w: 50 },
+        { label: 'Special Price', w: 58 },
+        { label: 'Combo Price', w: 58 },
+        { label: 'Total', w: W - 22 - 108 - 38 - 38 - 24 - 50 - 58 - 58 },
+      ]
+      : [
+        { label: 'S.No.', w: 22 },
+        { label: 'Product Name', w: 130 },
+        { label: 'Brand', w: 44 },
+        { label: 'Warranty', w: 44 },
+        { label: 'Qty', w: 28 },
+        { label: 'MRP', w: 60 },
+        { label: 'Special Price', w: 70 },
+        { label: 'Total', w: W - 22 - 130 - 44 - 44 - 28 - 60 - 70 },
+      ]
+    : showComboPriceCol
+      ? [
+        { label: 'S.No.', w: 22 },
+        { label: 'Product Name', w: 92 },
+        { label: 'Brand', w: 34 },
+        { label: 'Warranty', w: 34 },
+        { label: 'HSN Code', w: 34 },
+        { label: 'Qty', w: 24 },
+        { label: 'MRP', w: 48 },
+        { label: 'Special Price', w: 54 },
+        { label: 'Combo Price', w: 54 },
+        { label: 'Total', w: W - 22 - 92 - 34 - 34 - 34 - 24 - 48 - 54 - 54 },
+      ]
+      : [
+        { label: 'S.No.', w: 22 },
+        { label: 'Product Name', w: 118 },
+        { label: 'Brand', w: 40 },
+        { label: 'Warranty', w: 40 },
+        { label: 'HSN Code', w: 40 },
+        { label: 'Qty', w: 26 },
+        { label: 'MRP', w: 56 },
+        { label: 'Special Price', w: 62 },
+        { label: 'Total', w: W - 22 - 118 - 40 - 40 - 40 - 26 - 56 - 62 },
+      ];
   const rowH = 38;
   const headerH = 16;
   const colWidths = cols.map((c) => c.w);
@@ -471,7 +522,7 @@ const renderGstTaxInvoice = (doc, bill, { isNonGst = false, isEstimate = false, 
   const drawTableHeader = (tableY) => {
     let cx = M;
     for (const col of cols) {
-      cellText(doc, col.label, cx, tableY, col.w, headerH, { align: 'center', bold: true, size: 7.5 });
+      cellText(doc, col.label, cx, tableY, col.w, headerH, { align: 'center', bold: true, size: 7 });
       cx += col.w;
     }
   };
@@ -482,6 +533,7 @@ const renderGstTaxInvoice = (doc, bill, { isNonGst = false, isEstimate = false, 
       const name = truncateProductName(resolveLineProductName(item));
       const brand = resolveLineBrand(item);
       const warranty = resolveLineWarranty(item);
+      const comboCell = formatComboPriceCell(item);
       const row = isNonGst
         ? [
           String(idx + 1),
@@ -490,7 +542,8 @@ const renderGstTaxInvoice = (doc, bill, { isNonGst = false, isEstimate = false, 
           warranty,
           String(item.quantity),
           fmtNum(lineMrp(item)),
-          fmtNum(item.unit_price),
+          fmtNum(lineSpecialPrice(item)),
+          ...(showComboPriceCol ? [comboCell] : []),
           fmtNum(lineSpecialTotal(item)),
         ]
         : [
@@ -501,7 +554,8 @@ const renderGstTaxInvoice = (doc, bill, { isNonGst = false, isEstimate = false, 
           displayVal(item.hsn_code),
           String(item.quantity),
           fmtNum(lineMrp(item)),
-          fmtNum(item.unit_price),
+          fmtNum(lineSpecialPrice(item)),
+          ...(showComboPriceCol ? [comboCell] : []),
           fmtNum(lineSpecialTotal(item)),
         ];
       let cx = M;
@@ -845,6 +899,7 @@ const drawThermalKeyValue = (doc, label, value, y) => {
 const renderThermalReceipt = (doc, bill, { isNonGst = false, isEstimate = false, isNonListed = false } = {}) => {
   const shop = bill.shop || {};
   const items = bill.items || [];
+  const showComboPriceCol = items.some((item) => item?.combo_applied === true);
   const gst = shopGstin(bill);
   const legalName = bill.gst_config?.legal_name?.trim() || shop.shop_name || '';
   const mrpDiscount = calcMrpDiscount(items);
@@ -950,13 +1005,24 @@ const renderThermalReceipt = (doc, bill, { isNonGst = false, isEstimate = false,
   drawThermalDashedLine(doc, y);
   y += 5;
 
-  // Table Headers
-  doc.font('Helvetica-Bold').fontSize(8);
-  doc.text('Item', 12, y, { width: 80, align: 'left' });
-  doc.text('Qty', 92, y, { width: 20, align: 'center' });
-  doc.text('Spl.Price', 112, y, { width: 50, align: 'right' });
-  doc.text('Total', 162, y, { width: 40, align: 'right' });
-  y += 10;
+  // Table Headers (wrapped: Spl./Combo + Price on next line)
+  doc.font('Helvetica-Bold').fontSize(7);
+  if (showComboPriceCol) {
+    doc.text('Item', 12, y + 4, { width: 62, align: 'left' });
+    doc.text('Qty', 74, y + 4, { width: 18, align: 'center' });
+    doc.text('Spl.', 92, y, { width: 34, align: 'right', lineBreak: false });
+    doc.text('Price', 92, y + 8, { width: 34, align: 'right', lineBreak: false });
+    doc.text('Combo', 126, y, { width: 36, align: 'right', lineBreak: false });
+    doc.text('Price', 126, y + 8, { width: 36, align: 'right', lineBreak: false });
+    doc.text('Total', 162, y + 4, { width: 40, align: 'right' });
+  } else {
+    doc.text('Item', 12, y + 4, { width: 78, align: 'left' });
+    doc.text('Qty', 90, y + 4, { width: 22, align: 'center' });
+    doc.text('Spl.', 112, y, { width: 44, align: 'right', lineBreak: false });
+    doc.text('Price', 112, y + 8, { width: 44, align: 'right', lineBreak: false });
+    doc.text('Total', 156, y + 4, { width: 46, align: 'right' });
+  }
+  y += 18;
 
   drawThermalSolidLine(doc, y);
   y += 4;
@@ -965,6 +1031,7 @@ const renderThermalReceipt = (doc, bill, { isNonGst = false, isEstimate = false,
   items.forEach((item, idx) => {
     const name = truncateProductName(resolveLineProductName(item));
     const metaLines = resolveLineMeta(item, { isNonListed });
+    const comboCell = formatComboPriceCell(item);
 
     y = drawThermalBlockText(doc, name, y, { size: 8, bold: true, align: 'left', gap: 2 });
 
@@ -976,11 +1043,19 @@ const renderThermalReceipt = (doc, bill, { isNonGst = false, isEstimate = false,
       }
     });
 
-    doc.font('Helvetica').fontSize(7.5);
-    doc.text(`MRP: Rs. ${fmtNum(lineMrp(item))}`, 12, y, { width: 80, align: 'left' });
-    doc.text(String(item.quantity), 92, y, { width: 20, align: 'center' });
-    doc.text(fmtNum(item.unit_price), 112, y, { width: 50, align: 'right' });
-    doc.text(fmtNum(lineSpecialTotal(item)), 162, y, { width: 40, align: 'right' });
+    doc.font('Helvetica').fontSize(7);
+    if (showComboPriceCol) {
+      doc.text(`MRP: Rs. ${fmtNum(lineMrp(item))}`, 12, y, { width: 62, align: 'left' });
+      doc.text(String(item.quantity), 74, y, { width: 18, align: 'center' });
+      doc.text(fmtNum(lineSpecialPrice(item)), 92, y, { width: 34, align: 'right' });
+      doc.text(comboCell || '', 126, y, { width: 36, align: 'right' });
+      doc.text(fmtNum(lineSpecialTotal(item)), 162, y, { width: 40, align: 'right' });
+    } else {
+      doc.text(`MRP: Rs. ${fmtNum(lineMrp(item))}`, 12, y, { width: 78, align: 'left' });
+      doc.text(String(item.quantity), 90, y, { width: 22, align: 'center' });
+      doc.text(fmtNum(lineSpecialPrice(item)), 112, y, { width: 44, align: 'right' });
+      doc.text(fmtNum(lineSpecialTotal(item)), 156, y, { width: 46, align: 'right' });
+    }
     y += 11;
 
     if (idx < items.length - 1) {

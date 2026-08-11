@@ -38,6 +38,7 @@ const UPLOAD_DATA_HEADERS = [
   'height',
   'low_stock_threshold',
   'remarks',
+  'combo_eligible',
 ];
 
 /** Red header cells on Upload Data — must match Required fields in Instructions. */
@@ -100,6 +101,7 @@ const buildInstructionsRows = () => [
   ['weight', 'Required. In grams (g). Example: 350 for 350g.'],
   ['length / width / height', 'Required. In centimeters (cm). Used for volumetric weight calculation.'],
   ['low_stock_threshold', 'Required. Minimum stock level before low-stock alert (e.g. 10).'],
+  ['combo_eligible', 'Optional. true/false — include this variant in global combo offers. Blank/false = not eligible (default).'],
   [null, null],
   ['CATEGORY & VENDOR', null],
   ['category_name', 'Required. Must match an existing category name in the system (select from dropdown).'],
@@ -428,6 +430,7 @@ const buildExportRowForVariant = (product, variant) => {
     exportNumberOrBlank(v.height),
     exportNumberOrBlank(v.low_stock_threshold),
     v.remarks || '',
+    v.combo_eligible === true ? 'true' : 'false',
     variantImageUrls(v),
   ];
 };

@@ -67,6 +67,7 @@ const variantBodyRules = (prefix = 'variants.*.') => [
   body(`${prefix}low_stock_threshold`).optional().isInt({ min: 0 }),
   body(`${prefix}attributes`).optional(),
   body(`${prefix}is_active`).optional().isBoolean().toBoolean(),
+  body(`${prefix}combo_eligible`).optional().isBoolean().toBoolean(),
 ];
 
 const requireFieldWhenNoVariants = (field, label) =>
@@ -227,6 +228,7 @@ const bulkUpdateValidator = [
   body('items.*.product_id').isString().trim().notEmpty(),
   body('items.*.variant_id').optional().isString().trim().notEmpty(),
   body('items.*.is_active').optional().isBoolean().toBoolean(),
+  body('items.*.combo_eligible').optional().isBoolean().toBoolean(),
 ];
 
 const bulkDeleteValidator = [

@@ -166,37 +166,38 @@ const formatGstPercent = (pct) => {
 const PRICE_COL_W = 55;
 
 const buildFranchiseGstCols = () => [
-  { key: 'sno', label: 'S.No.', w: 23 },
-  { key: 'product', label: 'Product Name', w: 100, isProduct: true },
-  { key: 'brand', label: 'Brand', w: 44 },
-  { key: 'warranty', label: 'Warranty', w: 44 },
-  { key: 'hsn', label: 'HSN', w: 38 },
-  { key: 'gst', label: 'GST %', w: 30 },
-  { key: 'qty', label: 'Qty', w: 24 },
-  { key: 'mrp', label: 'MRP', w: PRICE_COL_W },
-  { key: 'special', labelLines: ['Spl/Sale', 'Price'], w: PRICE_COL_W },
-  // Stacked like old bills — full "Franchise Price" without shrinking font.
-  { key: 'fprice', labelLines: ['Franchise', 'Price'], w: PRICE_COL_W },
-  { key: 'tfprice', labelLines: ['Total', 'Franchise', 'Price'], w: PRICE_COL_W },
+  { key: 'sno', label: 'S.No.', w: 22 },
+  { key: 'product', label: 'Product Name', w: 88, isProduct: true },
+  { key: 'brand', label: 'Brand', w: 38 },
+  { key: 'warranty', label: 'Warranty', w: 38 },
+  { key: 'hsn', label: 'HSN', w: 34 },
+  { key: 'gst', label: 'GST %', w: 28 },
+  { key: 'qty', label: 'Qty', w: 22 },
+  { key: 'mrp', label: 'MRP', w: 48 },
+  { key: 'special', labelLines: ['Spl/Sale', 'Price'], w: 48 },
+  { key: 'fprice', labelLines: ['Franchise', 'Price'], w: 48 },
+  { key: 'combo', labelLines: ['Combo', 'Price'], w: 48 },
+  { key: 'tfprice', labelLines: ['Total', 'Franchise', 'Price'], w: 51 },
 ];
 
 const buildFranchiseNonGstCols = () => [
-  { key: 'sno', label: 'S.No.', w: 23 },
-  { key: 'product', label: 'Product Name', w: 118, isProduct: true },
-  { key: 'brand', label: 'Brand', w: 48 },
-  { key: 'warranty', label: 'Warranty', w: 48 },
-  { key: 'qty', label: 'Qty', w: 26 },
-  { key: 'mrp', label: 'MRP', w: 65 },
-  { key: 'special', labelLines: ['Spl/Sale', 'Price'], w: 65 },
-  { key: 'fprice', labelLines: ['Franchise', 'Price'], w: 65 },
-  { key: 'tfprice', labelLines: ['Total', 'Franchise', 'Price'], w: 65 },
+  { key: 'sno', label: 'S.No.', w: 22 },
+  { key: 'product', label: 'Product Name', w: 100, isProduct: true },
+  { key: 'brand', label: 'Brand', w: 42 },
+  { key: 'warranty', label: 'Warranty', w: 42 },
+  { key: 'qty', label: 'Qty', w: 24 },
+  { key: 'mrp', label: 'MRP', w: 52 },
+  { key: 'special', labelLines: ['Spl/Sale', 'Price'], w: 52 },
+  { key: 'fprice', labelLines: ['Franchise', 'Price'], w: 52 },
+  { key: 'combo', labelLines: ['Combo', 'Price'], w: 52 },
+  { key: 'tfprice', labelLines: ['Total', 'Franchise', 'Price'], w: 55 },
 ];
 
 const getFranchiseGstCols = () => buildFranchiseGstCols();
 
 const getFranchiseNonGstCols = () => buildFranchiseNonGstCols();
 
-const isPriceCol = (key) => ['mrp', 'special', 'fprice', 'tfprice'].includes(key);
+const isPriceCol = (key) => ['mrp', 'special', 'fprice', 'combo', 'tfprice'].includes(key);
 
 /** Short numeric / code cols — single line, may shrink slightly. */
 const isCompactCol = (key) => ['sno', 'hsn', 'gst', 'qty'].includes(key);
@@ -224,6 +225,10 @@ const cellValueForLine = (line, col, rowIndex) => {
       return fmtNum(line.unit_special_price);
     case 'fprice':
       return fmtNum(line.unit_franchise_price);
+    case 'combo':
+      return line.combo_applied && line.unit_combo_price != null
+        ? fmtNum(line.unit_combo_price)
+        : '';
     case 'tfprice':
       return fmtNum(line.line_franchise_total);
     default:
