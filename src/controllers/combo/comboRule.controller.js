@@ -13,6 +13,15 @@ const ComboRuleController = {
     });
   }),
 
+  listMatchingVariants: asyncHandler(async (req, res) => {
+    const data = await ComboRuleService.listMatchingVariants(req.query, req.user);
+    return successResponse(res, req, {
+      statusCode: 200,
+      message: 'Matching combo variants fetched',
+      data,
+    });
+  }),
+
   listActive: asyncHandler(async (req, res) => {
     const rules = await ComboRuleService.listActiveRulesForBilling();
     return successResponse(res, req, {

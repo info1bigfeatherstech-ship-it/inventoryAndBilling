@@ -14,6 +14,13 @@ const warehouseStockCatalogValidator = [
   query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
 ];
 
+const warehouseProductsCatalogValidator = [
+  ...shopIdParam,
+  query('warehouse_id').isString().trim().notEmpty().withMessage('warehouse_id is required'),
+  query('search').optional().isString().trim().isLength({ max: 120 }),
+];
+
 module.exports = {
   warehouseStockCatalogValidator,
+  warehouseProductsCatalogValidator,
 };

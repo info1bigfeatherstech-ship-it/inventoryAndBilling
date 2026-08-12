@@ -92,6 +92,77 @@ const ComboRuleService = {
     });
   },
 
+  async listMatchingVariants(query = {}, user) {
+    assertSuperAdmin(user);
+
+    const specialPriceGroup = roundMoney(Number(query.special_price_group));
+    if (!Number.isFinite(specialPriceGroup) || specialPriceGroup <= 0) {
+      throw new AppError(
+        'special_price_group must be a positive number (special price)',
+        400,
+        'INVALID_PRICE_GROUP'
+      );
+    }
+
+    const search = String(query.search || '').trim();
+    const searchFilter = search
+      ? {
+          OR: [
+            { product_code: { contains: search } },
+            { sku: { contains: search } },
+            { product: { name: { contains: search } } },
+            { product: { brand_name: { contains: search } } },
+          ],
+        }
+      : {};
+
+    const variants = await prisma.productVariant.findMany({
+      where: {
+        is_active: true,
+        special_price: specialPriceGroup,
+        product: {
+          is_active: true,
+        },
+        ...searchFilter,
+      },
+      orderBy: [
+        { combo_eligible: 'desc' },
+        { product_code: 'asc' },
+        { sort_order: 'asc' },
+      ],
+      take: 250,
+      select: {
+        variant_id: true,
+        product_id: true,
+        product_code: true,
+        sku: true,
+        special_price: true,
+        combo_eligible: true,
+        product: {
+          select: {
+            name: true,
+            brand_name: true,
+          },
+        },
+      },
+    });
+
+    return {
+      special_price_group: specialPriceGroup,
+      total: variants.length,
+      variants: variants.map((variant) => ({
+        variant_id: variant.variant_id,
+        product_id: variant.product_id,
+        product_code: variant.product_code,
+        sku: variant.sku,
+        product_name: variant.product?.name || '',
+        brand_name: variant.product?.brand_name || '',
+        special_price: variant.special_price,
+        combo_eligible: variant.combo_eligible === true,
+      })),
+    };
+  },
+
   async getRuleById(comboRuleId, user) {
     assertSuperAdmin(user);
     const rule = await prisma.comboRule.findUnique({

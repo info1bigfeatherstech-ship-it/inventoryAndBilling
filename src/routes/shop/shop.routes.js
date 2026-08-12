@@ -5,7 +5,10 @@ const ShopController = require('../../controllers/shop/shop.controller');
 const ShopBankAccountController = require('../../controllers/shop/shopBankAccount.controller');
 const ShopStaffCodeController = require('../../controllers/shop/shopStaffCode.controller');
 const ShopWarehouseCatalogController = require('../../controllers/stock/shopWarehouseCatalog.controller');
-const { warehouseStockCatalogValidator } = require('../../validators/stock/shopWarehouseCatalog.validators');
+const {
+  warehouseStockCatalogValidator,
+  warehouseProductsCatalogValidator,
+} = require('../../validators/stock/shopWarehouseCatalog.validators');
 const { validateRequest } = require('../../middlewares/validation.middleware');
 const { requireAuth, authorizeRoles } = require('../../middlewares/auth.middleware');
 const {
@@ -133,6 +136,20 @@ router.get(
   warehouseStockCatalogValidator,
   validateRequest,
   ShopWarehouseCatalogController.getCatalog
+);
+router.get(
+  '/:shopId/warehouse-products-catalog',
+  authorizeRoles('SHOP_OWNER', 'SHOP_MANAGER'),
+  warehouseProductsCatalogValidator,
+  validateRequest,
+  ShopWarehouseCatalogController.getProductsCatalog
+);
+router.get(
+  '/:shopId/warehouse-products-catalog/pdf',
+  authorizeRoles('SHOP_OWNER', 'SHOP_MANAGER'),
+  warehouseProductsCatalogValidator,
+  validateRequest,
+  ShopWarehouseCatalogController.downloadProductsCatalogPdf
 );
 router.get('/:shopId', authorizeRoles(...SHOP_READ_ROLES), shopIdParam, validateRequest, ShopController.getById);
 router.post('/', authorizeRoles(...ADMIN_ONLY), createShopValidator, validateRequest, ShopController.create);

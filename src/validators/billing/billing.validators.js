@@ -77,6 +77,12 @@ const gstReportValidator = [
   query('to_date').isISO8601().toDate(),
 ];
 
+const shopOverviewValidator = [
+  query('shop_id').optional().isString().trim().notEmpty(),
+  query('from_date').isISO8601().toDate(),
+  query('to_date').isISO8601().toDate(),
+];
+
 module.exports = {
   billIdParam,
   createBillValidator,
@@ -85,4 +91,5 @@ module.exports = {
   cancelBillValidator,
   dailySummaryValidator,
   gstReportValidator,
+  shopOverviewValidator,
 };

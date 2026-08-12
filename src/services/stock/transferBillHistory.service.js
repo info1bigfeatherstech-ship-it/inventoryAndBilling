@@ -90,9 +90,22 @@ const SINGLE_BILL_SELECT = {
 const buildDateFilter = (fromDate, toDate) => {
   if (!fromDate && !toDate) return undefined;
   const filter = {};
-  if (fromDate) filter.gte = new Date(fromDate);
-  if (toDate) filter.lte = new Date(toDate);
-  return filter;
+  if (fromDate) {
+    const start = new Date(fromDate);
+    if (!Number.isNaN(start.getTime())) {
+      start.setHours(0, 0, 0, 0);
+      filter.gte = start;
+    }
+  }
+  if (toDate) {
+    const end = new Date(toDate);
+    if (!Number.isNaN(end.getTime())) {
+      // Inclusive end-of-day (matches billing listBills behaviour)
+      end.setHours(23, 59, 59, 999);
+      filter.lte = end;
+    }
+  }
+  return Object.keys(filter).length ? filter : undefined;
 };
 
 const applyRoleScope = async (user, bulkWhere, singleWhere) => {
@@ -190,8 +203,14 @@ const buildListFilters = async (query, user) => {
   }
 
   if (query.shop_id) {
-    bulkWhere.to_shop_id = query.shop_id;
-    singleWhere.to_shop_id = query.shop_id;
+    // Shop roles are forced to their own shop in applyRoleScope — ignore client shop_id to prevent spoofing.
+    if (
+      user.role === 'SUPER_ADMIN' ||
+      ['WH_MANAGER', 'WH_STOCK_LISTER'].includes(user.role)
+    ) {
+      bulkWhere.to_shop_id = query.shop_id;
+      singleWhere.to_shop_id = query.shop_id;
+    }
   }
 
   if (query.warehouse_id) {

@@ -13,6 +13,7 @@ const {
   cancelBillValidator,
   dailySummaryValidator,
   gstReportValidator,
+  shopOverviewValidator,
 } = require('../../validators/billing/billing.validators');
 
 const { createRateLimiter, RL_KEY_PREFIX } = require('../../middlewares/rateLimiter.middleware');
@@ -36,6 +37,7 @@ router.use(requireAuth);
 
 router.get('/reports/daily', authorizeRoles(...READ_ROLES), dailySummaryValidator, validateRequest, BillingController.dailySummary);
 router.get('/reports/gst', authorizeRoles(...READ_ROLES), gstReportValidator, validateRequest, BillingController.gstReport);
+router.get('/reports/shop-overview', authorizeRoles(...READ_ROLES), shopOverviewValidator, validateRequest, BillingController.shopOverview);
 
 router.post('/', authorizeRoles(...WRITE_ROLES), idem24h, createBillValidator, validateRequest, BillingController.create);
 router.get('/', authorizeRoles(...READ_ROLES), listBillsValidator, validateRequest, BillingController.list);

@@ -928,11 +928,22 @@ const BillingService = {
 
     if (filters.from_date || filters.to_date) {
       where.created_at = {};
-      if (filters.from_date) where.created_at.gte = new Date(filters.from_date);
+      if (filters.from_date) {
+        const start = new Date(filters.from_date);
+        if (!Number.isNaN(start.getTime())) {
+          start.setHours(0, 0, 0, 0);
+          where.created_at.gte = start;
+        }
+      }
       if (filters.to_date) {
         const end = new Date(filters.to_date);
-        end.setHours(23, 59, 59, 999);
-        where.created_at.lte = end;
+        if (!Number.isNaN(end.getTime())) {
+          end.setHours(23, 59, 59, 999);
+          where.created_at.lte = end;
+        }
+      }
+      if (!where.created_at.gte && !where.created_at.lte) {
+        delete where.created_at;
       }
     }
 
@@ -1230,6 +1241,103 @@ const BillingService = {
       to_date: new Date(toDate).toISOString().slice(0, 10),
       hsn_summary: [...hsnMap.values()],
       totals,
+    };
+  },
+
+  /**
+   * Shop-scoped sales overview for a date range (read-only aggregates).
+   * Used by Shop Reports → Overview together with purchase/transfer FE queries.
+   */
+  async getShopOverview(shopId, fromDate, toDate, user) {
+    const resolvedShopId = await resolveBillingShopId(user, shopId);
+    await assertBillReadAccess(resolvedShopId, user);
+
+    if (!fromDate || !toDate) {
+      throw new AppError('from_date and to_date are required', 400, 'DATE_RANGE_REQUIRED');
+    }
+
+    const start = new Date(fromDate);
+    if (Number.isNaN(start.getTime())) {
+      throw new AppError('Invalid from_date', 400, 'INVALID_DATE');
+    }
+    start.setHours(0, 0, 0, 0);
+
+    const end = new Date(toDate);
+    if (Number.isNaN(end.getTime())) {
+      throw new AppError('Invalid to_date', 400, 'INVALID_DATE');
+    }
+    end.setHours(23, 59, 59, 999);
+
+    if (start > end) {
+      throw new AppError('from_date must be on or before to_date', 400, 'INVALID_DATE_RANGE');
+    }
+
+    const where = {
+      shop_id: resolvedShopId,
+      is_cancelled: false,
+      created_at: { gte: start, lte: end },
+    };
+
+    const [shop, totalsAgg, paymentGroups, billTypeGroups] = await Promise.all([
+      prisma.shop.findUnique({
+        where: { shop_id: resolvedShopId },
+        select: { shop_id: true, shop_name: true, shop_code: true, shop_type: true },
+      }),
+      prisma.bill.aggregate({
+        where,
+        _count: { _all: true },
+        _sum: {
+          total_amount: true,
+          gst_amount: true,
+          paid_amount: true,
+          balance_amount: true,
+        },
+      }),
+      prisma.bill.groupBy({
+        by: ['payment_method'],
+        where,
+        _sum: { paid_amount: true },
+        _count: { _all: true },
+      }),
+      prisma.bill.groupBy({
+        by: ['bill_type'],
+        where,
+        _count: { _all: true },
+        _sum: { total_amount: true },
+      }),
+    ]);
+
+    const payment_methods = {};
+    for (const row of paymentGroups) {
+      const key = row.payment_method || 'UNSPECIFIED';
+      payment_methods[key] = {
+        count: row._count?._all || 0,
+        amount: roundMoney(row._sum?.paid_amount || 0),
+      };
+    }
+
+    const by_bill_type = billTypeGroups.map((row) => ({
+      bill_type: row.bill_type,
+      count: row._count?._all || 0,
+      total_amount: roundMoney(row._sum?.total_amount || 0),
+    }));
+
+    return {
+      shop_id: resolvedShopId,
+      shop_name: shop?.shop_name || null,
+      shop_code: shop?.shop_code || null,
+      shop_type: shop?.shop_type || null,
+      from_date: start.toISOString().slice(0, 10),
+      to_date: end.toISOString().slice(0, 10),
+      sales: {
+        bill_count: totalsAgg._count?._all || 0,
+        total_amount: roundMoney(totalsAgg._sum?.total_amount || 0),
+        total_gst: roundMoney(totalsAgg._sum?.gst_amount || 0),
+        total_collected: roundMoney(totalsAgg._sum?.paid_amount || 0),
+        total_balance: roundMoney(totalsAgg._sum?.balance_amount || 0),
+        payment_methods,
+        by_bill_type,
+      },
     };
   },
 

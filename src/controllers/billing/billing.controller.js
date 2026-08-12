@@ -79,6 +79,20 @@ const BillingController = {
     });
   }),
 
+  shopOverview: asyncHandler(async (req, res) => {
+    const data = await BillingService.getShopOverview(
+      req.query.shop_id,
+      req.query.from_date,
+      req.query.to_date,
+      req.user
+    );
+    return successResponse(res, req, {
+      statusCode: 200,
+      message: 'Shop overview report fetched successfully',
+      data,
+    });
+  }),
+
   downloadPDF: asyncHandler(async (req, res) => {
     const printFormat = req.query.printFormat || 'A4';
     const { bill, pdf } = await BillingService.generatePDF(req.params.billId, req.user, {

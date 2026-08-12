@@ -6,6 +6,7 @@ const { validateRequest } = require('../../middlewares/validation.middleware');
 const {
   comboRuleIdParam,
   listComboRulesValidator,
+  listMatchingVariantsValidator,
   createComboRuleValidator,
   updateComboRuleValidator,
   setComboRuleActiveValidator,
@@ -15,6 +16,14 @@ const ADMIN = ['SUPER_ADMIN'];
 const BILLING_READ = ['SUPER_ADMIN', 'SHOP_OWNER', 'SHOP_MANAGER', 'BILLING_STAFF', 'WH_MANAGER'];
 
 router.use(requireAuth);
+
+router.get(
+  '/matching-variants',
+  authorizeRoles(...ADMIN),
+  listMatchingVariantsValidator,
+  validateRequest,
+  ComboRuleController.listMatchingVariants
+);
 
 router.get(
   '/active',

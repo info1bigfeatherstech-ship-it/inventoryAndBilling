@@ -8,6 +8,11 @@ const listComboRulesValidator = [
   query('is_active').optional().isBoolean().toBoolean(),
 ];
 
+const listMatchingVariantsValidator = [
+  query('special_price_group').isFloat({ gt: 0 }).toFloat(),
+  query('search').optional().isString().trim().isLength({ max: 120 }),
+];
+
 const createComboRuleValidator = [
   body('name').isString().trim().notEmpty().isLength({ max: 120 }),
   body('special_price_group').isFloat({ gt: 0 }),
@@ -33,6 +38,7 @@ const setComboRuleActiveValidator = [
 module.exports = {
   comboRuleIdParam,
   listComboRulesValidator,
+  listMatchingVariantsValidator,
   createComboRuleValidator,
   updateComboRuleValidator,
   setComboRuleActiveValidator,
