@@ -305,7 +305,12 @@ const buildWarehouseProductsCatalogPdf = async (catalog) => {
             else if (col.key === 'brand') value = row.brand_name || '—';
             else if (col.key === 'warranty') value = row.warranty || '—';
             else if (col.key === 'mrp') value = fmtMoney(row.mrp);
-            else if (col.key === 'fprice') value = fmtMoney(row.franchise_unit_price);
+            else if (col.key === 'fprice') {
+              value =
+                row.franchise_unit_price == null || !Number.isFinite(Number(row.franchise_unit_price))
+                  ? '—'
+                  : String(Math.round(Number(row.franchise_unit_price)));
+            }
             else if (col.key === 'purchase') value = fmtMoney(row.purchase_price);
             else if (col.key === 'special') value = fmtMoney(row.special_price);
             else if (col.key === 'combo') value = fmtCombo(row);

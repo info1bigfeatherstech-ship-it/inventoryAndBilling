@@ -8,6 +8,7 @@ const AppSettingsService = require('../settings/appSettings.service');
 const ComboRuleService = require('../combo/comboRule.service');
 const {
   calculateFranchiseUnitPrice,
+  calculateFranchiseUnitPriceFromSelling,
   isFranchiseShopType,
   isWarehouseInternalRole,
 } = require('../../utils/franchisePrice.utils');
@@ -209,6 +210,10 @@ const buildWarehouseProductsRows = async ({
 
     if (showFranchisePrice) {
       row.franchise_unit_price = calculateFranchiseUnitPrice(variant, franchiseMarkup);
+      row.franchise_combo_unit_price =
+        combo_unit_price != null
+          ? calculateFranchiseUnitPriceFromSelling(variant, franchiseMarkup, combo_unit_price)
+          : null;
     }
     if (showPurchasePrice) {
       row.purchase_price =
@@ -319,7 +324,7 @@ const ShopWarehouseCatalogService = {
     const variantIds = whStockRows.map((r) => r.variant_id);
     const whQtyMap = new Map(whStockRows.map((r) => [r.variant_id, r._sum.quantity ?? 0]));
 
-    const [variants, shopStocks, levels] = await Promise.all([
+    const [variants, shopStocks, levels, activeComboRules] = await Promise.all([
       prisma.productVariant.findMany({
         where: {
           variant_id: { in: variantIds },
@@ -366,10 +371,20 @@ const ShopWarehouseCatalogService = {
           reorder_qty: true,
         },
       }),
+      ComboRuleService.listActiveRulesForBilling().catch((err) => {
+        logger.warn('Failed to load combo rules for warehouse stock catalog', { error: err.message });
+        return [];
+      }),
     ]);
 
     const shopStockMap = new Map(shopStocks.map((s) => [s.variant_id, s]));
     const levelMap = new Map(levels.map((l) => [l.variant_id, l]));
+    const ruleByPrice = new Map();
+    for (const rule of activeComboRules || []) {
+      if (!rule || rule.is_active === false) continue;
+      const key = priceKey(rule.special_price_group);
+      if (!ruleByPrice.has(key)) ruleByPrice.set(key, rule);
+    }
 
     const productMap = new Map();
 
@@ -435,8 +450,28 @@ const ShopWarehouseCatalogService = {
       variantPayload.special_price = variant.special_price;
       variantPayload.combo_eligible = variant.combo_eligible === true;
 
+      const special = variant.special_price != null ? roundMoney(variant.special_price) : null;
+      if (variant.combo_eligible === true && special != null) {
+        const rule = ruleByPrice.get(priceKey(special));
+        if (rule && Number(rule.trigger_qty) >= 2 && Number(rule.combo_price) > 0) {
+          variantPayload.combo_trigger_qty = Number(rule.trigger_qty);
+          variantPayload.combo_price = roundMoney(rule.combo_price);
+          variantPayload.combo_unit_price = roundMoney(
+            variantPayload.combo_price / variantPayload.combo_trigger_qty
+          );
+        }
+      }
+
       if (isFranchiseShop) {
         variantPayload.franchise_unit_price = calculateFranchiseUnitPrice(variant, franchiseMarkup);
+        variantPayload.franchise_combo_unit_price =
+          variantPayload.combo_unit_price != null
+            ? calculateFranchiseUnitPriceFromSelling(
+                variant,
+                franchiseMarkup,
+                variantPayload.combo_unit_price
+              )
+            : null;
       }
 
       if (

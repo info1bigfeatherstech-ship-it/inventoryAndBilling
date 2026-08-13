@@ -10,6 +10,7 @@ const {
   createCreditNoteValidator,
   listCreditNotesValidator,
   lookupCreditNoteValidator,
+  listOriginalBillsForReturnValidator,
   redeemCreditNoteValidator,
   refundCreditNoteValidator,
   cancelCreditNoteValidator,
@@ -53,6 +54,14 @@ router.get(
   lookupCreditNoteValidator,
   validateRequest,
   CreditNoteController.lookup
+);
+
+router.get(
+  '/original-bills',
+  authorizeRoles(...WRITE_ROLES),
+  listOriginalBillsForReturnValidator,
+  validateRequest,
+  CreditNoteController.listOriginalBills
 );
 
 router.get(

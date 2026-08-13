@@ -30,10 +30,15 @@ const BULK_BILL_SELECT = {
       franchise_mrp_snapshot: true,
       franchise_unit_price_snapshot: true,
       franchise_line_value_snapshot: true,
+      franchise_combo_applied: true,
+      franchise_combo_unit_price: true,
+      franchise_combo_units: true,
+      franchise_normal_units: true,
       variant: {
         select: {
           sku: true,
           product_code: true,
+          special_price: true,
           warranty: true,
           attributes: true,
           product: {
@@ -65,12 +70,17 @@ const SINGLE_BILL_SELECT = {
   franchise_mrp_snapshot: true,
   franchise_unit_price_snapshot: true,
   franchise_line_value_snapshot: true,
+  franchise_combo_applied: true,
+  franchise_combo_unit_price: true,
+  franchise_combo_units: true,
+  franchise_normal_units: true,
   from_warehouse: { select: { warehouse_id: true, warehouse_code: true, warehouse_name: true, city: true } },
   to_shop: { select: { shop_id: true, shop_code: true, shop_name: true, city: true, shop_type: true } },
   variant: {
     select: {
       sku: true,
       product_code: true,
+      special_price: true,
       warranty: true,
       attributes: true,
       product: {

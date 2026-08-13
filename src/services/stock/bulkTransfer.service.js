@@ -33,10 +33,7 @@ const {
 const { getWarehouseStockAvailable } = require('../../utils/warehouseStock.utils');
 const { snapshotTransferCost } = require('../../utils/transferCost.utils');
 const AppSettingsService = require('../settings/appSettings.service');
-const {
-  snapshotFranchiseTransferPricing,
-  isFranchiseShopType,
-} = require('../../utils/franchisePrice.utils');
+const { isFranchiseShopType } = require('../../utils/franchisePrice.utils');
 const { formatBulkTransferRequestForUser } = require('../../utils/franchiseTransferPricing.utils');
 const TransferBillService = require('./transferBill.service');
 
@@ -111,6 +108,10 @@ const BULK_SELECT = {
       franchise_mrp_snapshot: true,
       franchise_unit_price_snapshot: true,
       franchise_line_value_snapshot: true,
+      franchise_combo_applied: true,
+      franchise_combo_unit_price: true,
+      franchise_combo_units: true,
+      franchise_normal_units: true,
       variant: {
         select: {
           variant_id: true,
@@ -118,6 +119,7 @@ const BULK_SELECT = {
           product_code: true,
           mrp: true,
           special_price: true,
+          combo_eligible: true,
           purchase_price: true,
           expenses: true,
           warranty: true,
@@ -268,6 +270,7 @@ const BulkTransferService = {
       if (!sourceWh?.is_active) throw new AppError('Source warehouse is inactive', 409, 'WAREHOUSE_INACTIVE');
 
       let createPayload;
+      let franchiseDest = false;
 
       if (requestType === 'WH_TO_WH') {
         assertWarehouseAssigned(user);
@@ -303,9 +306,10 @@ const BulkTransferService = {
         assertShopReadAccess(toShopId, user);
         const shop = await prisma.shop.findUnique({
           where: { shop_id: toShopId },
-          select: { is_active: true },
+          select: { is_active: true, shop_type: true },
         });
         if (!shop?.is_active) throw new AppError('Shop is inactive', 409, 'SHOP_INACTIVE');
+        franchiseDest = isFranchiseShopType(shop.shop_type);
 
         createPayload = {
           bulk_request_number: null,
@@ -324,10 +328,25 @@ const BulkTransferService = {
         const bulkNumber = await generateBulkRequestNumber(tx);
         createPayload.bulk_request_number = bulkNumber;
 
-        return tx.bulkTransferRequest.create({
+        const bulk = await tx.bulkTransferRequest.create({
           data: createPayload,
           select: BULK_SELECT,
         });
+
+        if (franchiseDest) {
+          const markup = await AppSettingsService.getFranchiseMarkupPercent();
+          await TransferBillService.snapshotFranchiseOnRequestedItems(
+            tx,
+            bulk.bulk_request_id,
+            markup
+          );
+          return tx.bulkTransferRequest.findUnique({
+            where: { bulk_request_id: bulk.bulk_request_id },
+            select: BULK_SELECT,
+          });
+        }
+
+        return bulk;
       }, TX_OPTIONS);
 
       logger.info('Bulk transfer request created', {
@@ -667,23 +686,27 @@ const BulkTransferService = {
           if (isFranchiseDest) {
             const existingFranchise = item.franchise_unit_price_snapshot;
             if (existingFranchise != null) {
+              const keepComboLine =
+                item.franchise_combo_applied === true &&
+                item.franchise_line_value_snapshot != null;
               franchiseSnap = {
                 franchise_markup_percent_snapshot: item.franchise_markup_percent_snapshot,
                 franchise_mrp_snapshot: item.franchise_mrp_snapshot,
                 franchise_unit_price_snapshot: item.franchise_unit_price_snapshot,
-                franchise_line_value_snapshot: roundMoney(existingFranchise * qty),
+                franchise_line_value_snapshot: keepComboLine
+                  ? item.franchise_line_value_snapshot
+                  : roundMoney(existingFranchise * qty),
+                franchise_combo_applied: item.franchise_combo_applied === true,
+                franchise_combo_unit_price: item.franchise_combo_unit_price,
+                franchise_combo_units: item.franchise_combo_units,
+                franchise_normal_units: item.franchise_normal_units,
               };
             } else {
-              const pricingVariant = await tx.productVariant.findUnique({
-                where: { variant_id: item.variant_id },
-                select: {
-                  mrp: true,
-                  purchase_price: true,
-                  expenses: true,
-                  product: { select: { expenses: true } },
-                },
-              });
-              franchiseSnap = snapshotFranchiseTransferPricing(pricingVariant, qty, franchiseMarkup);
+              franchiseSnap = await TransferBillService.snapshotFranchiseOnSingleRequest(
+                tx,
+                { variant_id: item.variant_id, quantity: qty, request_id: item.bulk_item_id },
+                franchiseMarkup
+              );
             }
           }
 

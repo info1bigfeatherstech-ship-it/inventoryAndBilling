@@ -28,10 +28,7 @@ const {
 const { deductWarehouseStock } = require('../../utils/warehouseStock.utils');
 const { snapshotTransferCost } = require('../../utils/transferCost.utils');
 const AppSettingsService = require('../settings/appSettings.service');
-const {
-  snapshotFranchiseTransferPricing,
-  isFranchiseShopType,
-} = require('../../utils/franchisePrice.utils');
+const { isFranchiseShopType } = require('../../utils/franchisePrice.utils');
 const {
   formatTransferRequestForUser,
   formatTransferRequestsForUser,
@@ -78,6 +75,10 @@ const REQUEST_SELECT = {
   franchise_mrp_snapshot: true,
   franchise_unit_price_snapshot: true,
   franchise_line_value_snapshot: true,
+  franchise_combo_applied: true,
+  franchise_combo_unit_price: true,
+  franchise_combo_units: true,
+  franchise_normal_units: true,
   transfer_bill_type: true,
   transfer_bill_number: true,
   transfer_bill_generated_at: true,
@@ -90,6 +91,7 @@ const REQUEST_SELECT = {
       sku: true,
       mrp: true,
       special_price: true,
+      combo_eligible: true,
       purchase_price: true,
       expenses: true,
       warranty: true,
@@ -734,16 +736,11 @@ const TransferRequestService = {
           if (isFranchiseShopType(destShop?.shop_type)) {
             if (locked.franchise_unit_price_snapshot == null) {
               const markup = await AppSettingsService.getFranchiseMarkupPercent();
-              const pricingVariant = await tx.productVariant.findUnique({
-                where: { variant_id: locked.variant_id },
-                select: {
-                  mrp: true,
-                  purchase_price: true,
-                  expenses: true,
-                  product: { select: { expenses: true } },
-                },
-              });
-              franchiseSnap = snapshotFranchiseTransferPricing(pricingVariant, locked.quantity, markup);
+              franchiseSnap = await TransferBillService.snapshotFranchiseOnSingleRequest(
+                tx,
+                locked,
+                markup
+              );
             }
           }
         }

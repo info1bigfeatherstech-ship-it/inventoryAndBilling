@@ -16,7 +16,7 @@ const updateShopStockValidator = [
   ...variantIdParam,
   body('shop_id').optional().isString().trim().notEmpty(),
   body('quantity').isFloat({ min: 0 }),
-  body('operation').optional().isIn(['set', 'increment', 'decrement']),
+  body('operation').optional().isIn(['set', 'decrement']),
   body('reason').optional().isString().trim().isLength({ max: 500 }),
   body('remarks').optional().isString().trim().isLength({ max: 500 }),
   body('low_stock_threshold').optional().isInt({ min: 0 }).toInt(),
@@ -27,7 +27,7 @@ const bulkUpdateShopStockValidator = [
   body('items').isArray({ min: 1 }),
   body('items.*.variant_id').isString().trim().notEmpty(),
   body('items.*.quantity').isFloat({ min: 0 }),
-  body('items.*.operation').optional().isIn(['set', 'increment', 'decrement']),
+  body('items.*.operation').optional().isIn(['set', 'decrement']),
 ];
 
 module.exports = {

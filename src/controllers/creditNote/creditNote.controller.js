@@ -31,6 +31,15 @@ const CreditNoteController = {
     });
   }),
 
+  listOriginalBills: asyncHandler(async (req, res) => {
+    const data = await CreditNoteService.listOriginalBillsForReturn(req.query, req.user);
+    return successResponse(res, req, {
+      statusCode: 200,
+      message: 'Original bills fetched for return',
+      data,
+    });
+  }),
+
   getById: asyncHandler(async (req, res) => {
     const data = await CreditNoteService.getCreditNoteById(req.params.creditNoteId, req.user, {
       redeeming_shop_id: req.query.redeeming_shop_id || req.query.shop_id,

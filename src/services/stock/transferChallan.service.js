@@ -1,6 +1,9 @@
 const { AppError } = require('../../errors/AppError');
 const { roundMoney } = require('../../utils/billing.utils');
-const { isFranchiseWhToShopTransfer } = require('../../utils/franchiseTransferPricing.utils');
+const {
+  isFranchiseWhToShopTransfer,
+  expandFranchiseBillSegments,
+} = require('../../utils/franchiseTransferPricing.utils');
 const TransferRequestService = require('./transferRequest.service');
 const BulkTransferService = require('./bulkTransfer.service');
 const TransferBillService = require('./transferBill.service');
@@ -141,33 +144,32 @@ const buildFranchiseLinesFromSingleRequest = (request) => {
   const unitMrp = Number(request.franchise_mrp_snapshot) || 0;
   const unitFranchise = Number(request.franchise_unit_price_snapshot) || 0;
   const unitSpecial = Number(request.variant?.special_price) || 0;
-  const lineMrp = roundMoney(unitMrp * qty);
-  const lineFranchise =
-    request.franchise_line_value_snapshot != null &&
-    Number.isFinite(Number(request.franchise_line_value_snapshot))
-      ? roundMoney(Number(request.franchise_line_value_snapshot))
-      : roundMoney(unitFranchise * qty);
-  const comboApplied = request.franchise_combo_applied === true;
-  return [
-    {
-      product_name: request.variant?.product?.name,
-      sku: request.variant?.sku || request.variant?.product_code,
-      hsn_code: request.variant?.product?.hsn_code,
-      batch_number: request.batch_number || '',
-      quantity: qty,
-      unit_mrp: unitMrp,
-      unit_special_price: unitSpecial,
-      unit_franchise_price: unitFranchise,
-      unit_combo_price:
-        comboApplied && request.franchise_combo_unit_price != null
-          ? Number(request.franchise_combo_unit_price)
-          : null,
-      combo_applied: comboApplied,
-      line_mrp_total: lineMrp,
-      line_franchise_total: lineFranchise,
-      ...lineMetaFromVariant(request.variant),
-    },
-  ];
+  const segments = expandFranchiseBillSegments({
+    quantity: qty,
+    franchise_unit_price_snapshot: request.franchise_unit_price_snapshot,
+    franchise_combo_applied: request.franchise_combo_applied,
+    franchise_combo_unit_price: request.franchise_combo_unit_price,
+    franchise_combo_units: request.franchise_combo_units,
+    franchise_normal_units: request.franchise_normal_units,
+  });
+  return segments.map((seg) => ({
+    product_name: request.variant?.product?.name,
+    sku: request.variant?.sku || request.variant?.product_code,
+    hsn_code: request.variant?.product?.hsn_code,
+    batch_number: request.batch_number || '',
+    quantity: seg.quantity,
+    unit_mrp: unitMrp,
+    unit_special_price: unitSpecial,
+    unit_franchise_price: unitFranchise,
+    unit_combo_price: seg.unit_combo_price,
+    combo_applied: seg.combo_applied,
+    combo_units: seg.combo_units,
+    normal_units: seg.normal_units,
+    unit_charged_price: seg.unit_charged_price,
+    line_mrp_total: roundMoney(unitMrp * seg.quantity),
+    line_franchise_total: seg.line_franchise_total,
+    ...lineMetaFromVariant(request.variant),
+  }));
 };
 
 const resolveBulkLineQty = (bulk, item) => {
@@ -211,36 +213,37 @@ const buildCostLinesFromBulk = (bulk) =>
 const buildFranchiseLinesFromBulk = (bulk) =>
   (bulk.items || [])
     .filter((item) => item.is_approved !== false && resolveBulkLineQty(bulk, item) > 0)
-    .map((item) => {
+    .flatMap((item) => {
       const qty = resolveBulkLineQty(bulk, item);
       const unitMrp = Number(item.franchise_mrp_snapshot) || 0;
       const unitFranchise = Number(item.franchise_unit_price_snapshot) || 0;
       const unitSpecial = Number(item.variant?.special_price) || 0;
-      const lineMrp = roundMoney(unitMrp * qty);
-      const lineFranchise =
-        item.franchise_line_value_snapshot != null &&
-        Number.isFinite(Number(item.franchise_line_value_snapshot))
-          ? roundMoney(Number(item.franchise_line_value_snapshot))
-          : roundMoney(unitFranchise * qty);
-      const comboApplied = item.franchise_combo_applied === true;
-      return {
+      const segments = expandFranchiseBillSegments({
+        quantity: qty,
+        franchise_unit_price_snapshot: item.franchise_unit_price_snapshot,
+        franchise_combo_applied: item.franchise_combo_applied,
+        franchise_combo_unit_price: item.franchise_combo_unit_price,
+        franchise_combo_units: item.franchise_combo_units,
+        franchise_normal_units: item.franchise_normal_units,
+      });
+      return segments.map((seg) => ({
         product_name: item.variant?.product?.name,
         sku: item.variant?.sku || item.variant?.product_code,
         hsn_code: item.variant?.product?.hsn_code,
         batch_number: item.batch_number || '',
-        quantity: qty,
+        quantity: seg.quantity,
         unit_mrp: unitMrp,
         unit_special_price: unitSpecial,
         unit_franchise_price: unitFranchise,
-        unit_combo_price:
-          comboApplied && item.franchise_combo_unit_price != null
-            ? Number(item.franchise_combo_unit_price)
-            : null,
-        combo_applied: comboApplied,
-        line_mrp_total: lineMrp,
-        line_franchise_total: lineFranchise,
+        unit_combo_price: seg.unit_combo_price,
+        combo_applied: seg.combo_applied,
+        combo_units: seg.combo_units,
+        normal_units: seg.normal_units,
+        unit_charged_price: seg.unit_charged_price,
+        line_mrp_total: roundMoney(unitMrp * seg.quantity),
+        line_franchise_total: seg.line_franchise_total,
         ...lineMetaFromVariant(item.variant),
-      };
+      }));
     });
 
 const computeFranchiseBillTotals = (lines) => {

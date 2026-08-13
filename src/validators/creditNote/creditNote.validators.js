@@ -15,6 +15,17 @@ const createCreditNoteValidator = [
   body('remarks').optional().isString().trim().isLength({ max: 500 }),
   body('refund_amount').optional().isFloat({ min: 0 }),
   body('restore_stock').optional().isBoolean().toBoolean(),
+  body('returning_shop_id').optional().isString().trim().notEmpty(),
+  body('shop_id').optional().isString().trim().notEmpty(),
+];
+
+const listOriginalBillsForReturnValidator = [
+  query('q').optional().isString().trim().isLength({ max: 80 }),
+  query('bill_number').optional().isString().trim().isLength({ max: 80 }),
+  query('customer_id').optional().isString().trim(),
+  query('customer_mobile').optional().isString().trim().isLength({ max: 15 }),
+  query('shop_id').optional().isString().trim(),
+  query('returning_shop_id').optional().isString().trim(),
 ];
 
 const listCreditNotesValidator = [
@@ -30,9 +41,16 @@ const listCreditNotesValidator = [
 ];
 
 const lookupCreditNoteValidator = [
-  query('credit_note_number').isString().trim().notEmpty(),
+  query('credit_note_number').optional().isString().trim(),
+  query('original_bill_number').optional().isString().trim(),
+  query('q').optional().isString().trim(),
   query('redeeming_shop_id').optional().isString().trim(),
   query('shop_id').optional().isString().trim(),
+  query().custom((_, { req }) => {
+    const q = req.query || {};
+    if (q.credit_note_number || q.original_bill_number || q.q) return true;
+    throw new Error('credit_note_number or original_bill_number is required');
+  }),
 ];
 
 const redeemCreditNoteValidator = [
@@ -46,6 +64,8 @@ const refundCreditNoteValidator = [
   body('refund_amount').isFloat({ min: 0.01 }),
   body('refund_method').isIn(PAYMENT_METHODS.filter((m) => m !== 'CREDIT_NOTE_REDEMPTION')),
   body('reference_no').optional().isString().trim().isLength({ max: 100 }),
+  body('shop_id').optional().isString().trim().notEmpty(),
+  body('refunding_shop_id').optional().isString().trim().notEmpty(),
 ];
 
 const cancelCreditNoteValidator = [
@@ -58,6 +78,7 @@ module.exports = {
   creditNoteIdParam,
   createCreditNoteValidator,
   listCreditNotesValidator,
+  listOriginalBillsForReturnValidator,
   lookupCreditNoteValidator,
   redeemCreditNoteValidator,
   refundCreditNoteValidator,

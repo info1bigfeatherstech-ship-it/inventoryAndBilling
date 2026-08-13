@@ -163,41 +163,45 @@ const formatGstPercent = (pct) => {
   return n % 1 === 0 ? `${n}%` : `${n.toFixed(2)}%`;
 };
 
-const PRICE_COL_W = 55;
+const sumColWidths = (cols) => cols.reduce((sum, col) => sum + col.w, 0);
 
-const buildFranchiseGstCols = () => [
-  { key: 'sno', label: 'S.No.', w: 22 },
-  { key: 'product', label: 'Product Name', w: 88, isProduct: true },
-  { key: 'brand', label: 'Brand', w: 38 },
-  { key: 'warranty', label: 'Warranty', w: 38 },
-  { key: 'hsn', label: 'HSN', w: 34 },
-  { key: 'gst', label: 'GST %', w: 28 },
-  { key: 'qty', label: 'Qty', w: 22 },
-  { key: 'mrp', label: 'MRP', w: 48 },
-  { key: 'special', labelLines: ['Spl/Sale', 'Price'], w: 48 },
-  { key: 'fprice', labelLines: ['Franchise', 'Price'], w: 48 },
-  { key: 'combo', labelLines: ['Combo', 'Price'], w: 48 },
-  { key: 'tfprice', labelLines: ['Total', 'Franchise', 'Price'], w: 51 },
-];
+const withAmountCol = (cols) => {
+  const used = sumColWidths(cols);
+  return [...cols, { key: 'tfprice', label: 'Amount', w: Math.max(48, W - used) }];
+};
 
-const buildFranchiseNonGstCols = () => [
-  { key: 'sno', label: 'S.No.', w: 22 },
-  { key: 'product', label: 'Product Name', w: 100, isProduct: true },
-  { key: 'brand', label: 'Brand', w: 42 },
-  { key: 'warranty', label: 'Warranty', w: 42 },
-  { key: 'qty', label: 'Qty', w: 24 },
-  { key: 'mrp', label: 'MRP', w: 52 },
-  { key: 'special', labelLines: ['Spl/Sale', 'Price'], w: 52 },
-  { key: 'fprice', labelLines: ['Franchise', 'Price'], w: 52 },
-  { key: 'combo', labelLines: ['Combo', 'Price'], w: 52 },
-  { key: 'tfprice', labelLines: ['Total', 'Franchise', 'Price'], w: 55 },
-];
+/** Columns always sum to page width W so the table lines up with the totals box. */
+const buildFranchiseGstCols = () =>
+  withAmountCol([
+    { key: 'sno', label: 'S.No.', w: 26 },
+    { key: 'product', label: 'Product Name', w: 108, isProduct: true },
+    { key: 'brand', label: 'Brand', w: 46 },
+    { key: 'warranty', label: 'Warranty', w: 40 },
+    { key: 'hsn', label: 'HSN', w: 36 },
+    { key: 'gst', label: 'GST %', w: 34 },
+    { key: 'qty', label: 'Qty', w: 28 },
+    { key: 'mrp', label: 'MRP', w: 46 },
+    { key: 'special', labelLines: ['Spl/Sale', 'Price'], w: 52 },
+    { key: 'fprice', labelLines: ['F.', 'Price'], w: 48 },
+  ]);
+
+const buildFranchiseNonGstCols = () =>
+  withAmountCol([
+    { key: 'sno', label: 'S.No.', w: 26 },
+    { key: 'product', label: 'Product Name', w: 128, isProduct: true },
+    { key: 'brand', label: 'Brand', w: 54 },
+    { key: 'warranty', label: 'Warranty', w: 48 },
+    { key: 'qty', label: 'Qty', w: 30 },
+    { key: 'mrp', label: 'MRP', w: 52 },
+    { key: 'special', labelLines: ['Spl/Sale', 'Price'], w: 56 },
+    { key: 'fprice', labelLines: ['F.', 'Price'], w: 52 },
+  ]);
 
 const getFranchiseGstCols = () => buildFranchiseGstCols();
 
 const getFranchiseNonGstCols = () => buildFranchiseNonGstCols();
 
-const isPriceCol = (key) => ['mrp', 'special', 'fprice', 'combo', 'tfprice'].includes(key);
+const isPriceCol = (key) => ['mrp', 'special', 'fprice', 'tfprice'].includes(key);
 
 /** Short numeric / code cols — single line, may shrink slightly. */
 const isCompactCol = (key) => ['sno', 'hsn', 'gst', 'qty'].includes(key);
@@ -223,12 +227,14 @@ const cellValueForLine = (line, col, rowIndex) => {
       return fmtNum(line.unit_mrp);
     case 'special':
       return fmtNum(line.unit_special_price);
-    case 'fprice':
-      return fmtNum(line.unit_franchise_price);
-    case 'combo':
-      return line.combo_applied && line.unit_combo_price != null
-        ? fmtNum(line.unit_combo_price)
-        : '';
+    case 'fprice': {
+      const p =
+        line.unit_charged_price != null ? line.unit_charged_price : line.unit_franchise_price;
+      const n = Number(p);
+      if (!Number.isFinite(n)) return '-';
+      if (Math.abs(n - Math.round(n)) < 0.001) return String(Math.round(n));
+      return fmtNum(n);
+    }
     case 'tfprice':
       return fmtNum(line.line_franchise_total);
     default:
@@ -252,8 +258,7 @@ const drawFranchiseTable = (pdf, startY, cols, lines, { isGst = false, isEstimat
   const cellSize = DETAIL_SIZE;
   const rowH = 40;
 
-  // Stacked headers (Total / Franchise / Price) at DETAIL_SIZE.
-  const headerH = 38;
+  const headerH = 28;
 
   const colWidths = cols.map((c) => c.w);
 

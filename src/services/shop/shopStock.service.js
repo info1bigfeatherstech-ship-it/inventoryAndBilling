@@ -203,6 +203,15 @@ const ShopStockService = {
           );
         }
 
+        if (after > before) {
+          throw new AppError(
+            `Shop stock cannot be increased from Adjust Stock (current: ${before}). Request stock from the warehouse instead.`,
+            409,
+            'SHOP_STOCK_INCREASE_FORBIDDEN',
+            { available: before, requested: after }
+          );
+        }
+
         const row = await tx.shopStock.upsert({
           where: { shop_id_variant_id: { shop_id: resolvedShopId, variant_id: variantId } },
           update: {

@@ -4,8 +4,16 @@
  * F.Price = totalCost + max(0, specialPrice - totalCost) × markup%
  * where totalCost = purchase_price + expenses
  * markup% is org setting: 20 | 40 | 60
+ * Final F.Price is nearest rupee (half-up) for transfer bills / catalog.
  */
 const { roundMoney } = require('./billing.utils');
+
+/** Nearest rupee, half-up (31.2 → 31, 31.5 → 32). Transfer F.Price only. */
+const roundFranchiseRupee = (value) => {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  return Math.round(n);
+};
 
 const ALLOWED_FRANCHISE_MARKUP_PERCENTS = [20, 40, 60];
 const DEFAULT_FRANCHISE_MARKUP_PERCENT = 40;
@@ -36,21 +44,28 @@ const resolveVariantSpecialPrice = (variant) => {
 };
 
 /**
- * Franchise unit price per variant.
- * Markup % applies to (special − totalCost), then added to totalCost.
- * If special ≤ totalCost, gap is treated as 0 (no error) → F.Price = totalCost.
- *
- * @param {object} variant
- * @param {number} markupPercent
+ * Franchise unit price from an explicit selling reference (special or combo unit).
+ * F.Price = totalCost + max(0, sellingPrice − totalCost) × markup%
+ * If selling ≤ totalCost, gap is 0 → F.Price = totalCost.
  */
-const calculateFranchiseUnitPrice = (variant, markupPercent) => {
+const calculateFranchiseUnitPriceFromSelling = (variant, markupPercent, sellingPrice) => {
   const totalCost = resolveVariantBaseCost(variant);
-  const special = resolveVariantSpecialPrice(variant);
+  const selling = roundMoney(Math.max(0, Number(sellingPrice) || 0));
   const pct = resolveFranchiseMarkupPercent(markupPercent);
-  const gap = Math.max(0, special - totalCost);
+  const gap = Math.max(0, selling - totalCost);
   const markupAmount = roundMoney(gap * (pct / 100));
-  return roundMoney(totalCost + markupAmount);
+  return roundFranchiseRupee(totalCost + markupAmount);
 };
+
+/**
+ * Franchise unit price per variant using special price as the selling reference.
+ */
+const calculateFranchiseUnitPrice = (variant, markupPercent) =>
+  calculateFranchiseUnitPriceFromSelling(
+    variant,
+    markupPercent,
+    resolveVariantSpecialPrice(variant)
+  );
 
 /**
  * Snapshot franchise pricing on a transfer line at approve / dispatch.
@@ -78,8 +93,10 @@ module.exports = {
   ALLOWED_FRANCHISE_MARKUP_PERCENTS,
   DEFAULT_FRANCHISE_MARKUP_PERCENT,
   resolveFranchiseMarkupPercent,
+  roundFranchiseRupee,
   resolveVariantBaseCost,
   resolveVariantSpecialPrice,
+  calculateFranchiseUnitPriceFromSelling,
   calculateFranchiseUnitPrice,
   snapshotFranchiseTransferPricing,
   isWarehouseInternalRole,

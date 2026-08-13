@@ -225,14 +225,185 @@ const applyCreditNotesOnBill = async (
   return { creditApplied: totalApplied, allocations };
 };
 
+const RETURN_BILL_SELECT = {
+  bill_id: true,
+  bill_number: true,
+  shop_id: true,
+  customer_id: true,
+  customer_mobile: true,
+  customer_name: true,
+  bill_type: true,
+  total_amount: true,
+  created_at: true,
+  is_cancelled: true,
+  shop: { select: { shop_id: true, shop_name: true, shop_code: true } },
+  items: {
+    select: {
+      variant_id: true,
+      product_id: true,
+      quantity: true,
+      unit_price: true,
+      line_total: true,
+      variant: {
+        select: {
+          sku: true,
+          product_code: true,
+          product: { select: { name: true } },
+        },
+      },
+      product: { select: { name: true } },
+    },
+  },
+};
+
+const attachRemainingReturnQty = async (bills) => {
+  const list = Array.isArray(bills) ? bills : [];
+  if (!list.length) return [];
+
+  const returnedMaps = await Promise.all(
+    list.map((bill) => getReturnedQuantitiesForBill(bill.bill_id))
+  );
+
+  return list.map((bill, idx) => {
+    const returned = returnedMaps[idx] || new Map();
+    const items = (bill.items || []).map((item) => {
+      const already = returned.get(item.variant_id) || 0;
+      const remaining_quantity = Math.max(0, Number(item.quantity || 0) - already);
+      return {
+        ...item,
+        already_returned: already,
+        remaining_quantity,
+        product_name: item.variant?.product?.name || item.product?.name || '',
+      };
+    });
+    return {
+      ...bill,
+      items,
+      remaining_return_qty: items.reduce((s, i) => s + i.remaining_quantity, 0),
+    };
+  });
+};
+
 const CreditNoteService = {
   applyCreditNotesOnBill,
 
   /**
+   * Exact/customer-scoped original bills for credit-note create.
+   * Does not open other shops' full bill lists — only matched customer/bill_number.
+   */
+  async listOriginalBillsForReturn(filters, user) {
+    const returningShopId = await resolveBillingShopId(
+      user,
+      filters.returning_shop_id || filters.shop_id
+    );
+    await assertBillWriteAccess(returningShopId, user);
+
+    const q = String(filters.q || '').trim();
+    const billNumber = String(filters.bill_number || q || '').trim();
+    const customerId = String(filters.customer_id || '').trim();
+    const qDigits = String(filters.q || filters.customer_mobile || '').replace(/\D/g, '').slice(-10);
+    const customerMobile = String(filters.customer_mobile || '').replace(/\D/g, '').slice(-10) ||
+      (qDigits.length === 10 ? qDigits : '');
+
+    if (!billNumber && !customerId && !customerMobile) {
+      throw new AppError(
+        'Provide bill_number, customer_id, customer_mobile, or q',
+        400,
+        'RETURN_BILL_FILTER_REQUIRED'
+      );
+    }
+
+    const baseWhere = {
+      is_cancelled: false,
+      bill_type: { not: 'NON_LISTED_BILL' },
+    };
+
+    const queries = [];
+    if (filters.q) {
+      queries.push(
+        prisma.bill.findMany({
+          where: {
+            ...baseWhere,
+            bill_number: { equals: billNumber, mode: 'insensitive' },
+          },
+          take: 1,
+          orderBy: { created_at: 'desc' },
+          select: RETURN_BILL_SELECT,
+        })
+      );
+      if (customerMobile.length === 10) {
+        queries.push(
+          prisma.bill.findMany({
+            where: { ...baseWhere, customer_mobile: { contains: customerMobile } },
+            take: 50,
+            orderBy: { created_at: 'desc' },
+            select: RETURN_BILL_SELECT,
+          })
+        );
+      }
+    } else if (filters.bill_number) {
+      queries.push(
+        prisma.bill.findMany({
+          where: {
+            ...baseWhere,
+            bill_number: { equals: String(filters.bill_number).trim(), mode: 'insensitive' },
+          },
+          take: 1,
+          orderBy: { created_at: 'desc' },
+          select: RETURN_BILL_SELECT,
+        })
+      );
+    } else if (customerId) {
+      queries.push(
+        prisma.bill.findMany({
+          where: { ...baseWhere, customer_id: customerId },
+          take: 50,
+          orderBy: { created_at: 'desc' },
+          select: RETURN_BILL_SELECT,
+        })
+      );
+    } else {
+      queries.push(
+        prisma.bill.findMany({
+          where: { ...baseWhere, customer_mobile: { contains: customerMobile } },
+          take: 50,
+          orderBy: { created_at: 'desc' },
+          select: RETURN_BILL_SELECT,
+        })
+      );
+    }
+
+    const batches = await Promise.all(queries);
+    const seen = new Set();
+    const bills = [];
+    for (const batch of batches) {
+      for (const bill of batch) {
+        if (seen.has(bill.bill_id)) continue;
+        seen.add(bill.bill_id);
+        bills.push(bill);
+      }
+    }
+
+    const withRemaining = await attachRemainingReturnQty(bills);
+    return {
+      returning_shop_id: returningShopId,
+      bills: withRemaining,
+    };
+  },
+
+  /**
    * Create credit note from an original bill (product return).
+   * Stock is restored to the returning shop (issuer), not necessarily the original sale shop.
    */
   async createCreditNote(data, user) {
     try {
+      const returningShopId = await resolveBillingShopId(
+        user,
+        data.returning_shop_id || data.shop_id
+      );
+      await assertBillWriteAccess(returningShopId, user);
+      await assertShopActive(returningShopId);
+
       const bill = await prisma.bill.findUnique({
         where: { bill_id: data.original_bill_id },
         include: {
@@ -254,8 +425,9 @@ const CreditNoteService = {
       if (bill.is_cancelled) {
         throw new AppError('Cannot create credit note for a cancelled bill', 409, 'BILL_CANCELLED');
       }
-
-      await assertBillWriteAccess(bill.shop_id, user);
+      if (bill.bill_type === 'NON_LISTED_BILL') {
+        throw new AppError('Cannot create a credit note for a non-listed bill', 409, 'INVALID_RETURN_BILL');
+      }
 
       if (!Array.isArray(data.items) || !data.items.length) {
         throw new AppError('At least one return item is required', 400, 'ITEMS_REQUIRED');
@@ -272,6 +444,9 @@ const CreditNoteService = {
 
       const computedLines = [];
       for (const item of data.items) {
+        const qty = Number(item.quantity);
+        if (!Number.isInteger(qty) || qty <= 0) continue;
+
         const variant = await loadVariant(item.variant_id);
         const billLine = billLineByVariant.get(item.variant_id);
         if (!billLine) {
@@ -280,11 +455,6 @@ const CreditNoteService = {
             409,
             'RETURN_ITEM_NOT_ON_BILL'
           );
-        }
-
-        const qty = Number(item.quantity);
-        if (!Number.isInteger(qty) || qty <= 0) {
-          throw new AppError('Return quantity must be a positive integer', 400, 'INVALID_QUANTITY');
         }
 
         const prior = alreadyReturned.get(item.variant_id) || 0;
@@ -297,7 +467,7 @@ const CreditNoteService = {
           );
         }
 
-        const unitPrice = item.unit_price != null ? Number(item.unit_price) : billLine.unit_price;
+        const unitPrice = Number(billLine.unit_price);
         const amounts = calculateLineAmounts({
           quantity: qty,
           unitPrice,
@@ -316,6 +486,10 @@ const CreditNoteService = {
           unit_price: unitPrice,
           gst_percent: billLine.gst_percent,
         });
+      }
+
+      if (!computedLines.length) {
+        throw new AppError('At least one return item with quantity > 0 is required', 400, 'ITEMS_REQUIRED');
       }
 
       let subtotal = roundMoney(computedLines.reduce((s, l) => s + l.line_subtotal, 0));
@@ -338,13 +512,36 @@ const CreditNoteService = {
       const restoreStock = data.restore_stock !== false;
 
       const result = await prisma.$transaction(async (tx) => {
+        const lockedBill = await tx.bill.findUnique({
+          where: { bill_id: bill.bill_id },
+          select: { bill_id: true, is_cancelled: true },
+        });
+        if (!lockedBill) throw new AppError('Original bill not found', 404, 'BILL_NOT_FOUND');
+        if (lockedBill.is_cancelled) {
+          throw new AppError('Cannot create credit note for a cancelled bill', 409, 'BILL_CANCELLED');
+        }
+
+        const returnedInTx = await getReturnedQuantitiesForBill(bill.bill_id, tx);
+        for (const line of computedLines) {
+          const billLine = billLineByVariant.get(line.variant_id);
+          const prior = returnedInTx.get(line.variant_id) || 0;
+          if (prior + line.quantity > billLine.quantity) {
+            throw new AppError(
+              `Return quantity exceeds sold quantity for variant ${line.variant_id}. Sold: ${billLine.quantity}, already returned: ${prior}, requested: ${line.quantity}`,
+              409,
+              'RETURN_QUANTITY_EXCEEDED',
+              { sold: billLine.quantity, already_returned: prior, requested: line.quantity }
+            );
+          }
+        }
+
         const cnNumber = await generateCreditNoteNumber(tx);
 
         const creditNote = await tx.creditNote.create({
           data: {
             credit_note_number: cnNumber,
             original_bill_id: bill.bill_id,
-            shop_id: bill.shop_id,
+            shop_id: returningShopId,
             customer_id: bill.customer_id,
             customer_mobile: bill.customer_mobile || '',
             customer_name: bill.customer_name,
@@ -376,7 +573,7 @@ const CreditNoteService = {
           for (const line of computedLines) {
             await ShopStockService.restoreStockForSale(
               tx,
-              bill.shop_id,
+              returningShopId,
               line.variant_id,
               line.quantity,
               line.low_stock_threshold
@@ -387,7 +584,7 @@ const CreditNoteService = {
               variantId: line.variant_id,
               movementType: 'RETURN',
               quantity: line.quantity,
-              toShopId: bill.shop_id,
+              toShopId: returningShopId,
               referenceId: creditNote.credit_note_id,
               referenceType: 'CREDIT_NOTE',
               createdBy: user.userId,
@@ -407,6 +604,8 @@ const CreditNoteService = {
         credit_note_id: result.credit_note_id,
         credit_note_number: result.credit_note_number,
         credit_amount: result.credit_amount,
+        original_shop_id: bill.shop_id,
+        returning_shop_id: returningShopId,
         user_id: user.userId,
       });
 
@@ -414,6 +613,8 @@ const CreditNoteService = {
         credit_note_id: result.credit_note_id,
         credit_note_number: result.credit_note_number,
         original_bill_number: bill.bill_number,
+        original_shop_id: bill.shop_id,
+        returning_shop_id: returningShopId,
         credit_amount: result.credit_amount,
         status: result.status,
         lines: result.lines,
@@ -477,30 +678,73 @@ const CreditNoteService = {
   },
 
   /**
-   * Look up a credit note by number for use at any shop counter (org-wide pool).
+   * Look up a credit note by CN number or original bill number (org-wide pool).
    */
   async lookupCreditNoteByNumber(filters, user) {
-    const number = String(filters.credit_note_number || '').trim();
-    if (!number) {
-      throw new AppError('credit_note_number is required', 400, 'CREDIT_NOTE_NUMBER_REQUIRED');
+    const cnNumber = String(filters.credit_note_number || '').trim();
+    const billNumber = String(filters.original_bill_number || '').trim();
+    const q = String(filters.q || '').trim();
+    const search = cnNumber || billNumber || q;
+    if (!search) {
+      throw new AppError(
+        'credit_note_number or original_bill_number is required',
+        400,
+        'CREDIT_NOTE_LOOKUP_REQUIRED'
+      );
     }
 
     await assertCreditNoteLookupAccess(user, filters.redeeming_shop_id || filters.shop_id);
 
-    const cn = await prisma.creditNote.findFirst({
-      where: { credit_note_number: { equals: number, mode: 'insensitive' } },
+    const formatLookup = (cn) => {
+      const balance = getCreditNoteBalance(cn);
+      const redeemable = REDEEMABLE_STATUSES.has(cn.status) && balance > 0;
+      return {
+        ...formatCreditNoteResponse(cn),
+        redeemable,
+        origin_shop: cn.shop,
+      };
+    };
+
+    let cn = await prisma.creditNote.findFirst({
+      where: { credit_note_number: { equals: search, mode: 'insensitive' } },
       select: CREDIT_NOTE_SELECT,
     });
 
-    if (!cn) throw new AppError('Credit note not found', 404, 'CREDIT_NOTE_NOT_FOUND');
+    if (cn) {
+      return formatLookup(cn);
+    }
 
-    const balance = getCreditNoteBalance(cn);
-    const redeemable = REDEEMABLE_STATUSES.has(cn.status) && balance > 0;
+    const bill = await prisma.bill.findFirst({
+      where: { bill_number: { equals: search, mode: 'insensitive' } },
+      select: { bill_id: true, bill_number: true },
+    });
+    if (!bill) throw new AppError('Credit note not found', 404, 'CREDIT_NOTE_NOT_FOUND');
+
+    const related = await prisma.creditNote.findMany({
+      where: {
+        original_bill_id: bill.bill_id,
+        status: { in: [...REDEEMABLE_STATUSES] },
+      },
+      orderBy: { created_at: 'desc' },
+      select: CREDIT_NOTE_SELECT,
+    });
+    const redeemableRelated = related
+      .map(formatLookup)
+      .filter((row) => row.redeemable);
+
+    if (!redeemableRelated.length) {
+      throw new AppError(
+        'No redeemable credit note found for this bill',
+        404,
+        'CREDIT_NOTE_NOT_FOUND'
+      );
+    }
 
     return {
-      ...formatCreditNoteResponse(cn),
-      redeemable,
-      origin_shop: cn.shop,
+      ...redeemableRelated[0],
+      related_credit_notes: redeemableRelated,
+      looked_up_by: 'original_bill_number',
+      original_bill_number: bill.bill_number,
     };
   },
 
@@ -630,7 +874,11 @@ const CreditNoteService = {
     try {
       const cn = await prisma.creditNote.findUnique({ where: { credit_note_id: creditNoteId } });
       if (!cn) throw new AppError('Credit note not found', 404, 'CREDIT_NOTE_NOT_FOUND');
-      await assertBillWriteAccess(cn.shop_id, user);
+      const refundingShopId = await resolveBillingShopId(
+        user,
+        data.refunding_shop_id || data.shop_id || (user.role === 'SUPER_ADMIN' ? cn.shop_id : undefined)
+      );
+      await assertBillWriteAccess(refundingShopId, user);
 
       if (!['ACTIVE', 'PARTIALLY_REDEEMED'].includes(cn.status)) {
         throw new AppError(`Credit note cannot be refunded in status ${cn.status}`, 409, 'INVALID_CREDIT_NOTE_STATUS');
