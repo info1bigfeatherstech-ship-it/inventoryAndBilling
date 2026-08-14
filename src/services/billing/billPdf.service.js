@@ -134,6 +134,11 @@ const lineMrp = (item) => {
 };
 
 const lineSpecialPrice = (item) => {
+  // Charged special for this bill (cashier may override). Catalog remains on variant.
+  if (!item?.combo_applied) {
+    const charged = Number(item.unit_price);
+    if (Number.isFinite(charged) && charged >= 0) return charged;
+  }
   const snap = item.special_unit_price;
   if (snap != null && Number.isFinite(Number(snap)) && Number(snap) >= 0) {
     return Number(snap);

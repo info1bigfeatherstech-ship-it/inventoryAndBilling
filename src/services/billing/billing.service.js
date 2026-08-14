@@ -287,12 +287,13 @@ const BillingService = {
             const variant = variantMap.get(item.variant_id);
             const priceType = item.price_type || 'SPECIAL';
             const specialOnly = priceType === 'SPECIAL' || priceType === 'RETAIL';
+            const overridden = item.price_overridden === true;
             return {
               line_key: `${item.variant_id}__${index}`,
               variant_id: item.variant_id,
               quantity: Number(item.quantity),
               special_price: Number(variant.special_price),
-              combo_eligible: specialOnly ? Boolean(variant.combo_eligible) : false,
+              combo_eligible: specialOnly && !overridden ? Boolean(variant.combo_eligible) : false,
             };
           });
           const priced = applyComboPricingToLines(comboInput, activeComboRules);
@@ -368,19 +369,43 @@ const BillingService = {
 
         const priceType = item.price_type || 'SPECIAL';
         const comboRow = comboPricedByKey.get(`${item.variant_id}__${index}`);
-        let unitPrice = Number(item.unit_price);
+        const catalogSpecial = Number(variant.special_price);
+        const clientPrice = Number(item.unit_price);
+        const priceOverridden = item.price_overridden === true;
+        let unitPrice;
 
-        // Server-authoritative pricing for SPECIAL: special_price + active combo rules.
-        if (priceType === 'SPECIAL' || priceType === 'RETAIL') {
+        if (priceOverridden) {
+          // Counter override for this bill only — never write back to ProductVariant.special_price.
+          if (!Number.isFinite(clientPrice) || clientPrice < 0) {
+            throw new AppError('unit_price must be >= 0', 400, 'INVALID_UNIT_PRICE');
+          }
+          unitPrice = roundMoney(clientPrice);
+        } else if (priceType === 'SPECIAL' || priceType === 'RETAIL') {
+          // Server-authoritative pricing: catalog special + active combo rules.
           if (comboRow && Number.isFinite(comboRow.unit_price)) {
             unitPrice = Number(comboRow.unit_price);
-          } else if (Number.isFinite(Number(variant.special_price))) {
-            unitPrice = Number(variant.special_price);
+          } else if (Number.isFinite(catalogSpecial)) {
+            unitPrice = catalogSpecial;
+          } else if (Number.isFinite(clientPrice) && clientPrice >= 0) {
+            unitPrice = clientPrice;
           }
+        } else if (Number.isFinite(clientPrice) && clientPrice >= 0) {
+          unitPrice = clientPrice;
         }
 
-        if (Number.isNaN(unitPrice) || unitPrice < 0) {
+        if (Number.isNaN(Number(unitPrice)) || unitPrice == null || unitPrice < 0) {
           throw new AppError('unit_price must be >= 0', 400, 'INVALID_UNIT_PRICE');
+        }
+
+        unitPrice = roundMoney(unitPrice);
+
+        const catalogMrp = Number(variant.mrp);
+        if (Number.isFinite(catalogMrp) && catalogMrp > 0 && unitPrice > catalogMrp + 0.005) {
+          throw new AppError(
+            `Sell price cannot exceed MRP (₹${catalogMrp})`,
+            400,
+            'UNIT_PRICE_ABOVE_MRP'
+          );
         }
 
         const lineGstType =
@@ -403,8 +428,8 @@ const BillingService = {
           quantity: qty,
           unit_price: unitPrice,
           mrp_unit_price: Number(variant.mrp) || unitPrice,
-          special_unit_price: Number.isFinite(Number(variant.special_price))
-            ? Number(variant.special_price)
+          special_unit_price: Number.isFinite(catalogSpecial)
+            ? catalogSpecial
             : unitPrice,
           price_type: priceType,
           gst_percent: variant.product.gst_percent,
@@ -412,12 +437,13 @@ const BillingService = {
           hsn_code: variant.product.hsn_code,
           product_name: variant.product.name,
           low_stock_threshold: variant.low_stock_threshold,
-          combo_applied: Boolean(comboRow?.combo_applied),
-          combo_unit_price: comboRow?.combo_applied
-            ? (comboRow?.combo_unit_price != null
-              ? Number(comboRow.combo_unit_price)
-              : unitPrice)
-            : null,
+          combo_applied: priceOverridden ? false : Boolean(comboRow?.combo_applied),
+          combo_unit_price:
+            !priceOverridden && comboRow?.combo_applied
+              ? (comboRow?.combo_unit_price != null
+                ? Number(comboRow.combo_unit_price)
+                : unitPrice)
+              : null,
           ...amounts,
         };
       });

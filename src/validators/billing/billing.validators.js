@@ -21,8 +21,9 @@ const createBillValidator = [
   // Inventory items (GST / NON_GST / ESTIMATE)
   body('items.*.variant_id').optional({ nullable: true }).isString().trim(),
   body('items.*.quantity').isInt({ min: 1 }),
-  body('items.*.unit_price').isFloat({ min: 0 }),
+  body('items.*.unit_price').isFloat({ min: 0, max: 9999999.99 }),
   body('items.*.price_type').optional().isIn(PRICE_TYPES),
+  body('items.*.price_overridden').optional().isBoolean(),
   body('items.*.discount').optional().isFloat({ min: 0 }),
   // Manual item fields (NON_LISTED_BILL only)
   body('items.*.item_name').optional({ nullable: true }).isString().trim().isLength({ min: 1, max: 200 }),

@@ -33,6 +33,8 @@ enum MovementType {
   SALES
   RETURN
   ADJUSTMENT
+  /// Shop returning stock to warehouse (additive; unused by legacy transfer paths).
+  SHOP_TO_WH
 }
 
 /// Dispatch vs receive leg for multi-step transfers (WH→Shop). Null for single-step movements.
@@ -190,6 +192,16 @@ enum TransferRequestType {
   SHOP_TO_SHOP
 }
 
+/// Shop → warehouse stock return workflow (isolated from TransferRequestStatus consumers).
+enum StockReturnStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  DISPATCHED
+  COMPLETED
+  CANCELLED
+}
+
 enum TransferPriority {
   NORMAL
   HIGH
@@ -263,6 +275,7 @@ model Warehouse {
   transfers_to         TransferRequest[] @relation("TransferToWarehouse")
   bulk_transfers_from  BulkTransferRequest[] @relation("BulkTransferFromWarehouse")
   bulk_transfers_to    BulkTransferRequest[] @relation("BulkTransferToWarehouse")
+  shop_warehouse_returns_to ShopWarehouseReturn[] @relation("ShopWarehouseReturnToWarehouse")
   warehouse_expenses   WarehouseExpense[]
   vendor_payments      VendorPayment[]
   /// Online / e-comm fulfillment warehouse when selected in AppSettings.
@@ -305,6 +318,7 @@ model Shop {
   gst_configs   ShopGstRegistration[]
   users         User[]                @relation("UserShopAssignment")
   shop_stocks   ShopStock[]
+  dead_stock_entries ShopDeadStockEntry[]
   bills         Bill[]
   /// Credit notes for returns processed at this shop.
   credit_notes_issued_here CreditNote[] @relation("CreditNoteReturnShop")
@@ -318,6 +332,7 @@ model Shop {
   transfers_to         TransferRequest[] @relation("TransferToShop")
   bulk_transfers_from  BulkTransferRequest[] @relation("BulkTransferFromShop")
   bulk_transfers_to    BulkTransferRequest[] @relation("BulkTransferToShop")
+  shop_warehouse_returns ShopWarehouseReturn[] @relation("ShopWarehouseReturnFromShop")
   product_levels       ShopProductLevel[]
   staff_codes          ShopStaffCode[]
   shop_expenses        ShopExpense[]
@@ -476,6 +491,7 @@ model Product {
   product_stocks ProductStock[]
   purchase_items PurchaseItem[]
   stock_ledgers  StockLedger[]
+  dead_stock_entries ShopDeadStockEntry[]
   bill_lines     BillLineItem[]
   credit_lines   CreditNoteLineItem[]
   debit_note_lines DebitNoteLineItem[] @relation("DebitNoteLineProduct")
@@ -530,9 +546,11 @@ model ProductVariant {
   images         ProductVariantImage[]
   stocks            ProductStock[]
   shop_stocks       ShopStock[]
+  dead_stock_entries ShopDeadStockEntry[]
   stock_ledgers     StockLedger[]
   transfer_requests   TransferRequest[]
   bulk_transfer_items BulkTransferRequestItem[]
+  shop_warehouse_return_items ShopWarehouseReturnItem[]
   shop_product_levels ShopProductLevel[]
   bill_lines          BillLineItem[] @relation("BillLineVariant")
   credit_note_lines   CreditNoteLineItem[]
@@ -629,6 +647,40 @@ model ShopStock {
   @@index([shop_id, quantity_available])
   @@index([variant_id])
   @@map("shop_stocks")
+}
+
+/// Immutable history of shop stock write-offs (Adjust Stock reduce).
+/// Stock leaves shop inventory and is not returned to warehouse — tracked here as dead stock.
+model ShopDeadStockEntry {
+  dead_stock_id String @id @default(cuid())
+
+  shop_id    String
+  product_id String
+  variant_id String
+
+  /// Snapshots so history stays clear if product/code is renamed later.
+  product_name_snapshot String
+  product_code_snapshot String
+
+  quantity_before  Int
+  quantity_reduced Int
+  quantity_after   Int
+
+  reason String
+
+  created_by String
+  created_at DateTime @default(now())
+
+  shop    Shop           @relation(fields: [shop_id], references: [shop_id], onDelete: Restrict)
+  product Product        @relation(fields: [product_id], references: [product_id], onDelete: Restrict)
+  variant ProductVariant @relation(fields: [variant_id], references: [variant_id], onDelete: Restrict)
+  createdByUser User     @relation("DeadStockCreatedBy", fields: [created_by], references: [user_id])
+
+  @@index([shop_id, created_at])
+  @@index([variant_id, created_at])
+  @@index([product_id, created_at])
+  @@index([created_at])
+  @@map("shop_dead_stock_entries")
 }
 
 // ==================== PURCHASE ====================
@@ -1219,6 +1271,7 @@ model User {
 
   purchase_entries_received PurchaseEntry[] @relation("PurchaseReceivedBy")
   stock_ledgers_created     StockLedger[]   @relation("StockLedgerCreatedBy")
+  dead_stock_entries_created ShopDeadStockEntry[] @relation("DeadStockCreatedBy")
   bills_created             Bill[]          @relation("BillCreatedBy")
   bill_payments_collected   BillPayment[]   @relation("BillPaymentCollector")
   credit_notes_created      CreditNote[]    @relation("CreditNoteCreatedBy")
@@ -1244,6 +1297,11 @@ model User {
   bulk_requests_dispatched    BulkTransferRequest[] @relation("BulkTransferDispatcher")
   bulk_requests_received      BulkTransferRequest[] @relation("BulkTransferReceiver")
   bulk_requests_cancelled     BulkTransferRequest[] @relation("BulkTransferCanceller")
+  shop_warehouse_returns_created   ShopWarehouseReturn[] @relation("ShopWarehouseReturnRequester")
+  shop_warehouse_returns_approved  ShopWarehouseReturn[] @relation("ShopWarehouseReturnApprover")
+  shop_warehouse_returns_dispatched ShopWarehouseReturn[] @relation("ShopWarehouseReturnDispatcher")
+  shop_warehouse_returns_received  ShopWarehouseReturn[] @relation("ShopWarehouseReturnReceiver")
+  shop_warehouse_returns_cancelled ShopWarehouseReturn[] @relation("ShopWarehouseReturnCanceller")
 
   google_drive_token   UserGoogleDriveToken?
   backup_settings      BackupClientSettings?
@@ -1464,6 +1522,104 @@ model TransferRequest {
   @@index([requested_by])
   @@index([created_at])
   @@map("transfer_requests")
+}
+
+// ==================== SHOP → WAREHOUSE RETURNS (additive; does not alter transfer tables) ====================
+
+model ShopWarehouseReturn {
+  return_id     String @id @default(cuid())
+  return_number String @unique
+
+  from_shop_id    String
+  to_warehouse_id String
+
+  /// bulk | single — which inbound transfer document this return is against.
+  source_type                   String
+  source_bulk_request_id        String?
+  source_transfer_request_id    String?
+  /// Exact transfer_bill_number when present; else bulk/request number used for lookup.
+  source_bill_number            String?
+  source_reference_number       String?
+
+  status StockReturnStatus @default(REQUESTED)
+
+  return_reason   String?
+  request_remarks String?
+
+  requested_by String
+  requested_at DateTime @default(now())
+
+  approved_by      String?
+  approved_at      DateTime?
+  rejection_reason String?
+
+  dispatched_by String?
+  dispatched_at DateTime?
+
+  received_by     String?
+  received_at     DateTime?
+  receive_remarks String?
+
+  cancelled_by  String?
+  cancelled_at  DateTime?
+  cancel_reason String?
+
+  return_bill_type         TransferBillType?
+  return_bill_number       String?           @unique
+  return_bill_generated_at DateTime?
+
+  items ShopWarehouseReturnItem[]
+
+  from_shop    Shop      @relation("ShopWarehouseReturnFromShop", fields: [from_shop_id], references: [shop_id], onDelete: Restrict)
+  to_warehouse Warehouse @relation("ShopWarehouseReturnToWarehouse", fields: [to_warehouse_id], references: [warehouse_id], onDelete: Restrict)
+  requester    User      @relation("ShopWarehouseReturnRequester", fields: [requested_by], references: [user_id])
+  approver     User?     @relation("ShopWarehouseReturnApprover", fields: [approved_by], references: [user_id])
+  dispatcher   User?     @relation("ShopWarehouseReturnDispatcher", fields: [dispatched_by], references: [user_id])
+  receiver     User?     @relation("ShopWarehouseReturnReceiver", fields: [received_by], references: [user_id])
+  canceller    User?     @relation("ShopWarehouseReturnCanceller", fields: [cancelled_by], references: [user_id])
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([status])
+  @@index([from_shop_id, status])
+  @@index([to_warehouse_id, status])
+  @@index([source_bill_number])
+  @@index([source_bulk_request_id])
+  @@index([source_transfer_request_id])
+  @@index([requested_by])
+  @@index([created_at])
+  @@map("shop_warehouse_returns")
+}
+
+model ShopWarehouseReturnItem {
+  return_item_id String @id @default(cuid())
+  return_id      String
+  variant_id     String
+
+  /// Qty that arrived on the source inbound transfer line (cap for returns).
+  source_received_qty Int
+  /// Qty shop is requesting to return.
+  return_quantity     Int
+  approved_quantity   Int?
+  received_quantity   Int @default(0)
+
+  batch_number String?
+
+  unit_cost_snapshot              Float?
+  line_cost_snapshot              Float?
+  unit_mrp_snapshot               Float?
+  unit_special_price_snapshot     Float?
+  franchise_unit_price_snapshot   Float?
+  franchise_line_value_snapshot   Float?
+  franchise_markup_percent_snapshot Float?
+
+  return_request ShopWarehouseReturn @relation(fields: [return_id], references: [return_id], onDelete: Cascade)
+  variant        ProductVariant      @relation(fields: [variant_id], references: [variant_id])
+
+  @@index([return_id])
+  @@index([variant_id])
+  @@map("shop_warehouse_return_items")
 }
 
 model RefreshToken {

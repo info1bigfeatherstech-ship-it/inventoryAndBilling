@@ -79,8 +79,10 @@ const assertVariantExists = async (variantId) => {
     select: {
       variant_id: true,
       product_id: true,
+      product_code: true,
+      sku: true,
       is_active: true,
-      product: { select: { is_active: true } },
+      product: { select: { is_active: true, name: true, product_code: true } },
     },
   });
 
@@ -242,6 +244,27 @@ const ShopStockService = {
             createdBy: user.userId,
             remarks: `${reason} (${before} → ${after})`,
           });
+
+          // Reduce-only write-off: stock leaves shop and is not returned to WH.
+          if (after < before) {
+            const productName = variant.product?.name || 'Item';
+            const productCode =
+              variant.product_code || variant.product?.product_code || variant.sku || '';
+            await tx.shopDeadStockEntry.create({
+              data: {
+                shop_id: resolvedShopId,
+                product_id: variant.product_id,
+                variant_id: variant.variant_id,
+                product_name_snapshot: productName,
+                product_code_snapshot: productCode,
+                quantity_before: before,
+                quantity_reduced: ledgerQty,
+                quantity_after: after,
+                reason: String(reason).trim() || 'Manual shop stock adjustment',
+                created_by: user.userId || user.user_id,
+              },
+            });
+          }
         }
 
         logger.info('Shop stock updated', {

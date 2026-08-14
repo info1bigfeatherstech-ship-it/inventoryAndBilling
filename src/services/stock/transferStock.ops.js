@@ -562,6 +562,49 @@ const reverseWhToShopDispatch = async (tx, params) => {
   await decrementShopInTransit(tx, toShopId, variant.variant_id, quantity);
 };
 
+/**
+ * Receive shop → warehouse return (stock moves only at WH receive).
+ * Shop available − and warehouse + in one call; single ledger row.
+ */
+const receiveShopToWarehouse = async (tx, params) => {
+  const {
+    variant,
+    fromShopId,
+    toWarehouseId,
+    quantity,
+    batchNumber,
+    referenceId,
+    referenceType,
+    createdBy,
+    remarks,
+  } = params;
+
+  const qty = Number(quantity);
+  if (!Number.isInteger(qty) || qty <= 0) {
+    throw new AppError('Return quantity must be a positive integer', 400, 'TRANSFER_QUANTITY_INVALID');
+  }
+
+  await decrementShopAvailable(tx, fromShopId, variant.variant_id, qty);
+  const batch = normalizeBatch(batchNumber);
+  await addWarehouseStock(tx, variant, toWarehouseId, qty, batch);
+
+  return createStockLedgerEntry(tx, {
+    productId: variant.product_id,
+    variantId: variant.variant_id,
+    movementType: 'SHOP_TO_WH',
+    movementPhase: 'RECEIVE',
+    quantity: qty,
+    fromShopId,
+    toWarehouseId,
+    referenceId,
+    referenceType,
+    batchNumber: batch || null,
+    createdBy,
+    remarks,
+    ...pickLedgerCost(params),
+  });
+};
+
 module.exports = {
   normalizeBatch,
   deductWarehouseStock,
@@ -576,5 +619,6 @@ module.exports = {
   receiveWhToWh,
   reverseWhToShopDispatch,
   reverseWhToWhDispatch,
+  receiveShopToWarehouse,
   validateWarehouseStock,
 };
