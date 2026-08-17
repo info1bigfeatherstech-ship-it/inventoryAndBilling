@@ -558,6 +558,7 @@ model ProductVariant {
   purchase_items      PurchaseItem[]
   inward_items_mapped InwardReceiptItem[] @relation("InwardMappedVariant")
   online_stock_reservation_lines OnlineStockReservationLine[]
+  sale_deals        SaleDeal[]
 
   @@unique([product_id, sku])
   @@unique([product_id, product_code])
@@ -1307,6 +1308,7 @@ model User {
   backup_settings      BackupClientSettings?
   backup_records       BackupRecord[]
   backup_restore_logs  BackupRestoreLog[]
+  sale_deals_created   SaleDeal[]
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
@@ -1886,6 +1888,26 @@ model BackupRestoreLog {
 
   @@index([user_id, created_at])
   @@map("backup_restore_logs")
+}
+
+/// Temporary sale overlay. Does not mutate ProductVariant.special_price.
+/// Live when is_active and (expires_at is null or expires_at >= now). Evaluated at read time.
+model SaleDeal {
+  sale_deal_id         String    @id @default(cuid())
+  variant_id           String
+  sale_price           Float
+  expires_at           DateTime?
+  is_active            Boolean   @default(true)
+  created_by_user_id   String?
+  created_at           DateTime  @default(now())
+  updated_at           DateTime  @updatedAt
+
+  variant    ProductVariant @relation(fields: [variant_id], references: [variant_id], onDelete: Cascade)
+  created_by User?          @relation(fields: [created_by_user_id], references: [user_id], onDelete: SetNull)
+
+  @@index([variant_id, is_active])
+  @@index([is_active, expires_at])
+  @@map("sale_deals")
 }
 
 /// Global combo offers (all shops). Matching is on variant.special_price + combo_eligible.

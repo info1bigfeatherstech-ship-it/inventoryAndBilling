@@ -25,6 +25,7 @@ const { assertVariantImageUploads } = require('../../utils/productMultipart.util
 const CategoryService = require('../category/category.service');
 const VendorService = require('../vendor/vendor.service');
 const bulkTemplateService = require('./bulkTemplate.service');
+const SaleDealService = require('../saleDeal/saleDeal.service');
 const { normalizeUnitOfMeasure } = require('../../constants/unitOfMeasure.constants');
 const {
   CATALOG_FIELD_KEYS,
@@ -1578,6 +1579,12 @@ const ProductService = {
       stock_available: stockAvailable,
       combo_eligible: Boolean(variant.combo_eligible),
     };
+
+    try {
+      await SaleDealService.attachLiveSaleDeals([payload]);
+    } catch {
+      // Fail-soft: barcode billing keeps catalog special.
+    }
 
     return await formatProductForUser(payload, user);
   },

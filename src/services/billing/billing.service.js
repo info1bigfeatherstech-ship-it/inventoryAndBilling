@@ -15,6 +15,7 @@ const CustomerService = require('../customer/customer.service');
 const CreditNoteService = require('../creditNote/creditNote.service');
 const { generateBillPdf } = require('./billPdf.service');
 const ComboRuleService = require('../combo/comboRule.service');
+const SaleDealService = require('../saleDeal/saleDeal.service');
 const { applyComboPricingToLines } = require('../../utils/comboPricing.utils');
 const {
   resolveBillingShopId,
@@ -24,6 +25,7 @@ const {
 } = require('../../utils/billAccess.utils');
 const {
   roundMoney,
+  assertSellPriceNotAboveMrp,
   isIntraStateSupply,
   buildTaxSummaryFromLines,
   calculateLineAmounts,
@@ -217,6 +219,11 @@ const loadVariantsForBill = async (items) => {
   });
 
   const map = new Map(variants.map((v) => [v.variant_id, v]));
+  try {
+    await SaleDealService.attachLiveSaleDeals(variants);
+  } catch (err) {
+    // Fail-soft: catalog special + combo remain authoritative.
+  }
   for (const item of items) {
     const variant = map.get(item.variant_id);
     if (!variant || !variant.is_active || !variant.product.is_active) {
@@ -288,12 +295,13 @@ const BillingService = {
             const priceType = item.price_type || 'SPECIAL';
             const specialOnly = priceType === 'SPECIAL' || priceType === 'RETAIL';
             const overridden = item.price_overridden === true;
+            const onSale = variant.on_sale === true;
             return {
               line_key: `${item.variant_id}__${index}`,
               variant_id: item.variant_id,
               quantity: Number(item.quantity),
               special_price: Number(variant.special_price),
-              combo_eligible: specialOnly && !overridden ? Boolean(variant.combo_eligible) : false,
+              combo_eligible: specialOnly && !overridden && !onSale ? Boolean(variant.combo_eligible) : false,
             };
           });
           const priced = applyComboPricingToLines(comboInput, activeComboRules);
@@ -381,8 +389,10 @@ const BillingService = {
           }
           unitPrice = roundMoney(clientPrice);
         } else if (priceType === 'SPECIAL' || priceType === 'RETAIL') {
-          // Server-authoritative pricing: catalog special + active combo rules.
-          if (comboRow && Number.isFinite(comboRow.unit_price)) {
+          const salePrice = Number(variant.sale_price ?? variant.effective_special_price);
+          if (variant.on_sale === true && Number.isFinite(salePrice) && salePrice > 0) {
+            unitPrice = salePrice;
+          } else if (comboRow && Number.isFinite(comboRow.unit_price)) {
             unitPrice = Number(comboRow.unit_price);
           } else if (Number.isFinite(catalogSpecial)) {
             unitPrice = catalogSpecial;
@@ -398,15 +408,7 @@ const BillingService = {
         }
 
         unitPrice = roundMoney(unitPrice);
-
-        const catalogMrp = Number(variant.mrp);
-        if (Number.isFinite(catalogMrp) && catalogMrp > 0 && unitPrice > catalogMrp + 0.005) {
-          throw new AppError(
-            `Sell price cannot exceed MRP (₹${catalogMrp})`,
-            400,
-            'UNIT_PRICE_ABOVE_MRP'
-          );
-        }
+        assertSellPriceNotAboveMrp(unitPrice, variant.mrp, variant.product?.name || variant.product_code);
 
         const lineGstType =
           billType === 'GST_INVOICE'
@@ -428,18 +430,18 @@ const BillingService = {
           quantity: qty,
           unit_price: unitPrice,
           mrp_unit_price: Number(variant.mrp) || unitPrice,
-          special_unit_price: Number.isFinite(catalogSpecial)
-            ? catalogSpecial
-            : unitPrice,
+          special_unit_price: priceOverridden
+            ? unitPrice
+            : (Number.isFinite(catalogSpecial) ? catalogSpecial : unitPrice),
           price_type: priceType,
           gst_percent: variant.product.gst_percent,
           gst_type: amounts.gst_type,
           hsn_code: variant.product.hsn_code,
           product_name: variant.product.name,
           low_stock_threshold: variant.low_stock_threshold,
-          combo_applied: priceOverridden ? false : Boolean(comboRow?.combo_applied),
+          combo_applied: priceOverridden || variant.on_sale === true ? false : Boolean(comboRow?.combo_applied),
           combo_unit_price:
-            !priceOverridden && comboRow?.combo_applied
+            !priceOverridden && variant.on_sale !== true && comboRow?.combo_applied
               ? (comboRow?.combo_unit_price != null
                 ? Number(comboRow.combo_unit_price)
                 : unitPrice)
@@ -753,6 +755,7 @@ const BillingService = {
       const qty = Number(item.quantity);
       const unitPrice = roundMoney(Number(item.unit_price));
       const mrpUnitPrice = item.mrp != null ? roundMoney(Number(item.mrp)) : unitPrice;
+      assertSellPriceNotAboveMrp(unitPrice, mrpUnitPrice, (item.item_name || '').trim());
       const lineSubtotal = roundMoney(unitPrice * qty);
       return {
         manual_item_name: (item.item_name || '').trim(),

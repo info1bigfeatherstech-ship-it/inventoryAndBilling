@@ -20,6 +20,28 @@ const PRODUCT_GST_TYPES = ['CGST_SGST', 'IGST', 'EXEMPT'];
 
 const roundMoney = (value) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 
+const MRP_PRICE_EPSILON = 0.005;
+
+const sellPriceExceedsMrp = (unitPrice, mrp) => {
+  const cap = Number(mrp);
+  const price = Number(unitPrice);
+  if (!Number.isFinite(cap) || cap <= 0) return false;
+  if (!Number.isFinite(price)) return true;
+  return roundMoney(price) > roundMoney(cap) + MRP_PRICE_EPSILON;
+};
+
+/** Counter / API must never charge above catalog MRP. Does not mutate master prices. */
+const assertSellPriceNotAboveMrp = (unitPrice, mrp, itemLabel = '') => {
+  if (!sellPriceExceedsMrp(unitPrice, mrp)) return;
+  const cap = roundMoney(Number(mrp));
+  const prefix = itemLabel ? `${itemLabel}: ` : '';
+  throw new AppError(
+    `${prefix}Sell price cannot exceed MRP (₹${cap})`,
+    400,
+    'UNIT_PRICE_ABOVE_MRP'
+  );
+};
+
 const normalizeStateCode = (value) => {
   if (value == null || String(value).trim() === '') return null;
   const raw = String(value).trim();
@@ -306,6 +328,8 @@ module.exports = {
   LOYALTY_DISCOUNT_PERCENT,
   PRODUCT_GST_TYPES,
   roundMoney,
+  sellPriceExceedsMrp,
+  assertSellPriceNotAboveMrp,
   normalizeStateCode,
   stateCodeFromGstin,
   resolvePlaceOfSupplyStateCode,

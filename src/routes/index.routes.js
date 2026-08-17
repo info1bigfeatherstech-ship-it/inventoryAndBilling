@@ -39,6 +39,7 @@ const backupRoutes = require('./backup/backup.routes');
 const appSettingsRoutes = require('./settings/appSettings.routes');
 const onlineStockRoutes = require('./stock/onlineStock.routes');
 const comboRuleRoutes = require('./combo/comboRule.routes');
+const saleDealRoutes = require('./saleDeal/saleDeal.routes');
 
 // API info route
 router.get('/', (req, res) => {
@@ -130,6 +131,7 @@ v1Router.use('/sync', syncRoutes);
 v1Router.use('/backups', backupRoutes);
 v1Router.use('/settings', appSettingsRoutes);
 v1Router.use('/combo-rules', comboRuleRoutes);
+v1Router.use('/sale-deals', saleDealRoutes);
 v1Router.use('/internal/stock', onlineStockRoutes);
 // Mount versioned routes
 router.use('/v1', v1Router);
