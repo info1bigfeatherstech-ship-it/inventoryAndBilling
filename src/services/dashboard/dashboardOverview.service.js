@@ -3,9 +3,11 @@ const { roundMoney } = require('../../utils/billing.utils');
 const { applyBillListScope } = require('../../utils/billAccess.utils');
 const { applyWarehouseFinanceScope } = require('../../utils/warehouseFinanceAccess.utils');
 const { applyShopFinanceScope } = require('../../utils/shopFinanceAccess.utils');
+const { isOrgLevelAdmin } = require('../../utils/orgRole.utils');
+
 
 const SHOP_SCOPED_ROLES = new Set(['SHOP_OWNER', 'SHOP_MANAGER', 'BILLING_STAFF']);
-const PURCHASE_EXPENSE_ROLES = new Set(['SUPER_ADMIN', 'WH_MANAGER', 'WH_STOCK_LISTER', 'ACCOUNTANT']);
+const PURCHASE_EXPENSE_ROLES = new Set(['SUPER_ADMIN', 'ORG_MANAGER', 'WH_MANAGER', 'WH_STOCK_LISTER', 'ACCOUNTANT']);
 
 /**
  * Build last N calendar month buckets (oldest first).
@@ -45,7 +47,7 @@ const DashboardOverviewService = {
 
     // Future: exclude franchise shops when Shop.is_franchise is added
     const billWhere = await applyBillListScope({ is_cancelled: false, created_at: dateRange }, user);
-    if (query.shop_id && user.role === 'SUPER_ADMIN') {
+    if (query.shop_id && isOrgLevelAdmin(user)) {
       billWhere.shop_id = query.shop_id;
     }
 
@@ -61,14 +63,14 @@ const DashboardOverviewService = {
     const includePurchases = PURCHASE_EXPENSE_ROLES.has(user.role);
     const includeWarehouseExpenses = PURCHASE_EXPENSE_ROLES.has(user.role);
     const includeShopExpenses =
-      user.role === 'SUPER_ADMIN' ||
+      isOrgLevelAdmin(user) ||
       user.role === 'ACCOUNTANT' ||
       SHOP_SCOPED_ROLES.has(user.role);
 
     let purchasePromise = Promise.resolve([]);
     if (includePurchases) {
       const purchaseWhere = applyWarehouseFinanceScope({ status: 'RECEIVED', purchase_date: dateRange }, user);
-      if (query.warehouse_id && user.role === 'SUPER_ADMIN') {
+      if (query.warehouse_id && isOrgLevelAdmin(user)) {
         purchaseWhere.warehouse_id = query.warehouse_id;
       }
       purchasePromise = prisma.purchaseEntry.findMany({
@@ -80,7 +82,7 @@ const DashboardOverviewService = {
     let warehouseExpensePromise = Promise.resolve([]);
     if (includeWarehouseExpenses) {
       const whExpWhere = applyWarehouseFinanceScope({ is_cancelled: false, expense_date: dateRange }, user);
-      if (query.warehouse_id && user.role === 'SUPER_ADMIN') {
+      if (query.warehouse_id && isOrgLevelAdmin(user)) {
         whExpWhere.warehouse_id = query.warehouse_id;
       }
       warehouseExpensePromise = prisma.warehouseExpense.findMany({
@@ -92,7 +94,7 @@ const DashboardOverviewService = {
     let shopExpensePromise = Promise.resolve([]);
     if (includeShopExpenses || SHOP_SCOPED_ROLES.has(user.role) || user.role === 'ACCOUNTANT') {
       const shopExpWhere = applyShopFinanceScope({ is_cancelled: false, expense_date: dateRange }, user);
-      if (query.shop_id && user.role === 'SUPER_ADMIN') {
+      if (query.shop_id && isOrgLevelAdmin(user)) {
         shopExpWhere.shop_id = query.shop_id;
       }
       shopExpensePromise = prisma.shopExpense.findMany({

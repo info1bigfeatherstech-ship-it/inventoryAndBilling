@@ -1,6 +1,7 @@
 const { AppError } = require('../errors/AppError');
 const { resolveShopIdForUser } = require('./shopAccess.utils');
 const { resolveOwnerShopId } = require('./transferRequest.utils');
+const { isOrgLevelAdmin } = require('./orgRole.utils');
 
 const {
   toRoleSet,
@@ -15,7 +16,7 @@ const SHOP_WRITE_ROLES = toRoleSet(SHOP_BILLING_WRITE_ROLES);
  * Resolve shop id for billing write operations.
  */
 const resolveBillingShopId = async (user, requestedShopId) => {
-  if (user.role === 'SUPER_ADMIN') {
+  if (isOrgLevelAdmin(user)) {
     if (!requestedShopId) {
       throw new AppError('shop_id is required', 400, 'SHOP_ID_REQUIRED');
     }
@@ -47,7 +48,7 @@ const resolveBillingShopId = async (user, requestedShopId) => {
  * Assert user may read a bill for the given shop.
  */
 const assertBillReadAccess = async (shopId, user) => {
-  if (user.role === 'SUPER_ADMIN') return;
+  if (isOrgLevelAdmin(user)) return;
   if (['WH_MANAGER', 'WH_STOCK_LISTER'].includes(user.role)) return;
 
   if (user.role === 'SHOP_OWNER') {
@@ -69,7 +70,7 @@ const assertBillReadAccess = async (shopId, user) => {
  * Assert user may mutate bills (create, pay, cancel).
  */
 const assertBillWriteAccess = async (shopId, user) => {
-  if (user.role === 'SUPER_ADMIN') return;
+  if (isOrgLevelAdmin(user)) return;
 
   if (user.role === 'SHOP_OWNER') {
     const owned = await resolveOwnerShopId(user);
@@ -86,7 +87,7 @@ const assertBillWriteAccess = async (shopId, user) => {
  * Build Prisma where for bill list queries.
  */
 const applyBillListScope = async (where, user) => {
-  if (user.role === 'SUPER_ADMIN') return where;
+  if (isOrgLevelAdmin(user)) return where;
 
   if (['WH_MANAGER', 'WH_STOCK_LISTER'].includes(user.role)) {
     return where;

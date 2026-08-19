@@ -45,6 +45,7 @@ enum MovementPhase {
 
 enum UserRole {
   SUPER_ADMIN
+  ORG_MANAGER
   WH_MANAGER
   WH_STOCK_LISTER
   SHOP_OWNER
@@ -1258,6 +1259,8 @@ model User {
   phone         String   @unique
   password_hash String?
   role          UserRole
+  /// Display title for ORG_MANAGER only (e.g. "MHM Manager"). Permissions always use `role`, never this string.
+  role_title    String?
 
   warehouse_id String?
   shop_id      String?
@@ -1755,6 +1758,8 @@ model AppSettings {
   id                       String   @id @default("default")
   /// Allowed values: 20, 40, 60 — markup on (purchase_price + expenses) for franchise transfer pricing.
   franchise_markup_percent Int      @default(40)
+  /// Owner-shop billing counter wholesale: F.Price formula with this custom %. Not stored on variants.
+  wholesale_markup_percent Float    @default(40)
   /// GST issuer details for franchise transfer GST invoices (warehouse → franchise shop).
   transfer_invoice_gstin       String?
   transfer_invoice_legal_name  String?

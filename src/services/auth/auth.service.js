@@ -4,6 +4,54 @@ const prisma = require('../../utils/prisma.utils');
 const { AppError } = require('../../middlewares/error.middleware');
 const { signAccessToken, signRefreshToken, verifyRefreshToken, decodeToken } = require('../../utils/jwt.utils');
 const logger = require('../../utils/logger.utils');
+const { isRoleTitleUnavailable } = require('../../utils/orgRole.utils');
+
+const AUTH_LOCATION_SELECT = {
+  warehouse: {
+    select: {
+      warehouse_id: true,
+      warehouse_code: true,
+      warehouse_name: true,
+      address: true,
+      city: true,
+      is_active: true,
+    },
+  },
+  shop: {
+    select: {
+      shop_id: true,
+      shop_code: true,
+      shop_name: true,
+      city: true,
+      is_active: true,
+      shop_type: true,
+    },
+  },
+};
+
+const findAuthUser = async (db, where, extraSelect = {}) => {
+  const select = {
+    user_id: true,
+    name: true,
+    phone: true,
+    role: true,
+    is_active: true,
+    shop_id: true,
+    warehouse_id: true,
+    ...AUTH_LOCATION_SELECT,
+    ...extraSelect,
+  };
+  try {
+    return await db.user.findUnique({
+      where,
+      select: { ...select, role_title: true },
+    });
+  } catch (err) {
+    if (!isRoleTitleUnavailable(err)) throw err;
+    const user = await db.user.findUnique({ where, select });
+    return user ? { ...user, role_title: null } : user;
+  }
+};
 
 const hashRefreshToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
 
@@ -12,6 +60,7 @@ const sanitizeUser = (user) => ({
   name: user.name,
   phone: user.phone,
   role: user.role,
+  role_title: user.role_title ?? null,
   shop_id: user.shop_id,
   warehouse_id: user.warehouse_id,
   warehouse: user.warehouse || null,
@@ -100,39 +149,7 @@ const AuthService = {
       ip: context.ipAddress || null,
     });
 
-    const user = await prisma.user.findUnique({
-      where: { phone },
-      select: {
-        user_id: true,
-        name: true,
-        phone: true,
-        role: true,
-        is_active: true,
-        shop_id: true,
-        warehouse_id: true,
-        password_hash: true,
-        warehouse: {
-          select: {
-            warehouse_id: true,
-            warehouse_code: true,
-            warehouse_name: true,
-            address: true,
-            city: true,
-            is_active: true,
-          },
-        },
-        shop: {
-          select: {
-            shop_id: true,
-            shop_code: true,
-            shop_name: true,
-            city: true,
-            is_active: true,
-            shop_type: true,
-          },
-        },
-      },
-    });
+    const user = await findAuthUser(prisma, { phone }, { password_hash: true });
 
     if (!user || !user.password_hash) {
       throw new AppError('Invalid phone or password', 401, 'INVALID_CREDENTIALS');
@@ -190,38 +207,7 @@ const AuthService = {
         throw new AppError('Invalid refresh token', 401, 'INVALID_REFRESH_TOKEN');
       }
 
-      const user = await tx.user.findUnique({
-        where: { user_id: decoded.sub },
-        select: {
-          user_id: true,
-          name: true,
-          phone: true,
-          role: true,
-          is_active: true,
-          shop_id: true,
-          warehouse_id: true,
-          warehouse: {
-            select: {
-              warehouse_id: true,
-              warehouse_code: true,
-              warehouse_name: true,
-              address: true,
-              city: true,
-              is_active: true,
-            },
-          },
-          shop: {
-            select: {
-              shop_id: true,
-              shop_code: true,
-              shop_name: true,
-              city: true,
-              is_active: true,
-              shop_type: true,
-            },
-          },
-        },
-      });
+      const user = await findAuthUser(tx, { user_id: decoded.sub });
 
       if (!user || !user.is_active) {
         throw new AppError('User is inactive or does not exist', 401, 'USER_INACTIVE');
@@ -269,38 +255,18 @@ const AuthService = {
   },
 
   async getMyProfile(userId) {
-    const user = await prisma.user.findUnique({
-      where: { user_id: userId },
-      select: {
-        user_id: true,
-        name: true,
-        phone: true,
-        role: true,
-        is_active: true,
-        shop_id: true,
-        warehouse_id: true,
-        created_at: true,
-        updated_at: true,
-        warehouse: {
-          select: {
-            warehouse_id: true,
-            warehouse_code: true,
-            warehouse_name: true,
-            address: true,
-            city: true,
-            manager_name: true,
-            is_active: true,
-          },
-        },
-        shop: {
-          select: {
-            shop_id: true,
-            shop_code: true,
-            shop_name: true,
-            city: true,
-            is_active: true,
-            shop_type: true,
-          },
+    const user = await findAuthUser(prisma, { user_id: userId }, {
+      created_at: true,
+      updated_at: true,
+      warehouse: {
+        select: {
+          warehouse_id: true,
+          warehouse_code: true,
+          warehouse_name: true,
+          address: true,
+          city: true,
+          manager_name: true,
+          is_active: true,
         },
       },
     });

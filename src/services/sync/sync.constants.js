@@ -4,6 +4,7 @@ const SYNC_API_VERSION = 1;
 
 const OFFLINE_SYNC_ROLES = Object.freeze([
   'SUPER_ADMIN',
+  'ORG_MANAGER',
   'SHOP_OWNER',
   'BILLING_STAFF',
   'SHOP_MANAGER',

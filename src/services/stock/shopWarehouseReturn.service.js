@@ -14,6 +14,8 @@ const {
   generateReturnBillNumber,
 } = require('../../utils/shopWarehouseReturn.utils');
 const logger = require('../../utils/logger.utils');
+const { isOrgLevelAdmin } = require('../../utils/orgRole.utils');
+
 
 const ACTIVE_RETURN_STATUSES = ['REQUESTED', 'APPROVED', 'DISPATCHED', 'COMPLETED'];
 
@@ -75,7 +77,7 @@ const RETURN_INCLUDE = {
 };
 
 const resolveShopIdForUser = async (user, explicitShopId = null) => {
-  if (user.role === 'SUPER_ADMIN') {
+  if (isOrgLevelAdmin(user)) {
     if (explicitShopId) return explicitShopId;
     throw new AppError('shop_id is required', 400, 'SHOP_ID_REQUIRED');
   }
@@ -99,7 +101,7 @@ const resolveShopIdForUser = async (user, explicitShopId = null) => {
 };
 
 const assertWarehouseActor = (user, warehouseId) => {
-  if (user.role === 'SUPER_ADMIN') return;
+  if (isOrgLevelAdmin(user)) return;
   if (!['WH_MANAGER', 'WH_STOCK_LISTER'].includes(user.role)) {
     throw new AppError('Warehouse role required', 403, 'FORBIDDEN');
   }
@@ -110,7 +112,7 @@ const assertWarehouseActor = (user, warehouseId) => {
 };
 
 const assertShopActor = async (user, shopId) => {
-  if (user.role === 'SUPER_ADMIN') return;
+  if (isOrgLevelAdmin(user)) return;
   if (!['SHOP_OWNER', 'SHOP_MANAGER'].includes(user.role)) {
     throw new AppError('Shop role required', 403, 'FORBIDDEN');
   }
@@ -121,7 +123,7 @@ const assertShopActor = async (user, shopId) => {
 };
 
 const assertCanViewReturn = async (user, row) => {
-  if (user.role === 'SUPER_ADMIN') return;
+  if (isOrgLevelAdmin(user)) return;
   if (['WH_MANAGER', 'WH_STOCK_LISTER'].includes(user.role)) {
     assertWarehouseActor(user, row.to_warehouse_id);
     return;
@@ -547,7 +549,7 @@ const ShopWarehouseReturnService = {
 
     if (query.status) where.status = query.status;
 
-    if (user.role === 'SUPER_ADMIN') {
+    if (isOrgLevelAdmin(user)) {
       if (query.shop_id) where.from_shop_id = query.shop_id;
       if (query.warehouse_id) where.to_warehouse_id = query.warehouse_id;
     } else if (['WH_MANAGER', 'WH_STOCK_LISTER'].includes(user.role)) {
@@ -808,8 +810,8 @@ const ShopWarehouseReturnService = {
         throw new AppError(`Cannot cancel return in status ${row.status}`, 409, 'INVALID_RETURN_STATUS');
       }
 
-      if (['WH_MANAGER', 'WH_STOCK_LISTER', 'SUPER_ADMIN'].includes(user.role)) {
-        if (user.role !== 'SUPER_ADMIN') assertWarehouseActor(user, row.to_warehouse_id);
+      if (['WH_MANAGER', 'WH_STOCK_LISTER', 'SUPER_ADMIN', 'ORG_MANAGER'].includes(user.role)) {
+        if (!isOrgLevelAdmin(user)) assertWarehouseActor(user, row.to_warehouse_id);
       } else {
         await assertShopActor(user, row.from_shop_id);
         if (!['REQUESTED', 'APPROVED'].includes(row.status)) {

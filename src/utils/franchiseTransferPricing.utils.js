@@ -10,6 +10,7 @@ const {
 } = require('./franchisePrice.utils');
 const { priceKey } = require('./comboPricing.utils');
 const { roundMoney } = require('./billing.utils');
+const { isOrgLevelAdmin } = require('./orgRole.utils');
 
 const findTransferComboRule = (variant, rules = []) => {
   if (!variant || variant.combo_eligible !== true) return null;
@@ -177,7 +178,7 @@ const isFranchiseWhToShopTransfer = (record) =>
 const viewerIsFranchiseShop = (user, record) => {
   if (!isFranchiseWhToShopTransfer(record)) return false;
   if (isWarehouseInternalRole(user?.role)) return false;
-  if (user?.role === 'SUPER_ADMIN') return false;
+  if (isOrgLevelAdmin(user)) return false;
   const shopId = user?.shopId || user?.shop_id;
   return Boolean(shopId && shopId === record.to_shop_id);
 };
@@ -349,6 +350,7 @@ const formatSingleTransferRequest = (request, user, markupPercent, comboRules = 
 };
 
 const { getBulkRequestedQuantity } = require('./bulkTransfer.utils');
+
 
 const resolveItemBillQty = (item, bulk) => {
   if (bulk.transfer_bill_number) {

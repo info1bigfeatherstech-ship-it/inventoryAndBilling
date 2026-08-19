@@ -6,6 +6,8 @@ const { groupVariantImageFiles } = require('../../utils/productMultipart.utils')
 const AdmZip = require('adm-zip');
 const fs = require('fs');
 const path = require('path');
+const { isOrgLevelAdmin } = require('../../utils/orgRole.utils');
+
 
 // ========== HELPER FUNCTIONS FOR ZIP EXTRACTION (Copy from ecomm) ==========
 
@@ -62,7 +64,7 @@ const parseKeepImageIds = (raw) => {
 
 const withUserContext = (req) => {
   const user = { ...req.user };
-  if (req.user.role === 'SUPER_ADMIN' && req.query.warehouse_id) {
+  if (isOrgLevelAdmin(req.user) && req.query.warehouse_id) {
     user.requestedWarehouseFilter = req.query.warehouse_id;
   }
   return user;

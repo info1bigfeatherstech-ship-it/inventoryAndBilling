@@ -2,6 +2,8 @@ const prisma = require('../../utils/prisma.utils');
 const { AppError } = require('../../errors/AppError');
 const { resolveShopForOwner } = require('../../utils/shopOwnerLink.utils');
 const { BACKUP_ACCESS_ROLES, SCOPE_TYPE } = require('./backup.constants');
+const { isOrgLevelAdmin } = require('../../utils/orgRole.utils');
+
 
 const assertBackupAccess = (user) => {
   if (!user?.userId) {
@@ -15,7 +17,7 @@ const assertBackupAccess = (user) => {
 const resolveBackupScope = async (user) => {
   assertBackupAccess(user);
 
-  if (user.role === 'SUPER_ADMIN') {
+  if (isOrgLevelAdmin(user)) {
     return {
       type: SCOPE_TYPE.SYSTEM,
       role: user.role,

@@ -3,12 +3,18 @@
  */
 const UserRole = Object.freeze({
   SUPER_ADMIN: 'SUPER_ADMIN',
+  ORG_MANAGER: 'ORG_MANAGER',
   WH_MANAGER: 'WH_MANAGER',
   WH_STOCK_LISTER: 'WH_STOCK_LISTER',
   SHOP_OWNER: 'SHOP_OWNER',
   BILLING_STAFF: 'BILLING_STAFF',
   SHOP_MANAGER: 'SHOP_MANAGER',
 });
+
+const PRIVILEGED_ROLES = Object.freeze([
+  UserRole.SUPER_ADMIN,
+  UserRole.ORG_MANAGER,
+]);
 
 /** Shop-assigned staff scoped to `user.shopId` (owner may also resolve via owned shop). */
 const SHOP_STAFF_ROLES = Object.freeze([
@@ -68,9 +74,24 @@ const isShopOwnerOrManager = (role) => isShopOwner(role) || isShopManager(role);
 const isShopTransferActor = (role) => SHOP_TRANSFER_ACTOR_ROLES.includes(role);
 const isShopBillingRead = (role) => SHOP_BILLING_READ_ROLES.includes(role);
 const isShopBillingWrite = (role) => SHOP_BILLING_WRITE_ROLES.includes(role);
+const isSuperAdminRole = (role) => role === UserRole.SUPER_ADMIN;
+const isOrgManagerRole = (role) => role === UserRole.ORG_MANAGER;
+const isOrgLevelAdminRole = (role) => isSuperAdminRole(role) || isOrgManagerRole(role);
+const isPrivilegedRole = (role) => PRIVILEGED_ROLES.includes(role);
+
+/**
+ * Route helper: any allow-list that includes SUPER_ADMIN also admits ORG_MANAGER.
+ * Franchise shop / franchise-owner writes are still blocked in services.
+ */
+const expandRolesForAuthorization = (...roles) => {
+  const set = new Set(roles.flat(Infinity).filter(Boolean));
+  if (set.has(UserRole.SUPER_ADMIN)) set.add(UserRole.ORG_MANAGER);
+  return [...set];
+};
 
 module.exports = {
   UserRole,
+  PRIVILEGED_ROLES,
   SHOP_STAFF_ROLES,
   SHOP_OPERATION_ROLES,
   SHOP_TRANSFER_ACTOR_ROLES,
@@ -87,4 +108,9 @@ module.exports = {
   isShopTransferActor,
   isShopBillingRead,
   isShopBillingWrite,
+  isSuperAdminRole,
+  isOrgManagerRole,
+  isOrgLevelAdminRole,
+  isPrivilegedRole,
+  expandRolesForAuthorization,
 };

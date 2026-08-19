@@ -6,6 +6,8 @@ const {
   applyShopOwnerListScope,
 } = require('../../utils/transferRequest.utils');
 const { getBulkRequestedQuantity, getDispatchQuantity } = require('../../utils/bulkTransfer.utils');
+const { isOrgLevelAdmin } = require('../../utils/orgRole.utils');
+
 
 const HISTORY_EXCLUDE_STATUSES = ['REQUESTED'];
 
@@ -76,7 +78,7 @@ const activityTimestamp = (row) =>
 const buildBulkHistoryWhere = async (user, filters) => {
   const where = {};
 
-  if (user.role === 'SUPER_ADMIN') {
+  if (isOrgLevelAdmin(user)) {
     // all
   } else if (['WH_MANAGER', 'WH_STOCK_LISTER'].includes(user.role) && user.warehouseId) {
     where.OR = [

@@ -23,6 +23,7 @@ const {
 } = require('../../utils/cache.utils');
 const logger = require('../../utils/logger.utils');
 const { generateDebitNotePdf } = require('./debitNotePdf.service');
+const { isOrgLevelAdmin } = require('../../utils/orgRole.utils');
 const {
   resolvePurchaseItemVariant,
   assertResolvedVariantForReturn,
@@ -473,8 +474,8 @@ const DebitNoteService = {
   },
 
   async cancelDebitNote(debitNoteId, data, user) {
-    if (!['SUPER_ADMIN', 'WH_MANAGER'].includes(user.role)) {
-      throw new AppError('Only SUPER_ADMIN or WH_MANAGER can cancel debit notes', 403, 'FORBIDDEN');
+    if (!isOrgLevelAdmin(user) && user.role !== 'WH_MANAGER') {
+      throw new AppError('Only Super Admin, Org Manager, or WH_MANAGER can cancel debit notes', 403, 'FORBIDDEN');
     }
 
     const dn = await prisma.debitNote.findUnique({

@@ -26,7 +26,7 @@ const assertShopActive = async (shopId) => {
  * User may look up / redeem credit notes at this billing counter (org-wide pool).
  */
 const assertCreditNoteLookupAccess = async (user, redeemingShopId) => {
-  if (['SUPER_ADMIN', 'WH_MANAGER', 'WH_STOCK_LISTER'].includes(user.role)) {
+  if (['SUPER_ADMIN', 'ORG_MANAGER', 'WH_MANAGER', 'WH_STOCK_LISTER'].includes(user.role)) {
     if (redeemingShopId) await assertShopActive(redeemingShopId);
     return redeemingShopId || null;
   }

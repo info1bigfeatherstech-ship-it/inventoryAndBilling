@@ -1,10 +1,11 @@
 const { AppError } = require('../middlewares/error.middleware');
+const { isOrgLevelAdmin } = require('./orgRole.utils');
 
 const WAREHOUSE_ROLES = new Set(['WH_MANAGER', 'WH_STOCK_LISTER']);
 const CATALOG_READ_ROLES = new Set(['SHOP_OWNER', 'SHOP_MANAGER', 'BILLING_STAFF']);
 
 const resolveWarehouseId = (user, requestedWarehouseId) => {
-  if (user.role === 'SUPER_ADMIN') {
+  if (isOrgLevelAdmin(user)) {
     const warehouseId = requestedWarehouseId || user.warehouseId;
     if (!warehouseId) {
       throw new AppError('warehouse_id is required for super admin product operations', 400, 'WAREHOUSE_ID_REQUIRED');
@@ -28,7 +29,7 @@ const applyWarehouseScope = (where, user, warehouseIdField = 'warehouse_id') => 
     return where;
   }
 
-  if (user.role === 'SUPER_ADMIN') {
+  if (isOrgLevelAdmin(user)) {
     if (user.requestedWarehouseFilter) {
       where[warehouseIdField] = user.requestedWarehouseFilter;
     }
@@ -44,7 +45,7 @@ const applyWarehouseScope = (where, user, warehouseIdField = 'warehouse_id') => 
 };
 
 const assertProductWarehouseAccess = (productWarehouseId, user) => {
-  if (user.role === 'SUPER_ADMIN' || CATALOG_READ_ROLES.has(user.role)) return;
+  if (isOrgLevelAdmin(user) || CATALOG_READ_ROLES.has(user.role)) return;
 
   if (!user.warehouseId || productWarehouseId !== user.warehouseId) {
     throw new AppError('Product not found in your warehouse', 404, 'PRODUCT_NOT_FOUND');
@@ -52,7 +53,7 @@ const assertProductWarehouseAccess = (productWarehouseId, user) => {
 };
 
 const requireWarehouseRole = (user) => {
-  if (user.role === 'SUPER_ADMIN' || WAREHOUSE_ROLES.has(user.role)) return;
+  if (isOrgLevelAdmin(user) || WAREHOUSE_ROLES.has(user.role)) return;
   throw new AppError('Insufficient permissions', 403, 'FORBIDDEN');
 };
 

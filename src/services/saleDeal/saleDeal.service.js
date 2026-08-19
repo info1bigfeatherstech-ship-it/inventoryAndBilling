@@ -40,9 +40,11 @@ const SALE_DEAL_SELECT = {
   },
 };
 
-const assertSuperAdmin = (user) => {
-  if (!user || user.role !== 'SUPER_ADMIN') {
-    throw new AppError("Only SUPER_ADMIN can manage today's deals", 403, 'FORBIDDEN');
+const { isOrgLevelAdmin } = require('../../utils/orgRole.utils');
+
+const assertOrgLevelAdmin = (user) => {
+  if (!isOrgLevelAdmin(user)) {
+    throw new AppError("Only Super Admin or Org Manager can manage today's deals", 403, 'FORBIDDEN');
   }
 };
 
@@ -175,7 +177,7 @@ const SaleDealService = {
   },
 
   async listDeals(query = {}, user) {
-    assertSuperAdmin(user);
+    assertOrgLevelAdmin(user);
     assertSaleDealModel();
     try {
       const { page, limit, skip, take } = parsePagination(query, { page: 1, limit: 50, maxLimit: 100 });
@@ -213,7 +215,7 @@ const SaleDealService = {
   },
 
   async searchVariants(query = {}, user) {
-    assertSuperAdmin(user);
+    assertOrgLevelAdmin(user);
     assertSaleDealModel();
     try {
       const search = String(query.search || '').trim();
@@ -295,7 +297,7 @@ const SaleDealService = {
   },
 
   async getDealById(saleDealId, user) {
-    assertSuperAdmin(user);
+    assertOrgLevelAdmin(user);
     assertSaleDealModel();
     try {
       const deal = await prisma.saleDeal.findUnique({
@@ -311,7 +313,7 @@ const SaleDealService = {
   },
 
   async createDeal(data = {}, user) {
-    assertSuperAdmin(user);
+    assertOrgLevelAdmin(user);
     assertSaleDealModel();
     try {
       const variantId = String(data.variant_id || '').trim();
@@ -363,7 +365,7 @@ const SaleDealService = {
   },
 
   async updateDeal(saleDealId, data = {}, user) {
-    assertSuperAdmin(user);
+    assertOrgLevelAdmin(user);
     assertSaleDealModel();
     try {
       const existing = await prisma.saleDeal.findUnique({
@@ -402,7 +404,7 @@ const SaleDealService = {
   },
 
   async setActive(saleDealId, isActive, user) {
-    assertSuperAdmin(user);
+    assertOrgLevelAdmin(user);
     assertSaleDealModel();
     try {
       const existing = await prisma.saleDeal.findUnique({

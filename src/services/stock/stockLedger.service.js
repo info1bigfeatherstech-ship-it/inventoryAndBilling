@@ -55,7 +55,7 @@
 
 //   async getWarehouseLedger(warehouseId, dateRange = {}, user) {
 //       // For warehouse ledger, also apply role-based check
-//   if (user.role !== 'SUPER_ADMIN') {
+//   if (!isOrgLevelAdmin(user)) {
 //     if (['WH_MANAGER', 'WH_STOCK_LISTER'].includes(user.role)) {
 //       if (user.warehouseId !== warehouseId) {
 //         throw new AppError('Access denied. You can only view your own warehouse ledger.', 403, 'FORBIDDEN');
@@ -95,7 +95,7 @@
 //   async getShopLedger(shopId, dateRange = {}, user) {
 
 //     // For shop ledger, apply role-based check
-//   if (user.role !== 'SUPER_ADMIN') {
+//   if (!isOrgLevelAdmin(user)) {
 //     if (['SHOP_OWNER', 'SHOP_MANAGER', 'BILLING_STAFF'].includes(user.role)) {
 //       if (user.shopId !== shopId) {
 //         throw new AppError('Access denied. You can only view your own shop ledger.', 403, 'FORBIDDEN');
@@ -142,6 +142,8 @@ const { applyLedgerScope } = require('../../utils/stockLedgerAccess.utils');
 const { applyTransferLedgerVisibilityWhere } = require('../../utils/stockLedgerView.utils');
 const { AppError } = require('../../middlewares/error.middleware');
 const { ledgerRowsToCsv } = require('../../utils/stockLedgerExport.utils');
+const { isOrgLevelAdmin } = require('../../utils/orgRole.utils');
+
 
 const buildLedgerWhere = (filters = {}) => {
   const where = {};
@@ -230,7 +232,7 @@ const StockLedgerService = {
 
   async getWarehouseLedger(warehouseId, dateRange = {}, user) {
     // Role-based check for warehouse ledger
-    if (user.role !== 'SUPER_ADMIN') {
+    if (!isOrgLevelAdmin(user)) {
       if (['WH_MANAGER', 'WH_STOCK_LISTER'].includes(user.role)) {
         if (user.warehouseId !== warehouseId) {
           throw new AppError('Access denied. You can only view your own warehouse ledger.', 403, 'FORBIDDEN');
@@ -275,7 +277,7 @@ const StockLedgerService = {
 
   async getShopLedger(shopId, dateRange = {}, user) {
     // Role-based check for shop ledger
-    if (user.role !== 'SUPER_ADMIN') {
+    if (!isOrgLevelAdmin(user)) {
       if (['SHOP_OWNER', 'SHOP_MANAGER', 'BILLING_STAFF'].includes(user.role)) {
         if (user.shopId !== shopId) {
           throw new AppError('Access denied. You can only view your own shop ledger.', 403, 'FORBIDDEN');

@@ -21,6 +21,24 @@ const AppSettingsController = {
     });
   }),
 
+  getWholesaleSettings: asyncHandler(async (req, res) => {
+    const data = await AppSettingsService.getWholesaleSettings();
+    return successResponse(res, req, {
+      statusCode: 200,
+      message: 'Wholesale settings fetched successfully',
+      data,
+    });
+  }),
+
+  updateWholesaleSettings: asyncHandler(async (req, res) => {
+    const data = await AppSettingsService.updateWholesaleSettings(req.body, req.user);
+    return successResponse(res, req, {
+      statusCode: 200,
+      message: 'Wholesale settings updated successfully',
+      data,
+    });
+  }),
+
   getOnlineStockSettings: asyncHandler(async (req, res) => {
     const data = await AppSettingsService.getOnlineStockSettings();
     return successResponse(res, req, {

@@ -6,11 +6,13 @@ const { requireAuth, authorizeRoles } = require('../../middlewares/auth.middlewa
 const { validateRequest } = require('../../middlewares/validation.middleware');
 const {
   updateFranchiseSettingsValidator,
+  updateWholesaleSettingsValidator,
   updateOnlineStockSettingsValidator,
   updateCompanyInvoiceSettingsValidator,
 } = require('../../validators/settings/appSettings.validators');
 
-const READ_ROLES = ['SUPER_ADMIN', 'WH_MANAGER', 'WH_STOCK_LISTER', 'SHOP_OWNER', 'SHOP_MANAGER'];
+const READ_ROLES = ['SUPER_ADMIN', 'ORG_MANAGER', 'WH_MANAGER', 'WH_STOCK_LISTER', 'SHOP_OWNER', 'SHOP_MANAGER'];
+const WHOLESALE_READ_ROLES = [...READ_ROLES, 'BILLING_STAFF'];
 
 router.use(requireAuth);
 
@@ -26,6 +28,20 @@ router.put(
   updateFranchiseSettingsValidator,
   validateRequest,
   AppSettingsController.updateFranchiseSettings
+);
+
+router.get(
+  '/wholesale',
+  authorizeRoles(...WHOLESALE_READ_ROLES),
+  AppSettingsController.getWholesaleSettings
+);
+
+router.put(
+  '/wholesale',
+  authorizeRoles('SUPER_ADMIN'),
+  updateWholesaleSettingsValidator,
+  validateRequest,
+  AppSettingsController.updateWholesaleSettings
 );
 
 router.get(

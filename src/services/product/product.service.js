@@ -4,11 +4,7 @@ const { parse } = require('csv-parse/sync');
 const prisma = require('../../utils/prisma.utils');
 const { AppError } = require('../../middlewares/error.middleware');
 const { parsePagination } = require('../../utils/pagination.utils');
-const {
-  resolveWarehouseId,
-  applyWarehouseScope,
-  assertProductWarehouseAccess,
-} = require('../../utils/productAccess.utils');
+const { isOrgLevelAdmin } = require('../../utils/orgRole.utils');
 const {
   cacheGet,
   cacheSet,
@@ -1122,6 +1118,24 @@ const parseQueryBoolean = (value) => {
   return undefined;
 };
 
+const assertProductWarehouseAccess = (productWarehouseId, user) => {
+  if (!productWarehouseId || !user) return;
+  if (isOrgLevelAdmin(user)) return;
+
+  const scopedWarehouseId = user.warehouseId || user.warehouse_id || user.locationId || null;
+  if (!scopedWarehouseId) return;
+  if (String(productWarehouseId) === String(scopedWarehouseId)) return;
+
+  throw new AppError('Product not found', 404, 'PRODUCT_NOT_FOUND');
+};
+
+const applyWarehouseScope = (where, query = {}, user) => {
+  const whId = query?.warehouse_id || user?.warehouseId || user?.warehouse_id;
+  if (whId) {
+    where.warehouse_id = whId;
+  }
+};
+
 const buildProductWhere = (query = {}, user) => {
   const where = {};
   const isActiveFilter = parseQueryBoolean(query.is_active);
@@ -1146,7 +1160,7 @@ const buildProductWhere = (query = {}, user) => {
     ];
   }
 
-  applyWarehouseScope(where, user);
+  applyWarehouseScope(where, query, user);
   return where;
 };
 
@@ -2500,8 +2514,7 @@ async listInactiveProducts(query = {}, user) {
   // Build where clause - only inactive products
   const where = { is_active: false };
   
-  // Apply warehouse scope (WH_MANAGER/WH_STOCK_LISTER will see only their warehouse)
-  applyWarehouseScope(where, user);
+  applyWarehouseScope(where, query, user);
   
   // Optional filters
   if (query.category_id) where.category_id = query.category_id;
@@ -2547,10 +2560,10 @@ async listInactiveProducts(query = {}, user) {
 
 
 
-  // Permanent delete of archived products only (SUPER_ADMIN).
+  // Permanent delete of archived products only (org-level admin).
   async hardDeleteProducts(productIds, user) {
-    if (user.role !== 'SUPER_ADMIN') {
-      throw new AppError('Only SUPER_ADMIN can permanently delete products', 403, 'FORBIDDEN');
+    if (!isOrgLevelAdmin(user)) {
+      throw new AppError('Only Super Admin or Org Manager can permanently delete products', 403, 'FORBIDDEN');
     }
 
     const uniqueIds = [...new Set((Array.isArray(productIds) ? productIds : []).filter(Boolean))];
@@ -2692,7 +2705,7 @@ async listInactiveProducts(query = {}, user) {
 
   async getInventoryStats(_query = {}, user) {
     const where = {};
-    applyWarehouseScope(where, user);
+    applyWarehouseScope(where, _query, user);
 
     const [totalProducts, activeCount, avgMrpAgg, variantGroups] = await Promise.all([
       prisma.product.count({ where }),

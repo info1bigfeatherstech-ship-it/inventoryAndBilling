@@ -5,7 +5,15 @@ const {
   DEFAULT_FRANCHISE_MARKUP_PERCENT,
   resolveFranchiseMarkupPercent,
 } = require('../../utils/franchisePrice.utils');
+const {
+  DEFAULT_WHOLESALE_MARKUP_PERCENT,
+  MIN_WHOLESALE_MARKUP_PERCENT,
+  MAX_WHOLESALE_MARKUP_PERCENT,
+  resolveWholesaleMarkupPercent,
+} = require('../../utils/wholesalePrice.utils');
 const { normalizeStateCode, stateCodeFromGstin } = require('../../utils/billing.utils');
+const { isOrgLevelAdmin } = require('../../utils/orgRole.utils');
+
 
 const SETTINGS_ID = 'default';
 
@@ -44,6 +52,7 @@ const getOrCreateSettings = async () => {
       data: {
         id: SETTINGS_ID,
         franchise_markup_percent: DEFAULT_FRANCHISE_MARKUP_PERCENT,
+        wholesale_markup_percent: DEFAULT_WHOLESALE_MARKUP_PERCENT,
       },
       include: { online_warehouse: { select: ONLINE_WAREHOUSE_SELECT } },
     });
@@ -173,7 +182,7 @@ const AppSettingsService = {
   },
 
   async updateFranchiseSettings({ franchise_markup_percent }, user) {
-    if (user?.role !== 'SUPER_ADMIN') {
+    if (!isOrgLevelAdmin(user)) {
       throw new AppError('Only super admin can update franchise settings', 403, 'FORBIDDEN');
     }
 
@@ -195,7 +204,8 @@ const AppSettingsService = {
       where: { id: SETTINGS_ID },
       create: {
         id: SETTINGS_ID,
-        franchise_markup_percent: updateData.franchise_markup_percent ?? DEFAULT_FRANCHISE_MARKUP_PERCENT,
+        franchise_markup_percent: DEFAULT_FRANCHISE_MARKUP_PERCENT,
+        wholesale_markup_percent: DEFAULT_WHOLESALE_MARKUP_PERCENT,
         ...updateData,
       },
       update: updateData,
@@ -208,13 +218,67 @@ const AppSettingsService = {
     };
   },
 
+  async getWholesaleMarkupPercent() {
+    const row = await getOrCreateSettings();
+    return resolveWholesaleMarkupPercent(row.wholesale_markup_percent);
+  },
+
+  async getWholesaleSettings() {
+    const row = await getOrCreateSettings();
+    return {
+      wholesale_markup_percent: resolveWholesaleMarkupPercent(row.wholesale_markup_percent),
+      min_markup_percent: MIN_WHOLESALE_MARKUP_PERCENT,
+      max_markup_percent: MAX_WHOLESALE_MARKUP_PERCENT,
+      updated_at: row.updated_at,
+    };
+  },
+
+  async updateWholesaleSettings({ wholesale_markup_percent }, user) {
+    if (!isOrgLevelAdmin(user)) {
+      throw new AppError('Only admin can update wholesale settings', 403, 'FORBIDDEN');
+    }
+
+    const updateData = { updated_by: user.userId };
+
+    if (wholesale_markup_percent != null) {
+      const pct = Number(wholesale_markup_percent);
+      if (!Number.isFinite(pct)) {
+        throw new AppError(
+          'wholesale_markup_percent must be a number',
+          400,
+          'INVALID_WHOLESALE_MARKUP'
+        );
+      }
+      updateData.wholesale_markup_percent = resolveWholesaleMarkupPercent(pct);
+    }
+
+    const row = await prisma.appSettings.upsert({
+      where: { id: SETTINGS_ID },
+      create: {
+        id: SETTINGS_ID,
+        franchise_markup_percent: DEFAULT_FRANCHISE_MARKUP_PERCENT,
+        wholesale_markup_percent:
+          updateData.wholesale_markup_percent ?? DEFAULT_WHOLESALE_MARKUP_PERCENT,
+        ...updateData,
+      },
+      update: updateData,
+    });
+
+    return {
+      wholesale_markup_percent: resolveWholesaleMarkupPercent(row.wholesale_markup_percent),
+      min_markup_percent: MIN_WHOLESALE_MARKUP_PERCENT,
+      max_markup_percent: MAX_WHOLESALE_MARKUP_PERCENT,
+      updated_at: row.updated_at,
+    };
+  },
+
   async getOnlineStockSettings() {
     const row = await getOrCreateSettings();
     return formatOnlineWarehouseSettings(row);
   },
 
   async updateOnlineStockSettings({ online_warehouse_id }, user) {
-    if (user?.role !== 'SUPER_ADMIN') {
+    if (!isOrgLevelAdmin(user)) {
       throw new AppError('Only super admin can update online stock settings', 403, 'FORBIDDEN');
     }
 
@@ -241,6 +305,7 @@ const AppSettingsService = {
       create: {
         id: SETTINGS_ID,
         franchise_markup_percent: DEFAULT_FRANCHISE_MARKUP_PERCENT,
+        wholesale_markup_percent: DEFAULT_WHOLESALE_MARKUP_PERCENT,
         ...updateData,
       },
       update: updateData,
@@ -256,7 +321,7 @@ const AppSettingsService = {
   },
 
   async updateCompanyInvoiceSettings(payload = {}, user) {
-    if (user?.role !== 'SUPER_ADMIN') {
+    if (!isOrgLevelAdmin(user)) {
       throw new AppError('Only super admin can update company details', 403, 'FORBIDDEN');
     }
 
@@ -310,6 +375,7 @@ const AppSettingsService = {
       create: {
         id: SETTINGS_ID,
         franchise_markup_percent: DEFAULT_FRANCHISE_MARKUP_PERCENT,
+        wholesale_markup_percent: DEFAULT_WHOLESALE_MARKUP_PERCENT,
         ...updateData,
       },
       update: updateData,

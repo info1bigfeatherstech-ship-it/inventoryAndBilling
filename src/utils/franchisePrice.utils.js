@@ -83,7 +83,7 @@ const snapshotFranchiseTransferPricing = (variant, quantity, markupPercent) => {
   };
 };
 
-const WAREHOUSE_INTERNAL_ROLES = new Set(['SUPER_ADMIN', 'WH_MANAGER', 'WH_STOCK_LISTER']);
+const WAREHOUSE_INTERNAL_ROLES = new Set(['SUPER_ADMIN', 'ORG_MANAGER', 'WH_MANAGER', 'WH_STOCK_LISTER']);
 
 const isWarehouseInternalRole = (role) => WAREHOUSE_INTERNAL_ROLES.has(role);
 

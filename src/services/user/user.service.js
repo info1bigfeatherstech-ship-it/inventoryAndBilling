@@ -4,6 +4,13 @@ const { AppError } = require('../../middlewares/error.middleware');
 const { parsePagination } = require('../../utils/pagination.utils');
 const { WAREHOUSE_ROLES, SHOP_ROLES } = require('../../validators/user/user.validators');
 const { syncShopOwnerAssignment } = require('../../utils/shopOwnerLink.utils');
+const { UserRole } = require('../../constants/userRole.constants');
+const { mapOrgManagerSchemaError } = require('../../utils/orgRole.utils');
+const {
+  assertCanMutateAdminUser,
+  resolveCreateRoleTitle,
+  resolveUpdateRoleTitle,
+} = require('../../utils/orgAdminPolicy.utils');
 
 const SALT_ROUNDS = 12;
 
@@ -12,12 +19,19 @@ const USER_SELECT = {
   name: true,
   phone: true,
   role: true,
+  role_title: true,
   warehouse_id: true,
   shop_id: true,
   is_active: true,
   remarks: true,
   created_at: true,
   updated_at: true,
+};
+
+const USER_LIST_RELATIONS = {
+  warehouse: { select: { warehouse_id: true, warehouse_code: true, warehouse_name: true } },
+  shop: { select: { shop_id: true, shop_code: true, shop_name: true, shop_type: true } },
+  owned_shop: { select: { shop_id: true, shop_code: true, shop_name: true, shop_type: true } },
 };
 
 const buildUsersWhere = (query = {}) => {
@@ -50,7 +64,7 @@ const sanitizeCreate = (data) => ({
 
 const sanitizeUpdate = (data) => {
   const payload = {};
-  const allowed = ['name', 'phone', 'role', 'warehouse_id', 'shop_id', 'remarks'];
+  const allowed = ['name', 'phone', 'role', 'warehouse_id', 'shop_id', 'remarks', 'role_title'];
   for (const key of allowed) {
     if (Object.prototype.hasOwnProperty.call(data, key)) {
       payload[key] = data[key];
@@ -80,9 +94,9 @@ const assertEntityActive = async ({ warehouseId, shopId }) => {
 };
 
 const validateRolePolicy = (role, warehouseId, shopId) => {
-  if (role === 'SUPER_ADMIN') {
+  if (role === UserRole.SUPER_ADMIN || role === UserRole.ORG_MANAGER) {
     if (warehouseId || shopId) {
-      throw new AppError('SUPER_ADMIN cannot have warehouse_id or shop_id', 400, 'INVALID_ROLE_ASSIGNMENT');
+      throw new AppError(`${role} cannot have warehouse_id or shop_id`, 400, 'INVALID_ROLE_ASSIGNMENT');
     }
     return;
   }
@@ -151,138 +165,178 @@ const applyShopOwnerLink = async ({ userId, role, shopId, previousRole, tx = pri
 };
 
 const UserService = {
-  async createUser(data) {
-    const payload = sanitizeCreate(data);
-    validateRolePolicy(payload.role, payload.warehouse_id, payload.shop_id);
-    await assertEntityActive({ warehouseId: payload.warehouse_id, shopId: payload.shop_id });
-    await enforceUniqueRoleConstraints({
-      role: payload.role,
-      warehouseId: payload.warehouse_id,
-      shopId: payload.shop_id,
-    });
-
-    const password_hash = await bcrypt.hash(data.password, SALT_ROUNDS);
-
-    const user = await prisma.$transaction(async (tx) => {
-      const created = await tx.user.create({
-        data: {
-          ...payload,
-          password_hash,
-          is_active: true,
-        },
-        select: USER_SELECT,
+  async createUser(data, actor) {
+    try {
+      await assertCanMutateAdminUser(actor, {
+        nextRole: data.role,
+        nextShopId: data.shop_id ?? null,
       });
 
-      await applyShopOwnerLink({
-        userId: created.user_id,
-        role: created.role,
-        shopId: created.shop_id,
-        previousRole: null,
-        tx,
+      const payload = sanitizeCreate(data);
+      payload.role_title = resolveCreateRoleTitle(actor, payload.role, data.role_title);
+      validateRolePolicy(payload.role, payload.warehouse_id, payload.shop_id);
+      await assertEntityActive({ warehouseId: payload.warehouse_id, shopId: payload.shop_id });
+      await enforceUniqueRoleConstraints({
+        role: payload.role,
+        warehouseId: payload.warehouse_id,
+        shopId: payload.shop_id,
       });
 
-      return created;
-    });
+      const password_hash = await bcrypt.hash(data.password, SALT_ROUNDS);
 
-    return user;
+      const user = await prisma.$transaction(async (tx) => {
+        const created = await tx.user.create({
+          data: {
+            ...payload,
+            password_hash,
+            is_active: true,
+          },
+          select: USER_SELECT,
+        });
+
+        await applyShopOwnerLink({
+          userId: created.user_id,
+          role: created.role,
+          shopId: created.shop_id,
+          previousRole: null,
+          tx,
+        });
+
+        return created;
+      });
+
+      return user;
+    } catch (err) {
+      mapOrgManagerSchemaError(err, 'Failed to create user');
+    }
   },
 
   async listUsers(query = {}) {
     const { page, limit, skip, take } = parsePagination(query, { page: 1, limit: 50, maxLimit: 100 });
     const where = buildUsersWhere(query);
 
-    const [total, users] = await Promise.all([
-      prisma.user.count({ where }),
-      prisma.user.findMany({
-        where,
-        skip,
-        take,
-        orderBy: [{ is_active: 'desc' }, { created_at: 'desc' }],
-        select: {
-          ...USER_SELECT,
-          warehouse: { select: { warehouse_id: true, warehouse_code: true, warehouse_name: true } },
-          shop: { select: { shop_id: true, shop_code: true, shop_name: true } },
-        },
-      }),
-    ]);
+    try {
+      const [total, users] = await Promise.all([
+        prisma.user.count({ where }),
+        prisma.user.findMany({
+          where,
+          skip,
+          take,
+          orderBy: [{ is_active: 'desc' }, { created_at: 'desc' }],
+          select: {
+            ...USER_SELECT,
+            ...USER_LIST_RELATIONS,
+          },
+        }),
+      ]);
 
-    return { total, page, limit, users };
+      return { total, page, limit, users };
+    } catch (err) {
+      mapOrgManagerSchemaError(err, 'Failed to list users');
+    }
   },
 
   async getUserById(userId) {
-    const user = await prisma.user.findUnique({
-      where: { user_id: userId },
-      select: {
-        ...USER_SELECT,
-        warehouse: { select: { warehouse_id: true, warehouse_code: true, warehouse_name: true } },
-        shop: { select: { shop_id: true, shop_code: true, shop_name: true } },
-      },
-    });
-    if (!user) {
-      throw new AppError('User not found', 404, 'USER_NOT_FOUND');
-    }
-    return user;
-  },
-
-  async updateUser(userId, data) {
-    const existing = await prisma.user.findUnique({
-      where: { user_id: userId },
-      select: { user_id: true, role: true, warehouse_id: true, shop_id: true },
-    });
-    if (!existing) throw new AppError('User not found', 404, 'USER_NOT_FOUND');
-
-    const payload = sanitizeUpdate(data);
-    if (Object.keys(payload).length === 0) {
-      throw new AppError('No updatable fields provided', 400, 'EMPTY_UPDATE');
-    }
-
-    const role = payload.role ?? existing.role;
-    const warehouseId = Object.prototype.hasOwnProperty.call(payload, 'warehouse_id')
-      ? (payload.warehouse_id || null)
-      : existing.warehouse_id;
-    const shopId = Object.prototype.hasOwnProperty.call(payload, 'shop_id')
-      ? (payload.shop_id || null)
-      : existing.shop_id;
-
-    validateRolePolicy(role, warehouseId, shopId);
-    await assertEntityActive({ warehouseId, shopId });
-    await enforceUniqueRoleConstraints({
-      role,
-      warehouseId,
-      shopId,
-      excludeUserId: existing.user_id,
-    });
-
-    const user = await prisma.$transaction(async (tx) => {
-      const updated = await tx.user.update({
+    try {
+      const user = await prisma.user.findUnique({
         where: { user_id: userId },
-        data: payload,
-        select: USER_SELECT,
+        select: {
+          ...USER_SELECT,
+          ...USER_LIST_RELATIONS,
+        },
       });
-
-      await applyShopOwnerLink({
-        userId: updated.user_id,
-        role,
-        shopId,
-        previousRole: existing.role,
-        tx,
-      });
-
-      return updated;
-    });
-
-    return user;
+      if (!user) {
+        throw new AppError('User not found', 404, 'USER_NOT_FOUND');
+      }
+      return user;
+    } catch (err) {
+      mapOrgManagerSchemaError(err, 'Failed to fetch user');
+    }
   },
 
-  async updateUserStatus(userId, isActive) {
+  async updateUser(userId, data, actor) {
+    try {
+      const existing = await prisma.user.findUnique({
+        where: { user_id: userId },
+        select: { user_id: true, role: true, warehouse_id: true, shop_id: true, role_title: true },
+      });
+      if (!existing) throw new AppError('User not found', 404, 'USER_NOT_FOUND');
+
+      const payload = sanitizeUpdate(data);
+      if (Object.keys(payload).length === 0) {
+        throw new AppError('No updatable fields provided', 400, 'EMPTY_UPDATE');
+      }
+
+      const role = payload.role ?? existing.role;
+      const warehouseId = Object.prototype.hasOwnProperty.call(payload, 'warehouse_id')
+        ? (payload.warehouse_id || null)
+        : existing.warehouse_id;
+      const shopId = Object.prototype.hasOwnProperty.call(payload, 'shop_id')
+        ? (payload.shop_id || null)
+        : existing.shop_id;
+
+      await assertCanMutateAdminUser(actor, {
+        existing,
+        nextRole: role,
+        nextShopId: shopId,
+      });
+
+      const hasTitle = Object.prototype.hasOwnProperty.call(payload, 'role_title');
+      const nextTitle = resolveUpdateRoleTitle(actor, {
+        existingRole: existing.role,
+        nextRole: payload.role,
+        nextTitle: payload.role_title,
+        hasTitle,
+      });
+      if (nextTitle === undefined) {
+        delete payload.role_title;
+      } else {
+        payload.role_title = nextTitle;
+      }
+
+      validateRolePolicy(role, warehouseId, shopId);
+      await assertEntityActive({ warehouseId, shopId });
+      await enforceUniqueRoleConstraints({
+        role,
+        warehouseId,
+        shopId,
+        excludeUserId: existing.user_id,
+      });
+
+      const user = await prisma.$transaction(async (tx) => {
+        const updated = await tx.user.update({
+          where: { user_id: userId },
+          data: payload,
+          select: USER_SELECT,
+        });
+
+        await applyShopOwnerLink({
+          userId: updated.user_id,
+          role,
+          shopId,
+          previousRole: existing.role,
+          tx,
+        });
+
+        return updated;
+      });
+
+      return user;
+    } catch (err) {
+      mapOrgManagerSchemaError(err, 'Failed to update user');
+    }
+  },
+
+  async updateUserStatus(userId, isActive, actor) {
     const existing = await prisma.user.findUnique({
       where: { user_id: userId },
-      select: { user_id: true, role: true, is_active: true },
+      select: { user_id: true, role: true, is_active: true, shop_id: true },
     });
     if (!existing) throw new AppError('User not found', 404, 'USER_NOT_FOUND');
-    if (existing.role === 'SUPER_ADMIN' && !isActive) {
+    if (existing.role === UserRole.SUPER_ADMIN && !isActive) {
       throw new AppError('SUPER_ADMIN cannot be deactivated', 400, 'SUPER_ADMIN_DEACTIVATION_NOT_ALLOWED');
     }
+    await assertCanMutateAdminUser(actor, { existing });
     if (existing.is_active === isActive) return { unchanged: true };
 
     await prisma.user.update({
@@ -294,12 +348,13 @@ const UserService = {
     return { unchanged: false };
   },
 
-  async resetUserPassword(userId, newPassword) {
+  async resetUserPassword(userId, newPassword, actor) {
     const existing = await prisma.user.findUnique({
       where: { user_id: userId },
-      select: { user_id: true },
+      select: { user_id: true, role: true, shop_id: true },
     });
     if (!existing) throw new AppError('User not found', 404, 'USER_NOT_FOUND');
+    await assertCanMutateAdminUser(actor, { existing });
 
     const password_hash = await bcrypt.hash(newPassword, SALT_ROUNDS);
 

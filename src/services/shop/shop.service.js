@@ -11,6 +11,10 @@ const {
   clearShopOwnerAssignment,
   resolveShopForOwner,
 } = require('../../utils/shopOwnerLink.utils');
+const {
+  assertCanCreateShop,
+  assertCanMutateShop,
+} = require('../../utils/orgAdminPolicy.utils');
 
 const parseShopStateCode = (value) => {
   if (value == null || String(value).trim() === '') return null;
@@ -236,7 +240,9 @@ const assertDeactivationAllowed = async (shopId) => {
 };
 
 const ShopService = {
-  async createShop(data) {
+  async createShop(data, actor) {
+    const shopType = normalizeShopType(data.shop_type);
+    assertCanCreateShop(actor, shopType);
     const shopCode = normalizeShopCode(data.shop_code);
     if (!shopCode) throw new AppError('shop_code is required', 400, 'SHOP_CODE_REQUIRED');
     if (!assertValidShopCode(shopCode)) {
@@ -291,7 +297,7 @@ const ShopService = {
         email: data.email ? String(data.email).trim().toLowerCase() : null,
         owner_user_id: ownerUserId,
         sales_channels: data.sales_channels || [],
-        shop_type: normalizeShopType(data.shop_type),
+        shop_type: shopType,
         remarks: data.remarks ?? null,
       },
       select: SHOP_SELECT,
@@ -371,12 +377,13 @@ const ShopService = {
     return attachDefaultGstFields(shop);
   },
 
-  async updateShop(shopId, data) {
+  async updateShop(shopId, data, actor) {
     const existing = await prisma.shop.findUnique({
       where: { shop_id: shopId },
-      select: { shop_id: true, shop_code: true, owner_user_id: true },
+      select: { shop_id: true, shop_code: true, owner_user_id: true, shop_type: true },
     });
     if (!existing) throw new AppError('Shop not found', 404, 'SHOP_NOT_FOUND');
+    assertCanMutateShop(actor, existing, data.shop_type !== undefined ? normalizeShopType(data.shop_type) : existing.shop_type);
   
     const payload = {};
     // ⭐ ADD 'owner_user_id' and 'sales_channels' to allowed fields
@@ -554,12 +561,13 @@ const ShopService = {
     return this.getShopByOwnerId(ownerUserId, { userShopId: shop.shop_id, repair: false });
   },
 
-  async softDeleteShop(shopId) {
+  async softDeleteShop(shopId, actor) {
     const existing = await prisma.shop.findUnique({
       where: { shop_id: shopId },
-      select: { shop_id: true, is_active: true },
+      select: { shop_id: true, is_active: true, shop_type: true },
     });
     if (!existing) throw new AppError('Shop not found', 404, 'SHOP_NOT_FOUND');
+    assertCanMutateShop(actor, existing);
     if (!existing.is_active) return { alreadyInactive: true };
 
     await assertDeactivationAllowed(shopId);

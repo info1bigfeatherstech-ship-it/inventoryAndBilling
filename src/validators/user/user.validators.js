@@ -2,6 +2,7 @@ const { body, param, query } = require('express-validator');
 
 const USER_ROLES = [
   'SUPER_ADMIN',
+  'ORG_MANAGER',
   'WH_MANAGER',
   'WH_STOCK_LISTER',
   'SHOP_OWNER',
@@ -38,8 +39,8 @@ const validateRoleAssignments = (value, { req }) => {
     // ⭐ Removed the mandatory shop_id check
   }
 
-  if (role === 'SUPER_ADMIN' && (hasWarehouse || hasShop)) {
-    throw new Error('SUPER_ADMIN cannot have warehouse_id or shop_id');
+  if ((role === 'SUPER_ADMIN' || role === 'ORG_MANAGER') && (hasWarehouse || hasShop)) {
+    throw new Error(`${role} cannot have warehouse_id or shop_id`);
   }
 
   return true;
@@ -69,6 +70,7 @@ const createUserValidator = [
     .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).+$/)
     .withMessage('password must include upper, lower, number and special character'),
   body('role').isIn(USER_ROLES).withMessage(`role must be one of: ${USER_ROLES.join(', ')}`),
+  body('role_title').optional({ nullable: true }).isString().trim().isLength({ max: 80 }),
   body('warehouse_id').optional({ nullable: true }).isString().trim().notEmpty(),
   body('shop_id').optional({ nullable: true }).isString().trim().notEmpty(),
   body('remarks').optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
@@ -84,6 +86,7 @@ const updateUserValidator = [
     .isLength({ min: 10, max: 10 })
     .withMessage('phone must be a 10-digit number'),
   body('role').optional().isIn(USER_ROLES),
+  body('role_title').optional({ nullable: true }).isString().trim().isLength({ max: 80 }),
   body('warehouse_id').optional({ nullable: true }).isString().trim().notEmpty(),
   body('shop_id').optional({ nullable: true }).isString().trim().notEmpty(),
   body('remarks').optional({ nullable: true }).isString().trim().isLength({ max: 500 }),

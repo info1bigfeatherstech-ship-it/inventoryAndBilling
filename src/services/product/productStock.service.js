@@ -7,6 +7,8 @@ const { cacheDel, cacheDelByPattern, productDetailCacheKey, productListCachePatt
 const { createStockLedgerEntry } = require('../stock/stockLedger.helpers');
 const { aggregateStocksByVariant } = require('../../utils/stockAggregate.utils');
 const logger = require('../../utils/logger.utils');
+const { isOrgLevelAdmin } = require('../../utils/orgRole.utils');
+
 
 const TX_OPTIONS = { isolationLevel: 'Serializable' };
 
@@ -213,7 +215,7 @@ const ProductStockService = {
     const stock = await prisma.productStock.findUnique({ where: { stock_id: stockId }, select: STOCK_SELECT });
     if (!stock) throw new AppError('Stock record not found', 404, 'STOCK_NOT_FOUND');
 
-    if (user.role !== 'SUPER_ADMIN' && user.warehouseId && stock.warehouse_id !== user.warehouseId) {
+    if (!isOrgLevelAdmin(user) && user.warehouseId && stock.warehouse_id !== user.warehouseId) {
       throw new AppError('Stock record not found', 404, 'STOCK_NOT_FOUND');
     }
 
@@ -234,7 +236,7 @@ const ProductStockService = {
     });
     if (!existing) throw new AppError('Stock record not found', 404, 'STOCK_NOT_FOUND');
 
-    if (user.role !== 'SUPER_ADMIN' && user.warehouseId && existing.warehouse_id !== user.warehouseId) {
+    if (!isOrgLevelAdmin(user) && user.warehouseId && existing.warehouse_id !== user.warehouseId) {
       throw new AppError('Stock record not found', 404, 'STOCK_NOT_FOUND');
     }
 
@@ -294,7 +296,7 @@ const ProductStockService = {
     });
     if (!existing) throw new AppError('Stock record not found', 404, 'STOCK_NOT_FOUND');
 
-    if (user.role !== 'SUPER_ADMIN' && user.warehouseId && existing.warehouse_id !== user.warehouseId) {
+    if (!isOrgLevelAdmin(user) && user.warehouseId && existing.warehouse_id !== user.warehouseId) {
       throw new AppError('Stock record not found', 404, 'STOCK_NOT_FOUND');
     }
 

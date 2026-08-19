@@ -2,6 +2,8 @@ const { AppError } = require('../../errors/AppError');
 const { resolveShopIdForUser } = require('../../utils/shopAccess.utils');
 const { resolveOwnerShopId } = require('../../utils/transferRequest.utils');
 const { OFFLINE_SYNC_ROLES } = require('./sync.constants');
+const { isOrgLevelAdmin } = require('../../utils/orgRole.utils');
+
 
 const assertOfflineSyncRole = (user) => {
   if (!user?.role || !OFFLINE_SYNC_ROLES.includes(user.role)) {
@@ -15,7 +17,7 @@ const assertOfflineSyncRole = (user) => {
 const resolveSyncShopId = async (user, requestedShopId) => {
   assertOfflineSyncRole(user);
 
-  if (user.role === 'SUPER_ADMIN') {
+  if (isOrgLevelAdmin(user)) {
     if (!requestedShopId) {
       throw new AppError('shop_id is required', 400, 'SHOP_ID_REQUIRED');
     }

@@ -41,6 +41,8 @@ const {
 const { generateBillNumber } = require('../../utils/billNumber.utils');
 const ShopBankAccountService = require('../shop/shopBankAccount.service');
 const ShopStaffCodeService = require('../shop/shopStaffCode.service');
+const AppSettingsService = require('../settings/appSettings.service');
+const { calculateWholesaleUnitPriceFromSelling } = require('../../utils/wholesalePrice.utils');
 const logger = require('../../utils/logger.utils');
 
 const TX_OPTIONS = { isolationLevel: 'Serializable', maxWait: 10000, timeout: 30000 };
@@ -202,6 +204,8 @@ const loadVariantsForBill = async (items) => {
       sku: true,
       mrp: true,
       special_price: true,
+      purchase_price: true,
+      expenses: true,
       combo_eligible: true,
       is_active: true,
       low_stock_threshold: true,
@@ -256,11 +260,24 @@ const BillingService = {
         );
       }
 
-      if (shop.shop_type === 'FRANCHISE' || shop.shop_type === 'OWNER') {
+      if (shop.shop_type === 'FRANCHISE') {
         for (const item of data.items) {
-          if (item.price_type && item.price_type !== 'SPECIAL') {
+          if (item.price_type && item.price_type !== 'SPECIAL' && item.price_type !== 'RETAIL') {
             throw new AppError(
               'This shop must bill at special price only',
+              400,
+              'SHOP_PRICE_TYPE_LOCKED'
+            );
+          }
+        }
+      }
+
+      if (shop.shop_type === 'OWNER') {
+        for (const item of data.items) {
+          const pt = item.price_type || 'SPECIAL';
+          if (pt !== 'SPECIAL' && pt !== 'RETAIL' && pt !== 'WHOLESALE') {
+            throw new AppError(
+              'Owner shops can bill retail (special) or wholesale only',
               400,
               'SHOP_PRICE_TYPE_LOCKED'
             );
@@ -285,7 +302,7 @@ const BillingService = {
 
       const variantMap = await loadVariantsForBill(data.items);
 
-      // Global combo rules — special-price based; only combo_eligible variants participate.
+      // Global combo rules — retail/special only. Wholesale ignores sale/combo pricing.
       let comboPricedByKey = new Map();
       try {
         const activeComboRules = await ComboRuleService.listActiveRulesForBilling();
@@ -293,7 +310,8 @@ const BillingService = {
           const comboInput = data.items.map((item, index) => {
             const variant = variantMap.get(item.variant_id);
             const priceType = item.price_type || 'SPECIAL';
-            const specialOnly = priceType === 'SPECIAL' || priceType === 'RETAIL';
+            const specialOnly =
+              priceType === 'SPECIAL' || priceType === 'RETAIL';
             const overridden = item.price_overridden === true;
             const onSale = variant.on_sale === true;
             return {
@@ -368,6 +386,18 @@ const BillingService = {
         shopStateCode,
       });
 
+      const usesWholesale = data.items.some((item) => (item.price_type || 'SPECIAL') === 'WHOLESALE');
+      if (usesWholesale && shop.shop_type !== 'OWNER') {
+        throw new AppError(
+          'Wholesale billing is only allowed on Mehta Mart owner shops',
+          403,
+          'WHOLESALE_BILLING_FORBIDDEN'
+        );
+      }
+      const wholesaleMarkupPercent = usesWholesale
+        ? await AppSettingsService.getWholesaleMarkupPercent()
+        : null;
+
       const computedLines = data.items.map((item, index) => {
         const variant = variantMap.get(item.variant_id);
         const qty = Number(item.quantity);
@@ -388,16 +418,30 @@ const BillingService = {
             throw new AppError('unit_price must be >= 0', 400, 'INVALID_UNIT_PRICE');
           }
           unitPrice = roundMoney(clientPrice);
-        } else if (priceType === 'SPECIAL' || priceType === 'RETAIL') {
+        } else if (priceType === 'SPECIAL' || priceType === 'RETAIL' || priceType === 'WHOLESALE') {
           const salePrice = Number(variant.sale_price ?? variant.effective_special_price);
-          if (variant.on_sale === true && Number.isFinite(salePrice) && salePrice > 0) {
-            unitPrice = salePrice;
+          let selling;
+          if (priceType === 'WHOLESALE') {
+            selling = Number.isFinite(catalogSpecial)
+              ? catalogSpecial
+              : (Number.isFinite(clientPrice) && clientPrice >= 0 ? clientPrice : undefined);
+          } else if (variant.on_sale === true && Number.isFinite(salePrice) && salePrice > 0) {
+            selling = salePrice;
           } else if (comboRow && Number.isFinite(comboRow.unit_price)) {
-            unitPrice = Number(comboRow.unit_price);
+            selling = Number(comboRow.unit_price);
           } else if (Number.isFinite(catalogSpecial)) {
-            unitPrice = catalogSpecial;
+            selling = catalogSpecial;
           } else if (Number.isFinite(clientPrice) && clientPrice >= 0) {
-            unitPrice = clientPrice;
+            selling = clientPrice;
+          }
+          if (priceType === 'WHOLESALE') {
+            unitPrice = calculateWholesaleUnitPriceFromSelling(
+              variant,
+              wholesaleMarkupPercent,
+              selling
+            );
+          } else {
+            unitPrice = selling;
           }
         } else if (Number.isFinite(clientPrice) && clientPrice >= 0) {
           unitPrice = clientPrice;
@@ -439,9 +483,12 @@ const BillingService = {
           hsn_code: variant.product.hsn_code,
           product_name: variant.product.name,
           low_stock_threshold: variant.low_stock_threshold,
-          combo_applied: priceOverridden || variant.on_sale === true ? false : Boolean(comboRow?.combo_applied),
+          combo_applied:
+            priceType === 'WHOLESALE' || priceOverridden || variant.on_sale === true
+              ? false
+              : Boolean(comboRow?.combo_applied),
           combo_unit_price:
-            !priceOverridden && variant.on_sale !== true && comboRow?.combo_applied
+            priceType !== 'WHOLESALE' && !priceOverridden && variant.on_sale !== true && comboRow?.combo_applied
               ? (comboRow?.combo_unit_price != null
                 ? Number(comboRow.combo_unit_price)
                 : unitPrice)
@@ -948,6 +995,7 @@ const BillingService = {
     if (filters.customer_mobile) where.customer_mobile = { contains: String(filters.customer_mobile).trim() };
     if (filters.bill_number) where.bill_number = { contains: String(filters.bill_number).trim(), mode: 'insensitive' };
     if (filters.payment_status) where.payment_status = filters.payment_status;
+    if (filters.sales_channel) where.sales_channel = String(filters.sales_channel).trim().toUpperCase();
     if (filters.is_cancelled != null) {
       where.is_cancelled = filters.is_cancelled === true || filters.is_cancelled === 'true';
     }

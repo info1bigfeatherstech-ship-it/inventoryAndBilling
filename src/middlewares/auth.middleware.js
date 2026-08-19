@@ -1,6 +1,7 @@
 const prisma = require('../utils/prisma.utils');
 const { AppError } = require('./error.middleware');
 const { verifyAccessToken } = require('../utils/jwt.utils');
+const { expandRolesForAuthorization } = require('../utils/orgRole.utils');
 
 const getBearerToken = (req) => {
   const authHeader = req.headers.authorization || '';
@@ -46,12 +47,13 @@ const requireAuth = async (req, res, next) => {
 };
 
 const authorizeRoles = (...roles) => {
+  const allowed = expandRolesForAuthorization(roles);
   return (req, res, next) => {
     if (!req.user) {
       return next(new AppError('Authentication required', 401, 'AUTH_REQUIRED'));
     }
 
-    if (!roles.includes(req.user.role)) {
+    if (!allowed.includes(req.user.role)) {
       return next(new AppError('Insufficient permissions', 403, 'FORBIDDEN'));
     }
 

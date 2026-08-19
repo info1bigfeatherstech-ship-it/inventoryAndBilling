@@ -10,6 +10,8 @@ const {
   productListCachePattern,
 } = require('../../utils/cache.utils');
 const logger = require('../../utils/logger.utils');
+const { isOrgLevelAdmin } = require('../../utils/orgRole.utils');
+
 const {
   normalizeBatch,
   deductWarehouseStock: deductWarehouseStockFifo,
@@ -325,7 +327,7 @@ const StockTransferService = {
   },
 
   async reconcileStock(data, user) {
-    if (user.role !== 'SUPER_ADMIN') {
+    if (!isOrgLevelAdmin(user)) {
       throw new AppError('Only SUPER_ADMIN can reconcile stock', 403, 'FORBIDDEN');
     }
 

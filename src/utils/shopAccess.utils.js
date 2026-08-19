@@ -1,11 +1,12 @@
 const { AppError } = require('../errors/AppError');
 const { toRoleSet, SHOP_STAFF_ROLES } = require('../constants/userRole.constants');
+const { isOrgLevelAdmin } = require('./orgRole.utils');
 
 const SHOP_STAFF_ROLE_SET = toRoleSet(SHOP_STAFF_ROLES);
 
 const assertShopReadAccess = (shopId, user) => {
   if (!shopId) return;
-  if (user?.role === 'SUPER_ADMIN') return;
+  if (isOrgLevelAdmin(user)) return;
 
   if (SHOP_STAFF_ROLE_SET.has(user?.role)) {
     if (user.shopId && user.shopId === shopId) return;
@@ -18,7 +19,7 @@ const assertShopReadAccess = (shopId, user) => {
 };
 
 const resolveShopIdForUser = (user, requestedShopId) => {
-  if (user?.role === 'SUPER_ADMIN') {
+  if (isOrgLevelAdmin(user)) {
     if (!requestedShopId) {
       throw new AppError('shop_id is required', 400, 'SHOP_ID_REQUIRED');
     }
@@ -40,7 +41,7 @@ const resolveShopIdForUser = (user, requestedShopId) => {
 };
 
 const applyShopListScope = (where, user) => {
-  if (user?.role === 'SUPER_ADMIN') return where;
+  if (isOrgLevelAdmin(user)) return where;
 
   if (SHOP_STAFF_ROLE_SET.has(user?.role) && user.shopId) {
     where.shop_id = user.shopId;

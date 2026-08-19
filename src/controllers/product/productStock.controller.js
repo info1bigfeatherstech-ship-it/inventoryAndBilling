@@ -2,10 +2,12 @@ const asyncHandler = require('../../utils/asyncHandler.utils');
 const { AppError } = require('../../middlewares/error.middleware');
 const { successResponse, paginatedMeta } = require('../../utils/response.utils');
 const ProductStockService = require('../../services/product/productStock.service');
+const { isOrgLevelAdmin } = require('../../utils/orgRole.utils');
+
 
 const withUserContext = (req) => {
   const user = { ...req.user };
-  if (req.user.role === 'SUPER_ADMIN' && req.query.warehouse_id) {
+  if (isOrgLevelAdmin(req.user) && req.query.warehouse_id) {
     user.requestedWarehouseFilter = req.query.warehouse_id;
   }
   return user;

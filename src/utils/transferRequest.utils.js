@@ -1,6 +1,8 @@
 const prisma = require('./prisma.utils');
 const { AppError } = require('../errors/AppError');
 const { assertWarehouseStockAvailable } = require('./warehouseStock.utils');
+const { isOrgLevelAdmin } = require('./orgRole.utils');
+
 const {
   UserRole,
   isShopOwner,
@@ -102,7 +104,7 @@ const getInTransitRemaining = (request) => {
  * @param {object} user
  */
 const assertCreateRequestAllowed = (requestType, user) => {
-  if (user.role === 'SUPER_ADMIN') return;
+  if (isOrgLevelAdmin(user)) return;
 
   if (user.role === 'WH_MANAGER' || user.role === 'WH_STOCK_LISTER') {
     if (requestType === 'WH_TO_SHOP') {
@@ -143,7 +145,7 @@ const assertCreateRequestAllowed = (requestType, user) => {
  * @param {object} [context] - Optional { requestType, toWarehouseId, toShopId, fromWarehouseId, fromShopId }
  */
 const validateRolePermissions = async (action, request, user, context = {}) => {
-  if (user.role === 'SUPER_ADMIN') return;
+  if (isOrgLevelAdmin(user)) return;
 
   const type = request?.request_type ?? context.requestType;
   const fromWh = request?.from_warehouse_id ?? context.fromWarehouseId;
@@ -195,7 +197,7 @@ const validateRolePermissions = async (action, request, user, context = {}) => {
     case 'approve':
     case 'reject': {
       if (type === 'WH_TO_WH' || type === 'WH_TO_SHOP') {
-        if (!['WH_MANAGER', 'SUPER_ADMIN'].includes(user.role)) {
+        if (!['WH_MANAGER', 'SUPER_ADMIN', 'ORG_MANAGER'].includes(user.role)) {
           throw new AppError(
             'Only the source warehouse manager can approve or reject this request',
             403,
@@ -304,7 +306,7 @@ const validateRolePermissions = async (action, request, user, context = {}) => {
  * @param {object} baseWhere
  */
 const applyTransferListScope = (user, baseWhere = {}) => {
-  if (user.role === 'SUPER_ADMIN') return baseWhere;
+  if (isOrgLevelAdmin(user)) return baseWhere;
 
   if (['WH_MANAGER', 'WH_STOCK_LISTER'].includes(user.role) && user.warehouseId) {
     baseWhere.OR = [

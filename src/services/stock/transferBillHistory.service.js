@@ -2,15 +2,20 @@ const prisma = require('../../utils/prisma.utils');
 const { AppError } = require('../../errors/AppError');
 const { parsePagination } = require('../../utils/pagination.utils');
 const { resolveOwnerShopId } = require('../../utils/transferRequest.utils');
-const { isFranchiseWhToShopTransfer } = require('../../utils/franchiseTransferPricing.utils');
 const TransferBillService = require('./transferBill.service');
 const { generateTransferChallanPdf } = require('./transferChallanPdf.service');
+const { isOrgLevelAdmin } = require('../../utils/orgRole.utils');
 
-const FRANCHISE_BILL_BASE_WHERE = {
+
+const COMMERCIAL_BILL_BASE_WHERE = {
   request_type: 'WH_TO_SHOP',
   transfer_bill_number: { not: null },
-  to_shop: { shop_type: 'FRANCHISE' },
+  to_shop: { shop_type: { in: ['FRANCHISE', 'OWNER'] } },
 };
+
+const isCommercialWhToShopTransfer = (record) =>
+  record?.request_type === 'WH_TO_SHOP'
+  && ['FRANCHISE', 'OWNER'].includes(record?.to_shop?.shop_type);
 
 const BULK_BILL_SELECT = {
   bulk_request_id: true,
@@ -119,7 +124,7 @@ const buildDateFilter = (fromDate, toDate) => {
 };
 
 const applyRoleScope = async (user, bulkWhere, singleWhere) => {
-  if (user.role === 'SUPER_ADMIN') return;
+  if (isOrgLevelAdmin(user)) return;
 
   if (['WH_MANAGER', 'WH_STOCK_LISTER'].includes(user.role) && user.warehouseId) {
     bulkWhere.from_warehouse_id = user.warehouseId;
@@ -196,8 +201,8 @@ const SINGLE_BILL_INCLUDE = {
 };
 
 const buildListFilters = async (query, user) => {
-  const bulkWhere = { ...FRANCHISE_BILL_BASE_WHERE };
-  const singleWhere = { ...FRANCHISE_BILL_BASE_WHERE };
+  const bulkWhere = { ...COMMERCIAL_BILL_BASE_WHERE };
+  const singleWhere = { ...COMMERCIAL_BILL_BASE_WHERE };
   let includeBulk = true;
   let includeSingle = true;
 
@@ -215,7 +220,7 @@ const buildListFilters = async (query, user) => {
   if (query.shop_id) {
     // Shop roles are forced to their own shop in applyRoleScope — ignore client shop_id to prevent spoofing.
     if (
-      user.role === 'SUPER_ADMIN' ||
+      isOrgLevelAdmin(user) ||
       ['WH_MANAGER', 'WH_STOCK_LISTER'].includes(user.role)
     ) {
       bulkWhere.to_shop_id = query.shop_id;
@@ -437,11 +442,11 @@ const TransferBillHistoryService = {
   },
 
   async assertBillAccess(record, user, source) {
-    if (!isFranchiseWhToShopTransfer(record) || !record.transfer_bill_number) {
+    if (!isCommercialWhToShopTransfer(record) || !record.transfer_bill_number) {
       throw new AppError('Transfer bill not found', 404, 'TRANSFER_BILL_NOT_FOUND');
     }
 
-    if (user.role === 'SUPER_ADMIN') return;
+    if (isOrgLevelAdmin(user)) return;
 
     if (['WH_MANAGER', 'WH_STOCK_LISTER'].includes(user.role)) {
       if (user.warehouseId !== record.from_warehouse_id) {

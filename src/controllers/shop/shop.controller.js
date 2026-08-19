@@ -5,7 +5,7 @@ const { AppError } = require('../../middlewares/error.middleware');
 
 const ShopController = {
   create: asyncHandler(async (req, res) => {
-    const shop = await ShopService.createShop(req.body);
+    const shop = await ShopService.createShop(req.body, req.user);
     return successResponse(res, req, { statusCode: 201, message: 'Shop created successfully', data: shop });
   }),
 
@@ -57,12 +57,12 @@ const ShopController = {
   }),
 
   update: asyncHandler(async (req, res) => {
-    const shop = await ShopService.updateShop(req.params.shopId, req.body);
+    const shop = await ShopService.updateShop(req.params.shopId, req.body, req.user);
     return successResponse(res, req, { statusCode: 200, message: 'Shop updated successfully', data: shop });
   }),
 
   remove: asyncHandler(async (req, res) => {
-    const result = await ShopService.softDeleteShop(req.params.shopId);
+    const result = await ShopService.softDeleteShop(req.params.shopId, req.user);
     return successResponse(res, req, {
       statusCode: 200,
       message: result.alreadyInactive ? 'Shop already inactive' : 'Shop deactivated successfully',

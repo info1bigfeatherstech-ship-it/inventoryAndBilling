@@ -34,6 +34,8 @@ const {
   formatTransferRequestsForUser,
 } = require('../../utils/franchiseTransferPricing.utils');
 const TransferBillService = require('./transferBill.service');
+const { isOrgLevelAdmin } = require('../../utils/orgRole.utils');
+
 
 const TX_OPTIONS = { isolationLevel: 'Serializable', maxWait: 10000, timeout: 30000 };
 
@@ -573,7 +575,7 @@ const TransferRequestService = {
   async getRequestById(requestId, user) {
     try {
       const request = await loadRequestOrThrow(requestId);
-      if (user.role !== 'SUPER_ADMIN') {
+      if (!isOrgLevelAdmin(user)) {
         const where = {};
         await applyShopOwnerListScope(user, where);
         applyTransferListScope(user, where);

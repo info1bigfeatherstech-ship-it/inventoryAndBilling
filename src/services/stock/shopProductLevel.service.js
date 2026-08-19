@@ -34,7 +34,7 @@ const ShopProductLevelService = {
       const shopId = resolveShopIdForUser(user, data.shop_id);
       assertShopReadAccess(shopId, user);
 
-      if (!['SUPER_ADMIN', 'SHOP_OWNER', 'SHOP_MANAGER'].includes(user.role)) {
+      if (!['SUPER_ADMIN', 'ORG_MANAGER', 'SHOP_OWNER', 'SHOP_MANAGER'].includes(user.role)) {
         throw new AppError('Only shop owners or managers can configure product levels', 403, 'FORBIDDEN');
       }
 

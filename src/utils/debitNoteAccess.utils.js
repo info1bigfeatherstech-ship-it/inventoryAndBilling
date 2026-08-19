@@ -1,7 +1,9 @@
 const { AppError } = require('../errors/AppError');
+const { isOrgLevelAdmin } = require('./orgRole.utils');
 
-const WH_WRITE_ROLES = new Set(['SUPER_ADMIN', 'WH_MANAGER', 'WH_STOCK_LISTER']);
-const WH_READ_ROLES = new Set(['SUPER_ADMIN', 'WH_MANAGER', 'WH_STOCK_LISTER']);
+
+const WH_WRITE_ROLES = new Set(['SUPER_ADMIN', 'ORG_MANAGER', 'WH_MANAGER', 'WH_STOCK_LISTER']);
+const WH_READ_ROLES = new Set(['SUPER_ADMIN', 'ORG_MANAGER', 'WH_MANAGER', 'WH_STOCK_LISTER']);
 
 /**
  * Assert user may read/write debit notes for a warehouse.
@@ -12,7 +14,7 @@ const assertWarehouseDebitNoteAccess = (warehouseId, user, { write = false } = {
     throw new AppError('Not authorized for warehouse debit notes', 403, 'FORBIDDEN');
   }
 
-  if (user.role === 'SUPER_ADMIN') return;
+  if (isOrgLevelAdmin(user)) return;
 
   if (!user.warehouseId) {
     throw new AppError('User is not assigned to a warehouse', 403, 'WAREHOUSE_NOT_ASSIGNED');
@@ -27,7 +29,7 @@ const assertWarehouseDebitNoteAccess = (warehouseId, user, { write = false } = {
  * Apply warehouse scope to list filters.
  */
 const applyDebitNoteListScope = (where, user) => {
-  if (user.role !== 'SUPER_ADMIN' && user.warehouseId) {
+  if (!isOrgLevelAdmin(user) && user.warehouseId) {
     where.warehouse_id = user.warehouseId;
   }
   return where;

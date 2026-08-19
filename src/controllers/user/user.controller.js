@@ -5,7 +5,7 @@ const { successResponse, paginatedMeta } = require('../../utils/response.utils')
 
 const UserController = {
   create: asyncHandler(async (req, res) => {
-    const user = await UserService.createUser(req.body);
+    const user = await UserService.createUser(req.body, req.user);
     return successResponse(res, req, {
       statusCode: 201,
       message: 'User created successfully',
@@ -33,7 +33,7 @@ const UserController = {
   }),
 
   update: asyncHandler(async (req, res) => {
-    const user = await UserService.updateUser(req.params.userId, req.body);
+    const user = await UserService.updateUser(req.params.userId, req.body, req.user);
     return successResponse(res, req, {
       statusCode: 200,
       message: 'User updated successfully',
@@ -42,7 +42,7 @@ const UserController = {
   }),
 
   updateStatus: asyncHandler(async (req, res) => {
-    const result = await UserService.updateUserStatus(req.params.userId, req.body.is_active);
+    const result = await UserService.updateUserStatus(req.params.userId, req.body.is_active, req.user);
     return successResponse(res, req, {
       statusCode: 200,
       message: result.unchanged ? 'User status already set' : 'User status updated successfully',
@@ -51,7 +51,7 @@ const UserController = {
   }),
 
   resetPassword: asyncHandler(async (req, res) => {
-    await UserService.resetUserPassword(req.params.userId, req.body.new_password);
+    await UserService.resetUserPassword(req.params.userId, req.body.new_password, req.user);
     return successResponse(res, req, {
       statusCode: 200,
       message: 'User password reset successfully',

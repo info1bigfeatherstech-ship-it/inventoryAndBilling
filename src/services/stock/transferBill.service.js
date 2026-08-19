@@ -51,6 +51,13 @@ const REQUEST_TYPE_LABELS = {
 
 };
 
+const OWNER_SHOP = 'OWNER';
+const FRANCHISE_SHOP = 'FRANCHISE';
+
+const isCommercialWhToShopTransfer = (record) =>
+  record?.request_type === 'WH_TO_SHOP'
+  && [OWNER_SHOP, FRANCHISE_SHOP].includes(record?.to_shop?.shop_type);
+
 
 
 const VALID_BILL_TYPES = new Set(['GST_INVOICE', 'NON_GST_INVOICE', 'ESTIMATE_INVOICE']);
@@ -86,6 +93,9 @@ const getApprovedQty = (item) => {
   if (item.approved_quantity != null) return Number(item.approved_quantity) || 0;
   return 0;
 };
+
+const toCommercialMarkupPercent = (shopType, franchiseMarkupPercent) =>
+  shopType === FRANCHISE_SHOP ? franchiseMarkupPercent : 100;
 
 
 
@@ -269,7 +279,7 @@ const assertFranchiseBillType = (billType) => {
 
     throw new AppError(
 
-      'transfer_bill_type is required (GST_INVOICE, NON_GST_INVOICE, or ESTIMATE_INVOICE) for franchise transfers',
+      'transfer_bill_type is required (GST_INVOICE, NON_GST_INVOICE, or ESTIMATE_INVOICE) for warehouse to shop transfer bills',
 
       400,
 
@@ -626,6 +636,54 @@ const snapshotFranchiseOnSingleRequest = async (tx, request, markupPercent) => {
   );
 };
 
+const snapshotCommercialOnApprovedItems = async (tx, bulk, markupPercent) =>
+  snapshotFranchiseOnBulkItems(tx, bulk.bulk_request_id, markupPercent, getApprovedQty);
+
+const snapshotCommercialOnSingleRequest = async (tx, request, markupPercent) =>
+  snapshotFranchiseOnSingleRequest(tx, request, markupPercent);
+
+const withCommercialSnapshotFallback = async (itemsOrRequest, markupPercent) => {
+  const rules = await ComboRuleService.listActiveRulesForBilling().catch(() => []);
+
+  if (Array.isArray(itemsOrRequest)) {
+    const snaps = buildFranchiseSnapshotsWithCombo(
+      itemsOrRequest.map((item) => ({
+        key: item.bulk_item_id,
+        quantity: getApprovedQty(item),
+        variant: item.variant,
+      })),
+      markupPercent,
+      rules
+    );
+    return itemsOrRequest.map((item) => ({
+      ...item,
+      ...(item.franchise_unit_price_snapshot != null
+        ? {}
+        : (
+            snaps.get(String(item.bulk_item_id))
+            || snapshotFranchiseTransferPricing(item.variant, getApprovedQty(item), markupPercent)
+          )),
+    }));
+  }
+
+  const snap =
+    itemsOrRequest?.franchise_unit_price_snapshot != null
+      ? null
+      : (
+          buildFranchiseSnapshotsWithCombo(
+            [{ key: itemsOrRequest.request_id || 'single', quantity: Number(itemsOrRequest.quantity) || 0, variant: itemsOrRequest.variant }],
+            markupPercent,
+            rules
+          ).get(String(itemsOrRequest.request_id || 'single'))
+          || snapshotFranchiseTransferPricing(
+            itemsOrRequest.variant,
+            Number(itemsOrRequest.quantity) || 0,
+            markupPercent
+          )
+        );
+  return snap ? { ...itemsOrRequest, ...snap } : itemsOrRequest;
+};
+
 
 
 const SINGLE_BILL_INCLUDE = {
@@ -651,6 +709,9 @@ const SINGLE_BILL_INCLUDE = {
       warranty: true,
       attributes: true,
       special_price: true,
+      combo_eligible: true,
+      purchase_price: true,
+      expenses: true,
       product: {
         select: {
           name: true,
@@ -658,6 +719,7 @@ const SINGLE_BILL_INCLUDE = {
           hsn_code: true,
           gst_percent: true,
           gst_type: true,
+          expenses: true,
           warranty: true,
         },
       },
@@ -691,10 +753,10 @@ const TransferBillService = {
 
 
 
-    if (!isFranchiseShopType(destShop?.shop_type)) {
+    if (![OWNER_SHOP, FRANCHISE_SHOP].includes(destShop?.shop_type)) {
       if (transferBillType) {
         throw new AppError(
-          'Transfer bill type applies only to franchise shop transfers',
+          'Transfer bill type applies only to warehouse to shop transfers',
           400,
           'NOT_FRANCHISE_TRANSFER'
         );
@@ -738,9 +800,12 @@ const TransferBillService = {
 
 
 
-    const markup = await AppSettingsService.getFranchiseMarkupPercent();
+    const markup = toCommercialMarkupPercent(
+      destShop?.shop_type,
+      await AppSettingsService.getFranchiseMarkupPercent()
+    );
 
-    await snapshotFranchiseOnApprovedItems(tx, bulk, markup);
+    await snapshotCommercialOnApprovedItems(tx, bulk, markup);
 
 
 
@@ -819,6 +884,9 @@ const TransferBillService = {
                 attributes: true,
 
                 special_price: true,
+                combo_eligible: true,
+                purchase_price: true,
+                expenses: true,
 
                 product: {
 
@@ -833,6 +901,7 @@ const TransferBillService = {
                     gst_percent: true,
 
                     gst_type: true,
+                    expenses: true,
 
                     warranty: true,
 
@@ -862,10 +931,8 @@ const TransferBillService = {
 
     }
 
-    if (!isFranchiseWhToShopTransfer(bulk)) {
-
-      throw new AppError('Not a franchise transfer bill', 400, 'NOT_FRANCHISE_TRANSFER_BILL');
-
+    if (!isCommercialWhToShopTransfer(bulk)) {
+      throw new AppError('Not a commercial shop transfer bill', 400, 'NOT_FRANCHISE_TRANSFER_BILL');
     }
 
     if (bulk.transfer_bill_type === 'GST_INVOICE') {
@@ -889,8 +956,12 @@ const TransferBillService = {
 
 
     const { issuer, recipient } = await buildIssuerRecipient(bulk, shopGst);
+    const resolvedItems =
+      bulk?.to_shop?.shop_type === OWNER_SHOP
+        ? await withCommercialSnapshotFallback(bulk.items, 100)
+        : bulk.items;
 
-    const lines = buildBillLines(bulk.items, bulk.transfer_bill_type);
+    const lines = buildBillLines(resolvedItems, bulk.transfer_bill_type);
 
     if (!lines.length) {
 
@@ -962,7 +1033,11 @@ const TransferBillService = {
 
     );
 
-    const lines = buildBillLines(approvedItems, bulk.transfer_bill_type);
+    const resolvedItems =
+      bulk?.to_shop?.shop_type === OWNER_SHOP
+        ? await withCommercialSnapshotFallback(approvedItems, 100)
+        : approvedItems;
+    const lines = buildBillLines(resolvedItems, bulk.transfer_bill_type);
 
     if (!lines.length) return null;
 
@@ -973,7 +1048,14 @@ const TransferBillService = {
 
 
   async prepareFranchiseApproveSingle(tx, request, transferBillType) {
-    if (!isFranchiseWhToShopTransfer(request)) return null;
+    const destShop =
+      request.request_type === 'WH_TO_SHOP' && request.to_shop_id
+        ? await tx.shop.findUnique({
+            where: { shop_id: request.to_shop_id },
+            select: { shop_type: true },
+          })
+        : null;
+    if (![OWNER_SHOP, FRANCHISE_SHOP].includes(destShop?.shop_type)) return null;
 
     assertFranchiseBillType(transferBillType);
 
@@ -993,8 +1075,11 @@ const TransferBillService = {
       }
     }
 
-    const markup = await AppSettingsService.getFranchiseMarkupPercent();
-    const franchiseSnap = await snapshotFranchiseOnSingleRequest(tx, request, markup);
+    const markup = toCommercialMarkupPercent(
+      destShop?.shop_type,
+      await AppSettingsService.getFranchiseMarkupPercent()
+    );
+    const franchiseSnap = await snapshotCommercialOnSingleRequest(tx, request, markup);
 
     const billNumber = await generateTransferBillNumber(tx, wh.warehouse_code);
 
@@ -1018,8 +1103,8 @@ const TransferBillService = {
     if (!request.transfer_bill_type || !request.transfer_bill_number) {
       throw new AppError('Transfer bill has not been generated for this request', 409, 'TRANSFER_BILL_NOT_FOUND');
     }
-    if (!isFranchiseWhToShopTransfer(request)) {
-      throw new AppError('Not a franchise transfer bill', 400, 'NOT_FRANCHISE_TRANSFER_BILL');
+    if (!isCommercialWhToShopTransfer(request)) {
+      throw new AppError('Not a commercial shop transfer bill', 400, 'NOT_FRANCHISE_TRANSFER_BILL');
     }
 
     if (request.transfer_bill_type === 'GST_INVOICE') {
@@ -1033,7 +1118,11 @@ const TransferBillService = {
     }
 
     const { issuer, recipient } = await buildIssuerRecipient(request, shopGst);
-    const lines = buildBillLinesFromSingle(request, request.transfer_bill_type);
+    const resolvedRequest =
+      request?.to_shop?.shop_type === OWNER_SHOP
+        ? await withCommercialSnapshotFallback(request, 100)
+        : request;
+    const lines = buildBillLinesFromSingle(resolvedRequest, request.transfer_bill_type);
     if (!lines.length) {
       throw new AppError('Transfer bill has no line items', 400, 'TRANSFER_BILL_EMPTY');
     }
@@ -1067,7 +1156,11 @@ const TransferBillService = {
 
   async computeFranchiseBillTotalsFromSingle(request) {
     if (!request?.transfer_bill_type || !request?.transfer_bill_number) return null;
-    const lines = buildBillLinesFromSingle(request, request.transfer_bill_type);
+    const resolvedRequest =
+      request?.to_shop?.shop_type === OWNER_SHOP
+        ? await withCommercialSnapshotFallback(request, 100)
+        : request;
+    const lines = buildBillLinesFromSingle(resolvedRequest, request.transfer_bill_type);
     if (!lines.length) return null;
     return computeBillTotals(lines, request.transfer_bill_type);
   },

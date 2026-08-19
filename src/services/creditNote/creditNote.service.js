@@ -26,6 +26,8 @@ const {
   deriveCreditNoteStatus,
 } = require('../../utils/creditNote.utils');
 const logger = require('../../utils/logger.utils');
+const { isOrgLevelAdmin } = require('../../utils/orgRole.utils');
+
 
 const TX_OPTIONS = { isolationLevel: 'Serializable', maxWait: 10000, timeout: 30000 };
 
@@ -876,7 +878,7 @@ const CreditNoteService = {
       if (!cn) throw new AppError('Credit note not found', 404, 'CREDIT_NOTE_NOT_FOUND');
       const refundingShopId = await resolveBillingShopId(
         user,
-        data.refunding_shop_id || data.shop_id || (user.role === 'SUPER_ADMIN' ? cn.shop_id : undefined)
+        data.refunding_shop_id || data.shop_id || (isOrgLevelAdmin(user) ? cn.shop_id : undefined)
       );
       await assertBillWriteAccess(refundingShopId, user);
 
@@ -939,7 +941,7 @@ const CreditNoteService = {
   },
 
   async cancelCreditNote(creditNoteId, data, user) {
-    if (user.role !== 'SUPER_ADMIN') {
+    if (!isOrgLevelAdmin(user)) {
       throw new AppError('Only SUPER_ADMIN can cancel credit notes', 403, 'FORBIDDEN');
     }
 

@@ -36,6 +36,8 @@ const AppSettingsService = require('../settings/appSettings.service');
 const { isFranchiseShopType } = require('../../utils/franchisePrice.utils');
 const { formatBulkTransferRequestForUser } = require('../../utils/franchiseTransferPricing.utils');
 const TransferBillService = require('./transferBill.service');
+const { isOrgLevelAdmin } = require('../../utils/orgRole.utils');
+
 
 const TX_OPTIONS = { isolationLevel: 'Serializable', maxWait: 10000, timeout: 30000 };
 
@@ -169,7 +171,7 @@ const loadVariant = async (variantId) => {
 };
 
 const assertBulkRead = async (bulk, user) => {
-  if (user.role === 'SUPER_ADMIN') return;
+  if (isOrgLevelAdmin(user)) return;
   if (['WH_MANAGER', 'WH_STOCK_LISTER'].includes(user.role)) {
     if (
       user.warehouseId &&
@@ -237,9 +239,9 @@ const BulkTransferService = {
     try {
       const requestType = data.request_type || 'WH_TO_SHOP';
       const canCreateShop =
-        user.role === 'SUPER_ADMIN' || user.role === 'SHOP_OWNER' || user.role === 'SHOP_MANAGER';
+        isOrgLevelAdmin(user) || user.role === 'SHOP_OWNER' || user.role === 'SHOP_MANAGER';
       const canCreateWh =
-        user.role === 'SUPER_ADMIN' || isWarehouseStaff(user);
+        isOrgLevelAdmin(user) || isWarehouseStaff(user);
 
       if (requestType === 'WH_TO_WH') {
         if (!canCreateWh) {
@@ -275,7 +277,7 @@ const BulkTransferService = {
       if (requestType === 'WH_TO_WH') {
         assertWarehouseAssigned(user);
         const toWarehouseId =
-          user.role === 'SUPER_ADMIN'
+          isOrgLevelAdmin(user)
             ? data.to_warehouse_id
             : user.warehouseId;
         if (!toWarehouseId) {
@@ -371,7 +373,7 @@ const BulkTransferService = {
     const { page, limit, skip, take } = parsePagination(filters, { page: 1, limit: 20, maxLimit: 100 });
     const where = {};
 
-    if (user.role === 'SUPER_ADMIN') {
+    if (isOrgLevelAdmin(user)) {
       // all
     } else if (['WH_MANAGER', 'WH_STOCK_LISTER'].includes(user.role) && user.warehouseId) {
       where.OR = [
@@ -471,7 +473,7 @@ const BulkTransferService = {
 
   async approveBulkRequest(bulkRequestId, data, user) {
     try {
-      if (!['SUPER_ADMIN', 'WH_MANAGER', 'WH_STOCK_LISTER'].includes(user.role)) {
+      if (!['SUPER_ADMIN', 'ORG_MANAGER', 'WH_MANAGER', 'WH_STOCK_LISTER'].includes(user.role)) {
         throw new AppError('Only warehouse staff can approve bulk requests', 403, 'FORBIDDEN');
       }
 
@@ -583,7 +585,7 @@ const BulkTransferService = {
 
   async rejectBulkRequest(bulkRequestId, data, user) {
     try {
-      if (!['SUPER_ADMIN', 'WH_MANAGER', 'WH_STOCK_LISTER'].includes(user.role)) {
+      if (!['SUPER_ADMIN', 'ORG_MANAGER', 'WH_MANAGER', 'WH_STOCK_LISTER'].includes(user.role)) {
         throw new AppError('Only warehouse staff can reject bulk requests', 403, 'FORBIDDEN');
       }
 
@@ -639,7 +641,7 @@ const BulkTransferService = {
 
   async dispatchBulkRequest(bulkRequestId, data, user) {
     try {
-      if (!['SUPER_ADMIN', 'WH_MANAGER', 'WH_STOCK_LISTER'].includes(user.role)) {
+      if (!['SUPER_ADMIN', 'ORG_MANAGER', 'WH_MANAGER', 'WH_STOCK_LISTER'].includes(user.role)) {
         throw new AppError('Only warehouse staff can dispatch bulk requests', 403, 'FORBIDDEN');
       }
 
@@ -651,7 +653,7 @@ const BulkTransferService = {
       if (bulk.status !== 'APPROVED') {
         throw new AppError('Bulk request must be APPROVED before dispatch', 409, 'INVALID_TRANSFER_STATUS');
       }
-      if (user.role !== 'SUPER_ADMIN' && user.warehouseId !== bulk.from_warehouse_id) {
+      if (!isOrgLevelAdmin(user) && user.warehouseId !== bulk.from_warehouse_id) {
         throw new AppError('Only source warehouse staff can dispatch', 403, 'WAREHOUSE_FORBIDDEN');
       }
 
@@ -783,21 +785,21 @@ const BulkTransferService = {
       }
 
       if (bulk.request_type === 'WH_TO_WH') {
-        if (!['SUPER_ADMIN', 'WH_MANAGER', 'WH_STOCK_LISTER'].includes(user.role)) {
+        if (!['SUPER_ADMIN', 'ORG_MANAGER', 'WH_MANAGER', 'WH_STOCK_LISTER'].includes(user.role)) {
           throw new AppError('Only warehouse staff can receive WH→WH bulk transfers', 403, 'FORBIDDEN');
         }
-        if (user.role !== 'SUPER_ADMIN' && user.warehouseId !== bulk.to_warehouse_id) {
+        if (!isOrgLevelAdmin(user) && user.warehouseId !== bulk.to_warehouse_id) {
           throw new AppError('Only destination warehouse staff can receive', 403, 'WAREHOUSE_FORBIDDEN');
         }
       } else {
-        if (!['SUPER_ADMIN', 'SHOP_OWNER', 'SHOP_MANAGER'].includes(user.role)) {
+        if (!['SUPER_ADMIN', 'ORG_MANAGER', 'SHOP_OWNER', 'SHOP_MANAGER'].includes(user.role)) {
           throw new AppError('Only shop owners or managers can receive WH→Shop bulk transfers', 403, 'FORBIDDEN');
         }
         let allowedShop = user.shopId;
         if (user.role === 'SHOP_OWNER') {
           allowedShop = (await resolveOwnerShopId(user)) || user.shopId;
         }
-        if (user.role !== 'SUPER_ADMIN' && allowedShop !== bulk.to_shop_id) {
+        if (!isOrgLevelAdmin(user) && allowedShop !== bulk.to_shop_id) {
           throw new AppError('Only destination shop owner or manager can receive', 403, 'SHOP_FORBIDDEN');
         }
       }

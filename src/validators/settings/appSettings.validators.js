@@ -1,5 +1,9 @@
 const { body } = require('express-validator');
 const { ALLOWED_FRANCHISE_MARKUP_PERCENTS } = require('../../utils/franchisePrice.utils');
+const {
+  MIN_WHOLESALE_MARKUP_PERCENT,
+  MAX_WHOLESALE_MARKUP_PERCENT,
+} = require('../../utils/wholesalePrice.utils');
 
 const updateFranchiseSettingsValidator = [
   body('franchise_markup_percent')
@@ -15,6 +19,17 @@ const updateFranchiseSettingsValidator = [
       }
       return true;
     }),
+];
+
+const updateWholesaleSettingsValidator = [
+  body('wholesale_markup_percent')
+    .exists({ checkNull: true })
+    .withMessage('wholesale_markup_percent is required')
+    .isFloat({ min: MIN_WHOLESALE_MARKUP_PERCENT, max: MAX_WHOLESALE_MARKUP_PERCENT })
+    .withMessage(
+      `wholesale_markup_percent must be between ${MIN_WHOLESALE_MARKUP_PERCENT} and ${MAX_WHOLESALE_MARKUP_PERCENT}`
+    )
+    .toFloat(),
 ];
 
 const updateOnlineStockSettingsValidator = [
@@ -73,6 +88,7 @@ const updateCompanyInvoiceSettingsValidator = [
 
 module.exports = {
   updateFranchiseSettingsValidator,
+  updateWholesaleSettingsValidator,
   updateOnlineStockSettingsValidator,
   updateCompanyInvoiceSettingsValidator,
 };

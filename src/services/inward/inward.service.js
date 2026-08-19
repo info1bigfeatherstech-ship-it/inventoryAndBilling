@@ -8,6 +8,8 @@ const {
   productListCachePattern,
 } = require('../../utils/cache.utils');
 const { createStockLedgerEntry } = require('../stock/stockLedger.helpers');
+const { isOrgLevelAdmin } = require('../../utils/orgRole.utils');
+
 const {
   assertVendorInvoiceNotDuplicate,
   buildPurchaseLinesFromInwardItems,
@@ -239,7 +241,7 @@ const applyStockFromMappedInward = async (tx, inwardId, warehouseId, actorUserId
 };
 
 const resolveInwardWarehouseId = (data, user) => {
-  if (user?.role === 'SUPER_ADMIN') {
+  if (isOrgLevelAdmin(user)) {
     if (!data.warehouse_id) {
       throw new AppError('warehouse_id is required', 400, 'WAREHOUSE_ID_REQUIRED');
     }
@@ -347,12 +349,12 @@ const InwardService = {
     const { page, limit, skip, take } = parsePagination(query, { page: 1, limit: 50, maxLimit: 100 });
     const where = buildInwardWhere(query);
 
-    if (user && user.role !== 'SUPER_ADMIN') {
+    if (user && !isOrgLevelAdmin(user)) {
       if (!user.warehouseId) {
         throw new AppError('User is not assigned to a warehouse', 403, 'WAREHOUSE_NOT_ASSIGNED');
       }
       where.warehouse_id = user.warehouseId;
-    } else if (user?.role === 'SUPER_ADMIN' && query.warehouse_id) {
+    } else if (isOrgLevelAdmin(user) && query.warehouse_id) {
       where.warehouse_id = query.warehouse_id;
     }
 
@@ -410,7 +412,7 @@ const InwardService = {
     });
     if (!inward) throw new AppError('Inward receipt not found', 404, 'INWARD_NOT_FOUND');
 
-    if (user && user.role !== 'SUPER_ADMIN') {
+    if (user && !isOrgLevelAdmin(user)) {
       if (!user.warehouseId || inward.warehouse_id !== user.warehouseId) {
         throw new AppError('Inward receipt not found', 404, 'INWARD_NOT_FOUND');
       }

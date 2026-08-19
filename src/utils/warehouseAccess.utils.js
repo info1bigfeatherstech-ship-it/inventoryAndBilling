@@ -1,9 +1,10 @@
 const { AppError } = require('../middlewares/error.middleware');
+const { isOrgLevelAdmin } = require('./orgRole.utils');
 
 const WAREHOUSE_STAFF_ROLES = new Set(['WH_MANAGER', 'WH_STOCK_LISTER']);
 const SHOP_TRANSFER_ROLES = new Set(['SHOP_OWNER', 'SHOP_MANAGER']);
 
-const isSuperAdmin = (user) => user?.role === 'SUPER_ADMIN';
+const isSuperAdmin = (user) => isOrgLevelAdmin(user);
 
 const isWarehouseStaff = (user) => WAREHOUSE_STAFF_ROLES.has(user?.role);
 

@@ -3,9 +3,9 @@ const { assertShopReadAccess, resolveShopIdForUser } = require('./shopAccess.uti
 const { resolveOwnerShopId } = require('./transferRequest.utils');
 const { UserRole } = require('../constants/userRole.constants');
 
-const BANK_READ_ROLES = new Set(['SUPER_ADMIN', 'SHOP_OWNER', 'BILLING_STAFF', UserRole.SHOP_MANAGER]);
-const BANK_WRITE_ROLES = new Set(['SUPER_ADMIN', 'SHOP_OWNER']);
-const STAFF_WRITE_ROLES = new Set(['SUPER_ADMIN', 'SHOP_OWNER', UserRole.SHOP_MANAGER]);
+const BANK_READ_ROLES = new Set(['SUPER_ADMIN', 'ORG_MANAGER', 'SHOP_OWNER', 'BILLING_STAFF', UserRole.SHOP_MANAGER]);
+const BANK_WRITE_ROLES = new Set(['SUPER_ADMIN', 'ORG_MANAGER', 'SHOP_OWNER']);
+const STAFF_WRITE_ROLES = new Set(['SUPER_ADMIN', 'ORG_MANAGER', 'SHOP_OWNER', UserRole.SHOP_MANAGER]);
 
 const isShopManager = (user) => user?.role === UserRole.SHOP_MANAGER;
 const resolveManagedShopId = async (user, requestedShopId) => {

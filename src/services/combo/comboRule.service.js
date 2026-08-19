@@ -14,9 +14,11 @@ const COMBO_RULE_SELECT = {
   updated_at: true,
 };
 
-const assertSuperAdmin = (user) => {
-  if (!user || user.role !== 'SUPER_ADMIN') {
-    throw new AppError('Only SUPER_ADMIN can manage combo rules', 403, 'FORBIDDEN');
+const { isOrgLevelAdmin } = require('../../utils/orgRole.utils');
+
+const assertOrgLevelAdmin = (user) => {
+  if (!isOrgLevelAdmin(user)) {
+    throw new AppError('Only Super Admin or Org Manager can manage combo rules', 403, 'FORBIDDEN');
   }
 };
 
@@ -63,7 +65,7 @@ const sanitizePayload = (data = {}, { partial = false } = {}) => {
 
 const ComboRuleService = {
   async listRules(query = {}, user) {
-    assertSuperAdmin(user);
+    assertOrgLevelAdmin(user);
     const { page, limit, skip, take } = parsePagination(query, { page: 1, limit: 50, maxLimit: 100 });
     const where = {};
     if (query.is_active === true || query.is_active === 'true') where.is_active = true;
@@ -93,7 +95,7 @@ const ComboRuleService = {
   },
 
   async listMatchingVariants(query = {}, user) {
-    assertSuperAdmin(user);
+    assertOrgLevelAdmin(user);
 
     const specialPriceGroup = roundMoney(Number(query.special_price_group));
     if (!Number.isFinite(specialPriceGroup) || specialPriceGroup <= 0) {
@@ -164,7 +166,7 @@ const ComboRuleService = {
   },
 
   async getRuleById(comboRuleId, user) {
-    assertSuperAdmin(user);
+    assertOrgLevelAdmin(user);
     const rule = await prisma.comboRule.findUnique({
       where: { combo_rule_id: comboRuleId },
       select: COMBO_RULE_SELECT,
@@ -174,7 +176,7 @@ const ComboRuleService = {
   },
 
   async createRule(data, user) {
-    assertSuperAdmin(user);
+    assertOrgLevelAdmin(user);
     const payload = sanitizePayload(data, { partial: false });
     if (!Object.prototype.hasOwnProperty.call(payload, 'is_active')) payload.is_active = true;
 
@@ -185,7 +187,7 @@ const ComboRuleService = {
   },
 
   async updateRule(comboRuleId, data, user) {
-    assertSuperAdmin(user);
+    assertOrgLevelAdmin(user);
     await this.getRuleById(comboRuleId, user);
     const payload = sanitizePayload(data, { partial: true });
     if (!Object.keys(payload).length) {
@@ -200,7 +202,7 @@ const ComboRuleService = {
   },
 
   async setActive(comboRuleId, isActive, user) {
-    assertSuperAdmin(user);
+    assertOrgLevelAdmin(user);
     await this.getRuleById(comboRuleId, user);
     return prisma.comboRule.update({
       where: { combo_rule_id: comboRuleId },
@@ -210,7 +212,7 @@ const ComboRuleService = {
   },
 
   async deleteRule(comboRuleId, user) {
-    assertSuperAdmin(user);
+    assertOrgLevelAdmin(user);
     await this.getRuleById(comboRuleId, user);
     await prisma.comboRule.delete({ where: { combo_rule_id: comboRuleId } });
     return { deleted: true };

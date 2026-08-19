@@ -3,6 +3,8 @@ const { AppError } = require('../../middlewares/error.middleware');
 const { parsePagination } = require('../../utils/pagination.utils');
 const { generatePurchaseEntryPdf } = require('./purchaseEntryPdf.service');
 const { buildPurchaseDisplayLines } = require('../../utils/purchaseDisplay.utils');
+const { isOrgLevelAdmin } = require('../../utils/orgRole.utils');
+
 
 const PURCHASE_SELECT = {
   purchase_id: true,
@@ -69,7 +71,7 @@ const PurchaseEntryService = {
     }
 
     // Role-based warehouse isolation
-    if (user.role !== 'SUPER_ADMIN' && user.warehouseId) {
+    if (!isOrgLevelAdmin(user) && user.warehouseId) {
       where.warehouse_id = user.warehouseId;
     }
 
@@ -138,7 +140,7 @@ const PurchaseEntryService = {
     }
 
     // Role-based warehouse isolation
-    if (user.role !== 'SUPER_ADMIN' && user.warehouseId && purchase.warehouse_id !== user.warehouseId) {
+    if (!isOrgLevelAdmin(user) && user.warehouseId && purchase.warehouse_id !== user.warehouseId) {
       throw new AppError('Purchase entry not found', 404, 'PURCHASE_NOT_FOUND');
     }
 
@@ -164,7 +166,7 @@ const PurchaseEntryService = {
       if (to_date) where.purchase_date.lte = new Date(to_date);
     }
 
-    if (user.role !== 'SUPER_ADMIN' && user.warehouseId) {
+    if (!isOrgLevelAdmin(user) && user.warehouseId) {
       where.warehouse_id = user.warehouseId;
     }
 

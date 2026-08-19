@@ -1,9 +1,11 @@
 // backend/src/utils/stockLedgerAccess.utils.js
 const { AppError } = require('../middlewares/error.middleware');
+const { isOrgLevelAdmin } = require('./orgRole.utils');
+
 
 const applyLedgerScope = (where, user) => {
   // SUPER_ADMIN sees everything
-  if (user?.role === 'SUPER_ADMIN') return where;
+  if (isOrgLevelAdmin(user)) return where;
   
   // Shop roles: only see their shop's ledger
   if (['SHOP_OWNER', 'SHOP_MANAGER', 'BILLING_STAFF'].includes(user?.role)) {
@@ -49,7 +51,7 @@ const applyLedgerScope = (where, user) => {
 };
 
 const assertLedgerReadAccess = (ledgerEntry, user) => {
-  if (user?.role === 'SUPER_ADMIN') return;
+  if (isOrgLevelAdmin(user)) return;
   
   // Shop roles
   if (['SHOP_OWNER', 'SHOP_MANAGER', 'BILLING_STAFF'].includes(user?.role)) {

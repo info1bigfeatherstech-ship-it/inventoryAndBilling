@@ -1,4 +1,6 @@
 const prisma = require('./prisma.utils');
+const { isOrgLevelAdmin } = require('./orgRole.utils');
+
 
 const SHOP_LEDGER_ROLES = new Set(['SHOP_OWNER', 'SHOP_MANAGER', 'BILLING_STAFF']);
 const WAREHOUSE_LEDGER_ROLES = new Set(['WH_MANAGER', 'WH_STOCK_LISTER']);
@@ -12,7 +14,7 @@ const isWarehouseLedgerViewer = (role) => WAREHOUSE_LEDGER_ROLES.has(role);
  * Super admin: full audit trail (no dedupe).
  */
 const applyTransferLedgerVisibilityWhere = async (where, user) => {
-  if (!user || user.role === 'SUPER_ADMIN') {
+  if (!user || isOrgLevelAdmin(user)) {
     return where;
   }
 
