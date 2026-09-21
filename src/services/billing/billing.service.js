@@ -1355,7 +1355,38 @@ const BillingService = {
       created_at: { gte: start, lte: end },
     };
 
-    const [shop, totalsAgg, paymentGroups, billTypeGroups] = await Promise.all([
+    /** WH→Shop commercial transfer bills for this shop in the period. */
+    const purchaseBillWhere = {
+      to_shop_id: resolvedShopId,
+      request_type: 'WH_TO_SHOP',
+      transfer_bill_number: { not: null },
+      transfer_bill_generated_at: { gte: start, lte: end },
+      to_shop: { shop_type: { in: ['FRANCHISE', 'OWNER'] } },
+    };
+
+    /** Approved+ returns with a bill in the period (REQUESTED/REJECTED/CANCELLED excluded). */
+    const RETURN_PROFIT_STATUSES = ['APPROVED', 'DISPATCHED', 'COMPLETED'];
+    const returnWhere = {
+      from_shop_id: resolvedShopId,
+      status: { in: RETURN_PROFIT_STATUSES },
+      return_bill_number: { not: null },
+      return_bill_generated_at: { gte: start, lte: end },
+    };
+
+    const [
+      shop,
+      totalsAgg,
+      paymentGroups,
+      billTypeGroups,
+      bulkPurchaseCount,
+      singlePurchaseCount,
+      bulkPurchaseSum,
+      singlePurchaseSum,
+      expenseAgg,
+      returnCount,
+      returnAmountAgg,
+      recentReturns,
+    ] = await Promise.all([
       prisma.shop.findUnique({
         where: { shop_id: resolvedShopId },
         select: { shop_id: true, shop_name: true, shop_code: true, shop_type: true },
@@ -1382,6 +1413,61 @@ const BillingService = {
         _count: { _all: true },
         _sum: { total_amount: true },
       }),
+      prisma.bulkTransferRequest.count({ where: purchaseBillWhere }),
+      prisma.transferRequest.count({ where: purchaseBillWhere }),
+      prisma.bulkTransferRequestItem.aggregate({
+        where: {
+          is_approved: true,
+          approved_quantity: { gt: 0 },
+          bulk_request: purchaseBillWhere,
+        },
+        _sum: { franchise_line_value_snapshot: true },
+      }),
+      prisma.transferRequest.aggregate({
+        where: purchaseBillWhere,
+        _sum: { franchise_line_value_snapshot: true },
+      }),
+      prisma.shopExpense.aggregate({
+        where: {
+          shop_id: resolvedShopId,
+          is_cancelled: false,
+          expense_date: { gte: start, lte: end },
+        },
+        _sum: { amount: true },
+        _count: { expense_id: true },
+      }),
+      prisma.shopWarehouseReturn.count({ where: returnWhere }),
+      prisma.shopWarehouseReturnItem.aggregate({
+        where: {
+          return_request: returnWhere,
+          OR: [
+            { approved_quantity: { gt: 0 } },
+            { received_quantity: { gt: 0 } },
+          ],
+        },
+        _sum: { franchise_line_value_snapshot: true },
+      }),
+      prisma.shopWarehouseReturn.findMany({
+        where: returnWhere,
+        orderBy: { return_bill_generated_at: 'desc' },
+        take: 8,
+        select: {
+          return_id: true,
+          return_number: true,
+          return_bill_number: true,
+          return_bill_generated_at: true,
+          status: true,
+          items: {
+            select: {
+              approved_quantity: true,
+              received_quantity: true,
+              return_quantity: true,
+              franchise_line_value_snapshot: true,
+              franchise_unit_price_snapshot: true,
+            },
+          },
+        },
+      }),
     ]);
 
     const payment_methods = {};
@@ -1399,6 +1485,45 @@ const BillingService = {
       total_amount: roundMoney(row._sum?.total_amount || 0),
     }));
 
+    const sales_total = roundMoney(totalsAgg._sum?.total_amount || 0);
+    const purchase_bill_count = (bulkPurchaseCount || 0) + (singlePurchaseCount || 0);
+    const purchase_amount = roundMoney(
+      (Number(bulkPurchaseSum._sum?.franchise_line_value_snapshot) || 0) +
+        (Number(singlePurchaseSum._sum?.franchise_line_value_snapshot) || 0)
+    );
+    const expense_count = expenseAgg._count?.expense_id || 0;
+    const expense_amount = roundMoney(expenseAgg._sum?.amount || 0);
+    const return_amount = roundMoney(returnAmountAgg._sum?.franchise_line_value_snapshot || 0);
+
+    // Profit = Sales − (Purchases + Petty cash − Returns)
+    const net_purchase = roundMoney(purchase_amount + expense_amount - return_amount);
+    const profit = roundMoney(sales_total - net_purchase);
+
+    const returns_recent = (recentReturns || []).map((row) => {
+      const amount = roundMoney(
+        (row.items || []).reduce((sum, item) => {
+          if (item.franchise_line_value_snapshot != null) {
+            return sum + (Number(item.franchise_line_value_snapshot) || 0);
+          }
+          const qty =
+            item.received_quantity > 0
+              ? item.received_quantity
+              : item.approved_quantity != null
+                ? item.approved_quantity
+                : item.return_quantity;
+          return sum + roundMoney((Number(item.franchise_unit_price_snapshot) || 0) * (Number(qty) || 0));
+        }, 0)
+      );
+      return {
+        return_id: row.return_id,
+        return_number: row.return_number,
+        return_bill_number: row.return_bill_number,
+        return_bill_generated_at: row.return_bill_generated_at,
+        status: row.status,
+        amount,
+      };
+    });
+
     return {
       shop_id: resolvedShopId,
       shop_name: shop?.shop_name || null,
@@ -1408,12 +1533,34 @@ const BillingService = {
       to_date: end.toISOString().slice(0, 10),
       sales: {
         bill_count: totalsAgg._count?._all || 0,
-        total_amount: roundMoney(totalsAgg._sum?.total_amount || 0),
+        total_amount: sales_total,
         total_gst: roundMoney(totalsAgg._sum?.gst_amount || 0),
         total_collected: roundMoney(totalsAgg._sum?.paid_amount || 0),
         total_balance: roundMoney(totalsAgg._sum?.balance_amount || 0),
         payment_methods,
         by_bill_type,
+      },
+      purchases: {
+        bill_count: purchase_bill_count,
+        total_amount: purchase_amount,
+      },
+      expenses: {
+        count: expense_count,
+        total_amount: expense_amount,
+      },
+      returns: {
+        count: returnCount || 0,
+        total_amount: return_amount,
+        recent: returns_recent,
+      },
+      profit: {
+        sales_amount: sales_total,
+        purchase_amount,
+        expense_amount,
+        return_amount,
+        net_purchase,
+        /** Sales − (Purchases + Expenses − Returns) */
+        profit_amount: profit,
       },
     };
   },

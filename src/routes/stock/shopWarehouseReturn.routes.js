@@ -8,6 +8,7 @@ const { idempotency } = require('../../middlewares/idempotency.middleware');
 const {
   returnIdParam,
   previewValidator,
+  searchSourcesValidator,
   createValidator,
   listValidator,
   approveValidator,
@@ -32,6 +33,14 @@ router.get(
   previewValidator,
   validateRequest,
   ShopWarehouseReturnController.preview
+);
+
+router.get(
+  '/search-sources',
+  authorizeRoles(...CREATE_ROLES),
+  searchSourcesValidator,
+  validateRequest,
+  ShopWarehouseReturnController.searchSources
 );
 
 router.post(

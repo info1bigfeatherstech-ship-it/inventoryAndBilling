@@ -39,6 +39,42 @@ const truncateProductName = (value, max = 25) => {
   return `${text.slice(0, max)}...`;
 };
 
+/**
+ * Single-line fit against available width. Caller must set doc.font / fontSize first.
+ * Never throws; falls back to character truncate if measuring fails.
+ */
+const fitTextWithEllipsis = (doc, value, maxWidth) => {
+  const text = displayVal(value);
+  if (!text) return '';
+  const width = Math.max(0, Number(maxWidth) || 0);
+  if (width <= 0) return '';
+
+  try {
+    if (doc.widthOfString(text) <= width) return text;
+
+    const ellipsis = '...';
+    const ellipsisW = doc.widthOfString(ellipsis);
+    if (ellipsisW > width) return '';
+
+    let lo = 0;
+    let hi = text.length;
+    let best = ellipsis;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const candidate = `${text.slice(0, mid)}${ellipsis}`;
+      if (doc.widthOfString(candidate) <= width) {
+        best = candidate;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return best;
+  } catch {
+    return truncateProductName(text, 25);
+  }
+};
+
 const drawManualUnderline = (doc, x, y, text, { size = FIELD_SIZE, offset = 9 } = {}) => {
   const w = doc.widthOfString(text);
   doc.save().strokeColor('#000').lineWidth(0.5);
@@ -514,6 +550,7 @@ module.exports = {
   fmtDate,
   displayVal,
   truncateProductName,
+  fitTextWithEllipsis,
   drawLabelValue,
   drawCenteredSegments,
   drawCenteredKeyedPairs,

@@ -1,4 +1,7 @@
 const PDFDocument = require('pdfkit');
+const https = require('https');
+const http = require('http');
+const { URL } = require('url');
 
 const { AppError } = require('../../errors/AppError');
 
@@ -7,6 +10,7 @@ const { buildTaxSummaryFromLines, roundMoney, normalizeStateCode } = require('..
 const { getStateName } = require('../../constants/indianStateCodes');
 
 const { amountInWords } = require('../../utils/amountInWords.utils');
+const logger = require('../../utils/logger.utils');
 
 const {
 
@@ -36,7 +40,7 @@ const {
 
   displayVal,
 
-  truncateProductName,
+  fitTextWithEllipsis,
 
   drawLabelValue,
 
@@ -76,6 +80,137 @@ const {
 
 /** Bill To / invoice meta + post-payable footer — +1pt vs default FIELD_SIZE (8). */
 const DETAIL_SIZE = FIELD_SIZE + 1;
+
+/** Fits inside franchise table rowH (40) without changing row/column sizes. */
+const PRODUCT_THUMB_SIZE = 28;
+const IMAGE_TIMEOUT_MS = 6000;
+const IMAGE_CONCURRENCY = 8;
+const IMAGE_MAX_BYTES = 1.5 * 1024 * 1024;
+
+/**
+ * Prefer a tiny Cloudinary derivative so large product photos (often >1.5MB)
+ * still render in the PDF. Non-Cloudinary URLs are returned unchanged.
+ */
+const toPdfThumbUrl = (url) => {
+  if (!url || typeof url !== 'string') return null;
+  const trimmed = url.trim();
+  if (!trimmed) return null;
+  // Already transformed or not Cloudinary delivery URL
+  if (!/res\.cloudinary\.com\//i.test(trimmed) || !/\/image\/upload\//i.test(trimmed)) {
+    return trimmed;
+  }
+  if (/\/image\/upload\/[^/]*[wc]_/i.test(trimmed)) {
+    return trimmed;
+  }
+  return trimmed.replace(
+    /\/image\/upload\//i,
+    '/image/upload/c_fill,w_80,h_80,f_jpg,q_auto/'
+  );
+};
+
+/** Fail-soft HTTP(S) image fetch — never throws; used only for franchise PDF thumbs. */
+const fetchImageBuffer = (url, redirectDepth = 0) =>
+  new Promise((resolve) => {
+    if (!url || typeof url !== 'string' || !/^https?:\/\//i.test(url) || redirectDepth > 3) {
+      resolve(null);
+      return;
+    }
+    let settled = false;
+    const done = (buf) => {
+      if (settled) return;
+      settled = true;
+      resolve(buf);
+    };
+
+    try {
+      const parsed = new URL(url);
+      const lib = parsed.protocol === 'https:' ? https : http;
+      const req = lib.get(
+        url,
+        {
+          timeout: IMAGE_TIMEOUT_MS,
+          headers: { Accept: 'image/*' },
+        },
+        (res) => {
+          if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+            res.resume();
+            fetchImageBuffer(res.headers.location, redirectDepth + 1).then(done);
+            return;
+          }
+          if (res.statusCode !== 200) {
+            res.resume();
+            done(null);
+            return;
+          }
+          const chunks = [];
+          let total = 0;
+          res.on('data', (c) => {
+            total += c.length;
+            if (total > IMAGE_MAX_BYTES) {
+              res.destroy();
+              done(null);
+              return;
+            }
+            chunks.push(c);
+          });
+          res.on('end', () => done(Buffer.concat(chunks)));
+          res.on('error', () => done(null));
+        }
+      );
+      req.on('timeout', () => {
+        req.destroy();
+        done(null);
+      });
+      req.on('error', () => done(null));
+    } catch {
+      done(null);
+    }
+  });
+
+const mapPool = async (items, concurrency, mapper) => {
+  const results = new Array(items.length);
+  let idx = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (idx < items.length) {
+      const i = idx;
+      idx += 1;
+      results[i] = await mapper(items[i], i);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+};
+
+/**
+ * Prefetch unique product image URLs onto lines as `_imageBuffer`.
+ * Missing/failed images leave layout identical to the existing template.
+ */
+const attachFranchiseLineImages = async (lines) => {
+  if (!Array.isArray(lines) || !lines.length) return;
+  const uniqueUrls = [...new Set(lines.map((l) => l.image_url).filter(Boolean))];
+  if (!uniqueUrls.length) return;
+
+  const bufByUrl = new Map();
+  await mapPool(uniqueUrls, IMAGE_CONCURRENCY, async (url) => {
+    try {
+      const thumbUrl = toPdfThumbUrl(url);
+      let buf = await fetchImageBuffer(thumbUrl);
+      // Fallback to original only if thumb URL failed and differs
+      if (!buf && thumbUrl !== url) {
+        buf = await fetchImageBuffer(url);
+      }
+      if (buf) bufByUrl.set(url, buf);
+      else logger.warn('Franchise bill PDF image unavailable', { url, thumbUrl });
+    } catch (err) {
+      logger.warn('Franchise bill PDF image fetch failed', { url, error: err?.message });
+    }
+  });
+
+  for (const line of lines) {
+    const buf = line.image_url ? bufByUrl.get(line.image_url) : null;
+    if (buf) line._imageBuffer = buf;
+  }
+};
 
 
 
@@ -174,7 +309,7 @@ const withAmountCol = (cols) => {
 const buildFranchiseGstCols = () =>
   withAmountCol([
     { key: 'sno', label: 'S.No.', w: 26 },
-    { key: 'product', label: 'Product Name', w: 108, isProduct: true },
+    { key: 'product', label: 'Product Name', w: 118, isProduct: true },
     { key: 'brand', label: 'Brand', w: 46 },
     { key: 'warranty', label: 'Warranty', w: 40 },
     { key: 'hsn', label: 'HSN', w: 36 },
@@ -188,7 +323,7 @@ const buildFranchiseGstCols = () =>
 const buildFranchiseNonGstCols = () =>
   withAmountCol([
     { key: 'sno', label: 'S.No.', w: 26 },
-    { key: 'product', label: 'Product Name', w: 128, isProduct: true },
+    { key: 'product', label: 'Product Name', w: 146, isProduct: true },
     { key: 'brand', label: 'Brand', w: 54 },
     { key: 'warranty', label: 'Warranty', w: 48 },
     { key: 'qty', label: 'Qty', w: 30 },
@@ -300,8 +435,6 @@ const drawFranchiseTable = (pdf, startY, cols, lines, { isGst = false, isEstimat
 
       const globalIdx = startIdx + idx;
 
-      const name = truncateProductName(line.product_name);
-
 
 
       let cx = M;
@@ -310,23 +443,53 @@ const drawFranchiseTable = (pdf, startY, cols, lines, { isGst = false, isEstimat
 
         if (i === productColIndex) {
 
+          const pad = 3;
+          const thumb = PRODUCT_THUMB_SIZE;
+          const gap = 3;
+          const buf = line._imageBuffer;
+          let textX = cx + pad;
+          let textW = Math.max(1, col.w - pad * 2);
+          let attrX = cx;
+          let attrW = col.w;
+          let drewImage = false;
+
+          if (buf) {
+            try {
+              pdf.image(buf, cx + pad, rowY + (rowH - thumb) / 2, {
+                fit: [thumb, thumb],
+                align: 'center',
+                valign: 'center',
+              });
+              drewImage = true;
+            } catch {
+              // fail-soft: keep original text-only cell layout
+            }
+          }
+
+          if (drewImage) {
+            textX = cx + pad + thumb + gap;
+            textW = Math.max(1, col.w - (textX - cx) - pad);
+            attrX = cx + thumb + gap;
+            attrW = Math.max(1, col.w - thumb - gap);
+          }
+
           pdf.font('Helvetica').fontSize(cellSize);
+          const name = fitTextWithEllipsis(pdf, line.product_name, textW);
+          pdf.text(name, textX, rowY + 3, { lineBreak: false });
 
-          pdf.text(name, cx + 3, rowY + 3, { width: Math.max(1, col.w - 6), height: 11, align: 'left' });
+          const rawCode = displayVal(line.product_code);
 
-          const code = displayVal(line.product_code);
-
-          if (code) {
+          if (rawCode) {
 
             pdf.font('Helvetica').fontSize(cellSize - 1).fillColor('#444');
-
-            pdf.text(code, cx + 3, rowY + 14, { width: Math.max(1, col.w - 6), align: 'left', lineBreak: false });
+            const code = fitTextWithEllipsis(pdf, rawCode, textW);
+            pdf.text(code, textX, rowY + 14, { lineBreak: false });
 
             pdf.fillColor('#000');
 
           }
 
-          drawProductCellAttributes(pdf, cx, rowY + (code ? 24 : 14), col.w, line.attributes, {
+          drawProductCellAttributes(pdf, attrX, rowY + (rawCode ? 24 : 14), attrW, line.attributes, {
             size: cellSize - 1.5,
           });
 
@@ -334,7 +497,7 @@ const drawFranchiseTable = (pdf, startY, cols, lines, { isGst = false, isEstimat
 
           drawFitCellText(pdf, cellValueForLine(line, col, globalIdx), cx, rowY, col.w, rowH, {
 
-            align: 'right',
+            align: 'center',
 
             bold: false,
 
@@ -1033,9 +1196,17 @@ const buildCostChallanPdf = (pdf, doc) => {
 
 
 
-const buildTransferChallanPdfBuffer = (doc) =>
+const buildTransferChallanPdfBuffer = async (doc) => {
+  const isFranchise =
+    doc?.bill_format === 'FRANCHISE_TRANSFER_BILL' ||
+    doc?.bill_format === 'FRANCHISE' ||
+    doc?.is_franchise_bill;
 
-  new Promise((resolve, reject) => {
+  if (isFranchise) {
+    await attachFranchiseLineImages(doc.lines || []);
+  }
+
+  return new Promise((resolve, reject) => {
 
     try {
 
@@ -1051,7 +1222,7 @@ const buildTransferChallanPdfBuffer = (doc) =>
 
 
 
-      if (doc.bill_format === 'FRANCHISE_TRANSFER_BILL' || doc.bill_format === 'FRANCHISE' || doc.is_franchise_bill) {
+      if (isFranchise) {
 
         buildFranchiseBillPdf(pdf, doc);
 
@@ -1072,7 +1243,7 @@ const buildTransferChallanPdfBuffer = (doc) =>
     }
 
   });
-
+};
 
 
 const generateTransferChallanPdf = async (challanDoc) => {

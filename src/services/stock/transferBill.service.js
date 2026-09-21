@@ -368,6 +368,8 @@ const buildBillLines = (items, billType) => {
 
       attributes: item.variant?.attributes || null,
 
+      image_url: item.variant?.images?.[0]?.url || null,
+
       hsn_code: product?.hsn_code || '',
 
       quantity: seg.quantity,
@@ -712,6 +714,11 @@ const SINGLE_BILL_INCLUDE = {
       combo_eligible: true,
       purchase_price: true,
       expenses: true,
+      images: {
+        orderBy: { sort_order: 'asc' },
+        take: 1,
+        select: { url: true },
+      },
       product: {
         select: {
           name: true,
@@ -887,6 +894,12 @@ const TransferBillService = {
                 combo_eligible: true,
                 purchase_price: true,
                 expenses: true,
+
+                images: {
+                  orderBy: { sort_order: 'asc' },
+                  take: 1,
+                  select: { url: true },
+                },
 
                 product: {
 

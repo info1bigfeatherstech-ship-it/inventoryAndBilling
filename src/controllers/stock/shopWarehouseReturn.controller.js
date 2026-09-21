@@ -24,6 +24,23 @@ const ShopWarehouseReturnController = {
     });
   }),
 
+  searchSources: asyncHandler(async (req, res) => {
+    const q = req.query.q || req.query.search || req.query.product;
+    if (!q || !String(q).trim()) {
+      throw new AppError('Product name or code is required', 400, 'PRODUCT_SEARCH_REQUIRED');
+    }
+    const data = await ShopWarehouseReturnService.searchSourcesByProduct(
+      q,
+      req.user,
+      req.query.shop_id
+    );
+    return successResponse(res, req, {
+      statusCode: 200,
+      message: 'Matching transfer bills found',
+      data,
+    });
+  }),
+
   create: asyncHandler(async (req, res) => {
     const data = await ShopWarehouseReturnService.createReturn(req.body, req.user);
     return successResponse(res, req, {

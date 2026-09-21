@@ -31,6 +31,11 @@ const VARIANT_SELECT = {
   expenses: true,
   low_stock_threshold: true,
   attributes: true,
+  images: {
+    orderBy: { sort_order: 'asc' },
+    take: 1,
+    select: { url: true },
+  },
   product: {
     select: {
       name: true,
@@ -160,6 +165,84 @@ const sumCommittedAgainstSource = async (tx, { sourceType, sourceId, variantId, 
 
 const normalizeLookupCode = (value) => String(value || '').trim();
 
+/** Same eligibility as preview-by-bill: inbound transfers that can seed a return. */
+const INBOUND_ELIGIBLE_STATUSES = Object.freeze([
+  'COMPLETED',
+  'PARTIALLY_RECEIVED',
+  'RECEIVED',
+  'DISPATCHED',
+  'IN_TRANSIT',
+]);
+
+const WAREHOUSE_MIN_SELECT = {
+  warehouse_id: true,
+  warehouse_code: true,
+  warehouse_name: true,
+  city: true,
+};
+
+const resolveInboundEventAt = (row) =>
+  row.transfer_bill_generated_at
+  || row.received_at
+  || row.dispatched_at
+  || row.requested_at
+  || row.created_at
+  || null;
+
+const receivedQtyFromBulkItem = (item) => {
+  if (Number(item.received_quantity) > 0) return Number(item.received_quantity);
+  if (Number(item.approved_quantity) > 0) return Number(item.approved_quantity);
+  return 0;
+};
+
+const receivedQtyFromSingle = (row) => {
+  if (Number(row.received_quantity) > 0) return Number(row.received_quantity);
+  return Number(row.quantity) || 0;
+};
+
+/**
+ * Batch committed return qty keyed by `${sourceId}:${variantId}`.
+ * Avoids N+1 when listing product-matched bills.
+ */
+const buildCommittedQtyMap = async ({ sourceType, sourceIds, variantIds }) => {
+  const map = new Map();
+  if (!sourceIds.length || !variantIds.length) return map;
+
+  const rows = await prisma.shopWarehouseReturnItem.findMany({
+    where: {
+      variant_id: { in: variantIds },
+      return_request: {
+        status: { in: ACTIVE_RETURN_STATUSES },
+        ...(sourceType === 'bulk'
+          ? { source_bulk_request_id: { in: sourceIds } }
+          : { source_transfer_request_id: { in: sourceIds } }),
+      },
+    },
+    select: {
+      variant_id: true,
+      return_quantity: true,
+      approved_quantity: true,
+      return_request: {
+        select: {
+          source_bulk_request_id: true,
+          source_transfer_request_id: true,
+        },
+      },
+    },
+  });
+
+  for (const row of rows) {
+    const sourceId =
+      sourceType === 'bulk'
+        ? row.return_request?.source_bulk_request_id
+        : row.return_request?.source_transfer_request_id;
+    if (!sourceId) continue;
+    const key = `${sourceId}:${row.variant_id}`;
+    map.set(key, (map.get(key) || 0) + committedReturnQty(row));
+  }
+  return map;
+};
+
 /**
  * Resolve inbound WH→Shop transfer by transfer bill number OR request number.
  * Owned shops often have no FTB bill — bulk/request number still works.
@@ -170,7 +253,7 @@ const resolveSourceTransfer = async (lookupCode, shopId) => {
     throw new AppError('Bill / invoice number is required', 400, 'BILL_NUMBER_REQUIRED');
   }
 
-  const completedStatuses = ['COMPLETED', 'PARTIALLY_RECEIVED', 'RECEIVED', 'DISPATCHED', 'IN_TRANSIT'];
+  const completedStatuses = INBOUND_ELIGIBLE_STATUSES;
 
   const bulkByBill = await prisma.bulkTransferRequest.findFirst({
     where: {
@@ -424,6 +507,217 @@ const ShopWarehouseReturnService = {
     const shopId = await resolveShopIdForUser(user, shopIdQuery);
     const source = await resolveSourceTransfer(lookupCode, shopId);
     return source;
+  },
+
+  /**
+   * Find inbound WH→Shop transfers that contain a product matching name / product_code / sku.
+   * Read-only. Shop-scoped. Returns bills with date/time so staff can pick one, then use preview.
+   * No schema change. Caps result size for production safety.
+   */
+  async searchSourcesByProduct(productQuery, user, shopIdQuery = null) {
+    const shopId = await resolveShopIdForUser(user, shopIdQuery);
+    const q = String(productQuery || '').trim();
+    if (q.length < 2) {
+      throw new AppError(
+        'Enter at least 2 characters of product name or code',
+        400,
+        'SEARCH_TOO_SHORT'
+      );
+    }
+    if (q.length > 120) {
+      throw new AppError('Search text is too long', 400, 'SEARCH_TOO_LONG');
+    }
+
+    const variants = await prisma.productVariant.findMany({
+      where: {
+        OR: [
+          { product_code: { contains: q, mode: 'insensitive' } },
+          { sku: { contains: q, mode: 'insensitive' } },
+          { product: { name: { contains: q, mode: 'insensitive' } } },
+        ],
+      },
+      select: {
+        variant_id: true,
+        product_code: true,
+        sku: true,
+        product: { select: { name: true } },
+      },
+      take: 80,
+    });
+
+    if (!variants.length) {
+      return { query: q, sources: [] };
+    }
+
+    const variantIds = variants.map((v) => v.variant_id);
+
+    const [bulks, singles] = await Promise.all([
+      prisma.bulkTransferRequest.findMany({
+        where: {
+          request_type: 'WH_TO_SHOP',
+          to_shop_id: shopId,
+          status: { in: [...INBOUND_ELIGIBLE_STATUSES] },
+          items: {
+            some: {
+              variant_id: { in: variantIds },
+              is_approved: { not: false },
+            },
+          },
+        },
+        select: {
+          bulk_request_id: true,
+          bulk_request_number: true,
+          transfer_bill_number: true,
+          transfer_bill_generated_at: true,
+          received_at: true,
+          dispatched_at: true,
+          requested_at: true,
+          created_at: true,
+          status: true,
+          from_warehouse: { select: WAREHOUSE_MIN_SELECT },
+          items: {
+            where: {
+              variant_id: { in: variantIds },
+              is_approved: { not: false },
+            },
+            select: {
+              variant_id: true,
+              received_quantity: true,
+              approved_quantity: true,
+              variant: {
+                select: {
+                  variant_id: true,
+                  product_code: true,
+                  product: { select: { name: true } },
+                },
+              },
+            },
+          },
+        },
+        orderBy: [{ requested_at: 'desc' }],
+        take: 40,
+      }),
+      prisma.transferRequest.findMany({
+        where: {
+          request_type: 'WH_TO_SHOP',
+          to_shop_id: shopId,
+          status: { in: [...INBOUND_ELIGIBLE_STATUSES] },
+          variant_id: { in: variantIds },
+        },
+        select: {
+          request_id: true,
+          request_number: true,
+          transfer_bill_number: true,
+          transfer_bill_generated_at: true,
+          received_at: true,
+          dispatched_at: true,
+          requested_at: true,
+          created_at: true,
+          status: true,
+          variant_id: true,
+          received_quantity: true,
+          quantity: true,
+          from_warehouse: { select: WAREHOUSE_MIN_SELECT },
+          variant: {
+            select: {
+              variant_id: true,
+              product_code: true,
+              product: { select: { name: true } },
+            },
+          },
+        },
+        orderBy: [{ requested_at: 'desc' }],
+        take: 40,
+      }),
+    ]);
+
+    const bulkIds = bulks.map((b) => b.bulk_request_id);
+    const singleIds = singles.map((s) => s.request_id);
+    const [bulkCommitted, singleCommitted] = await Promise.all([
+      buildCommittedQtyMap({
+        sourceType: 'bulk',
+        sourceIds: bulkIds,
+        variantIds,
+      }),
+      buildCommittedQtyMap({
+        sourceType: 'single',
+        sourceIds: singleIds,
+        variantIds,
+      }),
+    ]);
+
+    const sources = [];
+
+    for (const bulk of bulks) {
+      const lookup = normalizeLookupCode(
+        bulk.transfer_bill_number || bulk.bulk_request_number
+      );
+      if (!lookup) continue;
+      const eventAt = resolveInboundEventAt(bulk);
+
+      for (const item of bulk.items || []) {
+        const received = receivedQtyFromBulkItem(item);
+        if (received <= 0) continue;
+        const committed =
+          bulkCommitted.get(`${bulk.bulk_request_id}:${item.variant_id}`) || 0;
+        const remaining = Math.max(0, received - committed);
+        if (remaining <= 0) continue;
+
+        sources.push({
+          source_type: 'bulk',
+          lookup_number: lookup,
+          transfer_bill_number: bulk.transfer_bill_number || null,
+          reference_number: bulk.bulk_request_number,
+          transfer_status: bulk.status,
+          event_at: eventAt,
+          warehouse: bulk.from_warehouse,
+          matched_product_name: item.variant?.product?.name || null,
+          matched_product_code: item.variant?.product_code || null,
+          matched_variant_id: item.variant_id,
+          matched_received_qty: received,
+          matched_remaining_returnable_qty: remaining,
+        });
+      }
+    }
+
+    for (const single of singles) {
+      const lookup = normalizeLookupCode(
+        single.transfer_bill_number || single.request_number
+      );
+      if (!lookup) continue;
+      const received = receivedQtyFromSingle(single);
+      if (received <= 0) continue;
+      const committed =
+        singleCommitted.get(`${single.request_id}:${single.variant_id}`) || 0;
+      const remaining = Math.max(0, received - committed);
+      if (remaining <= 0) continue;
+
+      sources.push({
+        source_type: 'single',
+        lookup_number: lookup,
+        transfer_bill_number: single.transfer_bill_number || null,
+        reference_number: single.request_number,
+        transfer_status: single.status,
+        event_at: resolveInboundEventAt(single),
+        warehouse: single.from_warehouse,
+        matched_product_name: single.variant?.product?.name || null,
+        matched_product_code: single.variant?.product_code || null,
+        matched_variant_id: single.variant_id,
+        matched_received_qty: received,
+        matched_remaining_returnable_qty: remaining,
+      });
+    }
+
+    sources.sort((a, b) => {
+      const ta = a.event_at ? new Date(a.event_at).getTime() : 0;
+      const tb = b.event_at ? new Date(b.event_at).getTime() : 0;
+      return tb - ta;
+    });
+
+    return {
+      query: q,
+      sources: sources.slice(0, 40),
+    };
   },
 
   async createReturn(payload, user) {
@@ -858,6 +1152,7 @@ const ShopWarehouseReturnService = {
           hsn_code: product.hsn_code || '',
           gst_percent: product.gst_percent || 0,
           attributes: i.variant?.attributes || null,
+          image_url: i.variant?.images?.[0]?.url || null,
           quantity: qty,
           unit_mrp: Number(i.unit_mrp_snapshot) || 0,
           unit_special_price: Number(i.unit_special_price_snapshot) || 0,

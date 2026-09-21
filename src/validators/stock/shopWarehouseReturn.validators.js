@@ -10,6 +10,13 @@ const previewValidator = [
   query('shop_id').optional().isString().trim(),
 ];
 
+const searchSourcesValidator = [
+  query('q').optional().isString().trim().isLength({ max: 120 }),
+  query('search').optional().isString().trim().isLength({ max: 120 }),
+  query('product').optional().isString().trim().isLength({ max: 120 }),
+  query('shop_id').optional().isString().trim(),
+];
+
 const createValidator = [
   body('bill_number').optional().isString().trim(),
   body('source_number').optional().isString().trim(),
@@ -63,6 +70,7 @@ const cancelValidator = [
 module.exports = {
   returnIdParam,
   previewValidator,
+  searchSourcesValidator,
   createValidator,
   listValidator,
   approveValidator,
