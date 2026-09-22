@@ -115,7 +115,7 @@ const REQUEST_SELECT = {
   },
   from_warehouse: { select: { warehouse_id: true, warehouse_code: true, warehouse_name: true, address: true, city: true, manager_name: true } },
   to_warehouse: { select: { warehouse_id: true, warehouse_code: true, warehouse_name: true, address: true, city: true } },
-  from_shop: { select: { shop_id: true, shop_code: true, shop_name: true, address: true, city: true, pincode: true, phone: true } },
+  from_shop: { select: { shop_id: true, shop_code: true, shop_name: true, address: true, city: true, pincode: true, phone: true, state_code: true, shop_type: true } },
   to_shop: { select: { shop_id: true, shop_code: true, shop_name: true, address: true, city: true, pincode: true, phone: true, email: true, state_code: true, shop_type: true } },
   requester: USER_BRIEF,
   approver: USER_BRIEF,
@@ -730,7 +730,10 @@ const TransferRequestService = {
         const costSnap = snapshotTransferCost(variant, locked.quantity);
 
         let franchiseSnap = {};
-        if (locked.request_type === 'WH_TO_SHOP' && locked.to_shop_id) {
+        if (
+          (locked.request_type === 'WH_TO_SHOP' || locked.request_type === 'SHOP_TO_SHOP') &&
+          locked.to_shop_id
+        ) {
           const destShop = await tx.shop.findUnique({
             where: { shop_id: locked.to_shop_id },
             select: { shop_type: true },

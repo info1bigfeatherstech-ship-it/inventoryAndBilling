@@ -8,13 +8,13 @@ const { isOrgLevelAdmin } = require('../../utils/orgRole.utils');
 
 
 const COMMERCIAL_BILL_BASE_WHERE = {
-  request_type: 'WH_TO_SHOP',
+  request_type: { in: ['WH_TO_SHOP', 'SHOP_TO_SHOP'] },
   transfer_bill_number: { not: null },
   to_shop: { shop_type: { in: ['FRANCHISE', 'OWNER'] } },
 };
 
 const isCommercialWhToShopTransfer = (record) =>
-  record?.request_type === 'WH_TO_SHOP'
+  ['WH_TO_SHOP', 'SHOP_TO_SHOP'].includes(record?.request_type)
   && ['FRANCHISE', 'OWNER'].includes(record?.to_shop?.shop_type);
 
 const BULK_BILL_SELECT = {
@@ -65,12 +65,14 @@ const BULK_BILL_SELECT = {
 const SINGLE_BILL_SELECT = {
   request_id: true,
   request_number: true,
+  request_type: true,
   transfer_bill_type: true,
   transfer_bill_number: true,
   transfer_bill_generated_at: true,
   status: true,
   quantity: true,
   from_warehouse_id: true,
+  from_shop_id: true,
   to_shop_id: true,
   franchise_mrp_snapshot: true,
   franchise_unit_price_snapshot: true,
@@ -80,6 +82,7 @@ const SINGLE_BILL_SELECT = {
   franchise_combo_units: true,
   franchise_normal_units: true,
   from_warehouse: { select: { warehouse_id: true, warehouse_code: true, warehouse_name: true, city: true } },
+  from_shop: { select: { shop_id: true, shop_code: true, shop_name: true, city: true, shop_type: true } },
   to_shop: { select: { shop_id: true, shop_code: true, shop_name: true, city: true, shop_type: true } },
   variant: {
     select: {

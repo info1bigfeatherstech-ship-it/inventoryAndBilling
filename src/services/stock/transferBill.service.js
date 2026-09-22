@@ -15,7 +15,6 @@ const {
 } = require('../../utils/billing.utils');
 
 const {
-  isFranchiseWhToShopTransfer,
   buildFranchiseSnapshotsWithCombo,
   emptyFranchiseComboFields,
   expandFranchiseBillSegments,
@@ -54,9 +53,10 @@ const REQUEST_TYPE_LABELS = {
 const OWNER_SHOP = 'OWNER';
 const FRANCHISE_SHOP = 'FRANCHISE';
 
-const isCommercialWhToShopTransfer = (record) =>
-  record?.request_type === 'WH_TO_SHOP'
-  && [OWNER_SHOP, FRANCHISE_SHOP].includes(record?.to_shop?.shop_type);
+const { isCommercialShopTransfer: isCommercialShopTransferShared } = require('../../utils/franchiseTransferPricing.utils');
+
+/** Commercial transfer bill (WH→shop or shop→shop) to OWNER/FRANCHISE dest. */
+const isCommercialWhToShopTransfer = (record) => isCommercialShopTransferShared(record);
 
 
 
@@ -279,7 +279,7 @@ const assertFranchiseBillType = (billType) => {
 
     throw new AppError(
 
-      'transfer_bill_type is required (GST_INVOICE, NON_GST_INVOICE, or ESTIMATE_INVOICE) for warehouse to shop transfer bills',
+      'transfer_bill_type is required (GST_INVOICE, NON_GST_INVOICE, or ESTIMATE_INVOICE) for commercial shop transfer bills',
 
       400,
 
@@ -509,14 +509,18 @@ const computeBillTotals = (lines, billType) => {
 
 
 /**
- * Company block (all warehouses / GST + Non-GST bills): legal name, GSTIN, address, phone, email.
- * Warehouse block (per dispatch WH): Location ID/Name, Place of Dispatch city/state, Dispatched by.
+ * Company block (GST + Non-GST bills): legal name, GSTIN, address, phone, email.
+ * Location / Place of Dispatch: source warehouse (WH→shop) or source shop (shop→shop).
  */
 const buildIssuerRecipient = async (record, shopGst = null, company = null) => {
 
   const wh = record.from_warehouse;
 
+  const fromShop = record.from_shop;
+
   const shop = record.to_shop;
+
+  const isShopToShop = record.request_type === 'SHOP_TO_SHOP';
 
   const companyIdentity = company || (await AppSettingsService.getCompanyInvoiceIdentity());
 
@@ -528,36 +532,44 @@ const buildIssuerRecipient = async (record, shopGst = null, company = null) => {
 
   const recipientLegalName = shopGst?.legal_name?.trim() || '';
 
+  const locationCode = isShopToShop ? (fromShop?.shop_code || '') : (wh?.warehouse_code || '');
+  const locationName = isShopToShop ? (fromShop?.shop_name || '') : (wh?.warehouse_name || '');
+  const locationAddress = isShopToShop ? (fromShop?.address || '') : (wh?.address || '');
+  const locationCity = isShopToShop ? (fromShop?.city || '') : (wh?.city || '');
+  const locationState = isShopToShop
+    ? (fromShop?.state_code || '')
+    : (wh?.state_code || '');
+
 
 
   return {
 
     issuer: {
 
-      code: wh?.warehouse_code || '',
+      code: locationCode,
 
-      /** Big title on PDF — company legal name (falls back to warehouse name if unset). */
-      name: companyLegalName || wh?.warehouse_name || 'Company',
+      /** Big title on PDF — company legal name (falls back to location name if unset). */
+      name: companyLegalName || locationName || 'Company',
 
-      /** Location line "Location Name :" — always the warehouse display name. */
-      location_name: wh?.warehouse_name || '',
+      /** Location line "Location Name :" — dispatching warehouse or shop. */
+      location_name: locationName,
 
       gstin,
 
-      /** Header address — company registered address (fallback WH only if company unset). */
-      address: companyIdentity.address || wh?.address || '',
+      /** Header address — company registered address (fallback location only if company unset). */
+      address: companyIdentity.address || locationAddress || '',
 
-      /** Place of Dispatch city — dispatching warehouse. */
-      city: wh?.city || '',
+      /** Place of Dispatch city — dispatching location. */
+      city: locationCity,
 
-      /** Place of Dispatch state — warehouse state (fallback company only if WH unset). */
-      state_code: wh?.state_code || companyIdentity.state_code || '',
+      /** Place of Dispatch state — location state (fallback company only if unset). */
+      state_code: locationState || companyIdentity.state_code || '',
 
       phone: companyIdentity.phone || '',
 
       email: companyIdentity.email || '',
 
-      manager_name: wh?.manager_name || null,
+      manager_name: isShopToShop ? null : (wh?.manager_name || null),
 
     },
 
@@ -690,6 +702,19 @@ const withCommercialSnapshotFallback = async (itemsOrRequest, markupPercent) => 
 
 const SINGLE_BILL_INCLUDE = {
   from_warehouse: { select: WAREHOUSE_INVOICE_SELECT },
+  from_shop: {
+    select: {
+      shop_id: true,
+      shop_code: true,
+      shop_name: true,
+      address: true,
+      city: true,
+      pincode: true,
+      phone: true,
+      state_code: true,
+      shop_type: true,
+    },
+  },
   to_shop: {
     select: {
       shop_id: true,
@@ -1062,22 +1087,46 @@ const TransferBillService = {
 
   async prepareFranchiseApproveSingle(tx, request, transferBillType) {
     const destShop =
-      request.request_type === 'WH_TO_SHOP' && request.to_shop_id
+      request.to_shop_id
         ? await tx.shop.findUnique({
             where: { shop_id: request.to_shop_id },
             select: { shop_type: true },
           })
         : null;
-    if (![OWNER_SHOP, FRANCHISE_SHOP].includes(destShop?.shop_type)) return null;
+
+    const isWhCommercial =
+      request.request_type === 'WH_TO_SHOP' &&
+      [OWNER_SHOP, FRANCHISE_SHOP].includes(destShop?.shop_type);
+    const isShopToShopCommercial =
+      request.request_type === 'SHOP_TO_SHOP' &&
+      [OWNER_SHOP, FRANCHISE_SHOP].includes(destShop?.shop_type);
+
+    if (!isWhCommercial && !isShopToShopCommercial) return null;
 
     assertFranchiseBillType(transferBillType);
 
-    const wh = await tx.warehouse.findUnique({
-      where: { warehouse_id: request.from_warehouse_id },
-      select: WAREHOUSE_INVOICE_SELECT,
-    });
-    if (!wh) {
-      throw new AppError('Source warehouse not found', 404, 'WAREHOUSE_NOT_FOUND');
+    let billLocationCode = '';
+    if (isWhCommercial) {
+      const wh = await tx.warehouse.findUnique({
+        where: { warehouse_id: request.from_warehouse_id },
+        select: WAREHOUSE_INVOICE_SELECT,
+      });
+      if (!wh) {
+        throw new AppError('Source warehouse not found', 404, 'WAREHOUSE_NOT_FOUND');
+      }
+      billLocationCode = wh.warehouse_code;
+    } else {
+      const fromShop = await tx.shop.findUnique({
+        where: { shop_id: request.from_shop_id },
+        select: { shop_id: true, shop_code: true, shop_type: true, is_active: true },
+      });
+      if (!fromShop) {
+        throw new AppError('Source shop not found', 404, 'SHOP_NOT_FOUND');
+      }
+      if (fromShop.is_active === false) {
+        throw new AppError('Source shop is inactive', 409, 'SHOP_INACTIVE');
+      }
+      billLocationCode = fromShop.shop_code;
     }
 
     if (transferBillType === 'GST_INVOICE') {
@@ -1094,7 +1143,7 @@ const TransferBillService = {
     );
     const franchiseSnap = await snapshotCommercialOnSingleRequest(tx, request, markup);
 
-    const billNumber = await generateTransferBillNumber(tx, wh.warehouse_code);
+    const billNumber = await generateTransferBillNumber(tx, billLocationCode);
 
     return {
       transfer_bill_type: transferBillType,

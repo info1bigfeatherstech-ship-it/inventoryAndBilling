@@ -1,7 +1,7 @@
 const { AppError } = require('../../errors/AppError');
 const { roundMoney } = require('../../utils/billing.utils');
 const {
-  isFranchiseWhToShopTransfer,
+  isFranchisePricedTransfer,
   expandFranchiseBillSegments,
 } = require('../../utils/franchiseTransferPricing.utils');
 const TransferRequestService = require('./transferRequest.service');
@@ -316,7 +316,7 @@ const assertFranchiseSnapshotsReady = (record, lines) => {
       'FRANCHISE_BILL_NOT_READY'
     );
   }
-  if (record.request_type === 'WH_TO_SHOP' && !isFranchiseWhToShopTransfer(record)) {
+  if (!isFranchisePricedTransfer(record)) {
     throw new AppError('Not a franchise shop transfer', 400, 'NOT_FRANCHISE_TRANSFER');
   }
 };
@@ -346,7 +346,7 @@ const TransferChallanService = {
 
     const { from_label, to_label, from_address, to_address } = resolveFromTo(request);
     const { issuer, recipient } = buildIssuerRecipient(request);
-    const isFranchiseBill = isFranchiseWhToShopTransfer(request);
+    const isFranchiseBill = isFranchisePricedTransfer(request);
     const lines = isFranchiseBill
       ? buildFranchiseLinesFromSingleRequest(request)
       : buildCostLinesFromSingleRequest(request);
@@ -406,7 +406,7 @@ const TransferChallanService = {
 
     const { from_label, to_label } = resolveFromTo(bulk);
     const { issuer, recipient } = buildIssuerRecipient(bulk);
-    const isFranchiseBill = isFranchiseWhToShopTransfer(bulk);
+    const isFranchiseBill = isFranchisePricedTransfer(bulk);
     const lines = isFranchiseBill
       ? buildFranchiseLinesFromBulk(bulk)
       : buildCostLinesFromBulk(bulk);

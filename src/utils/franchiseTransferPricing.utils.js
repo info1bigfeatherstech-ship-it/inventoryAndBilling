@@ -175,12 +175,38 @@ const expandFranchiseBillSegments = ({
 const isFranchiseWhToShopTransfer = (record) =>
   record?.request_type === 'WH_TO_SHOP' && isFranchiseShopType(record?.to_shop?.shop_type);
 
+/** Franchise-priced commercial transfer: WH→franchise OR shop→franchise (F.Price UI / PDF). */
+const isFranchisePricedTransfer = (record) => {
+  if (!isFranchiseShopType(record?.to_shop?.shop_type)) return false;
+  return record?.request_type === 'WH_TO_SHOP' || record?.request_type === 'SHOP_TO_SHOP';
+};
+
+/**
+ * Commercial bill destination (OWNER or FRANCHISE) for WH→shop or shop→shop.
+ * Shop→shop uses the same F.Price / transfer-bill path as warehouse→shop.
+ */
+const isCommercialShopTransfer = (record) => {
+  const destType = record?.to_shop?.shop_type;
+  if (!['OWNER', 'FRANCHISE'].includes(destType)) return false;
+  return record?.request_type === 'WH_TO_SHOP' || record?.request_type === 'SHOP_TO_SHOP';
+};
+
 const viewerIsFranchiseShop = (user, record) => {
-  if (!isFranchiseWhToShopTransfer(record)) return false;
+  if (!isFranchisePricedTransfer(record)) return false;
   if (isWarehouseInternalRole(user?.role)) return false;
   if (isOrgLevelAdmin(user)) return false;
   const shopId = user?.shopId || user?.shop_id;
-  return Boolean(shopId && shopId === record.to_shop_id);
+  if (!shopId) return false;
+  // Destination franchise shop must never see cost / purchase price.
+  if (shopId === record.to_shop_id) return true;
+  // Source franchise shop staff also must not see internal cost on these bills.
+  if (
+    shopId === record.from_shop_id &&
+    isFranchiseShopType(record?.from_shop?.shop_type)
+  ) {
+    return true;
+  }
+  return false;
 };
 
 const snapshotsFromRecord = (record = {}) => ({
@@ -305,7 +331,7 @@ const enrichVariantForWarehouseFranchiseView = (variant, franchiseUnit) => {
 };
 
 const formatSingleTransferRequest = (request, user, markupPercent, comboRules = []) => {
-  if (!isFranchiseWhToShopTransfer(request)) return request;
+  if (!isFranchisePricedTransfer(request)) return request;
 
   const franchiseShopView = viewerIsFranchiseShop(user, request);
   const liveEstimate = request.status === 'REQUESTED' || request.franchise_unit_price_snapshot == null;
@@ -364,7 +390,7 @@ const resolveItemBillQty = (item, bulk) => {
 };
 
 const formatBulkTransferItem = (item, user, bulk, markupPercent, comboRules = []) => {
-  if (!isFranchiseWhToShopTransfer(bulk)) return item;
+  if (!isFranchisePricedTransfer(bulk)) return item;
 
   const franchiseShopView = viewerIsFranchiseShop(user, bulk);
   const qty = resolveItemBillQty(item, bulk);
@@ -405,7 +431,7 @@ const formatBulkTransferItem = (item, user, bulk, markupPercent, comboRules = []
 };
 
 const formatBulkTransferRequest = (bulk, user, markupPercent, comboRules = []) => {
-  if (!isFranchiseWhToShopTransfer(bulk)) return bulk;
+  if (!isFranchisePricedTransfer(bulk)) return bulk;
 
   const franchiseShopView = viewerIsFranchiseShop(user, bulk);
   const items = (bulk.items || []).map((item) =>
@@ -460,7 +486,7 @@ const loadComboRulesSafe = async () => {
 
 const formatTransferRequestsForUser = async (requests, user) => {
   if (!Array.isArray(requests) || !requests.length) return requests;
-  const needsFranchise = requests.some(isFranchiseWhToShopTransfer);
+  const needsFranchise = requests.some(isFranchisePricedTransfer);
   const markup = needsFranchise
     ? await AppSettingsService.getFranchiseMarkupPercent()
     : null;
@@ -470,7 +496,7 @@ const formatTransferRequestsForUser = async (requests, user) => {
 
 const formatTransferRequestForUser = async (request, user) => {
   if (!request) return request;
-  const markup = isFranchiseWhToShopTransfer(request)
+  const markup = isFranchisePricedTransfer(request)
     ? await AppSettingsService.getFranchiseMarkupPercent()
     : null;
   const comboRules = markup != null ? await loadComboRulesSafe() : [];
@@ -479,7 +505,7 @@ const formatTransferRequestForUser = async (request, user) => {
 
 const formatBulkTransferRequestForUser = async (bulk, user) => {
   if (!bulk) return bulk;
-  const markup = isFranchiseWhToShopTransfer(bulk)
+  const markup = isFranchisePricedTransfer(bulk)
     ? await AppSettingsService.getFranchiseMarkupPercent()
     : null;
   const comboRules = markup != null ? await loadComboRulesSafe() : [];
@@ -496,6 +522,8 @@ const formatBulkTransferRequestForUser = async (bulk, user) => {
 
 module.exports = {
   isFranchiseWhToShopTransfer,
+  isFranchisePricedTransfer,
+  isCommercialShopTransfer,
   viewerIsFranchiseShop,
   formatSingleTransferRequest,
   formatBulkTransferRequest,

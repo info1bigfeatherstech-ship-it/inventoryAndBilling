@@ -191,7 +191,8 @@ const summarizeBulkRow = (row) => {
     product_summary: productSummary,
     transfer_bill_number: row.transfer_bill_number,
     is_franchise_transfer:
-      row.request_type === 'WH_TO_SHOP' && row.to_shop?.shop_type === 'FRANCHISE',
+      (row.request_type === 'WH_TO_SHOP' || row.request_type === 'SHOP_TO_SHOP') &&
+      row.to_shop?.shop_type === 'FRANCHISE',
     activity_at: activityTimestamp(row),
     remarks: row.request_remarks,
   };
@@ -221,7 +222,8 @@ const summarizeSingleRow = (row) => {
     product_summary: code ? `${productName} (${code})` : productName,
     transfer_bill_number: row.transfer_bill_number,
     is_franchise_transfer:
-      row.request_type === 'WH_TO_SHOP' && row.to_shop?.shop_type === 'FRANCHISE',
+      (row.request_type === 'WH_TO_SHOP' || row.request_type === 'SHOP_TO_SHOP') &&
+      row.to_shop?.shop_type === 'FRANCHISE',
     activity_at: activityTimestamp(row),
     remarks: row.request_remarks,
   };
