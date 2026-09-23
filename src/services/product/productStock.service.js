@@ -34,7 +34,32 @@ const STOCK_SELECT = {
       variant_id: true,
       sku: true,
       system_barcode: true,
-      product: { select: { product_id: true, product_code: true, name: true, warehouse_id: true } },
+      // Additive: first image for stock list thumbnails (does not affect qty/ledger ops)
+      images: {
+        orderBy: { sort_order: 'asc' },
+        take: 1,
+        select: { url: true, alt_text: true },
+      },
+      product: {
+        select: {
+          product_id: true,
+          product_code: true,
+          name: true,
+          warehouse_id: true,
+          // Primary (default) variant image — same pattern as shop stock / products list
+          variants: {
+            where: { is_default: true, is_active: true },
+            take: 1,
+            select: {
+              images: {
+                orderBy: { sort_order: 'asc' },
+                take: 1,
+                select: { url: true, alt_text: true },
+              },
+            },
+          },
+        },
+      },
     },
   },
   warehouse: { select: { warehouse_id: true, warehouse_code: true, warehouse_name: true } },
