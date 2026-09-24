@@ -42,6 +42,33 @@ const assertSellPriceNotAboveMrp = (unitPrice, mrp, itemLabel = '') => {
   );
 };
 
+/**
+ * True when charged sell price is below franchise F.Price floor.
+ * Missing or non-positive floor is not treated as a min (same spirit as MRP cap).
+ */
+const sellPriceBelowFranchiseFloor = (unitPrice, franchiseFloor) => {
+  const floor = Number(franchiseFloor);
+  const price = Number(unitPrice);
+  if (!Number.isFinite(floor) || floor <= 0) return false;
+  if (!Number.isFinite(price)) return true;
+  return roundMoney(price) < roundMoney(floor) - MRP_PRICE_EPSILON;
+};
+
+/**
+ * Franchise counter: manual override must not go below F.Price.
+ * Does not apply to combo/catalog auto pricing — callers must gate on price_overridden.
+ */
+const assertSellPriceNotBelowFranchiseFloor = (unitPrice, franchiseFloor, itemLabel = '') => {
+  if (!sellPriceBelowFranchiseFloor(unitPrice, franchiseFloor)) return;
+  const floor = roundMoney(Number(franchiseFloor));
+  const prefix = itemLabel ? `${itemLabel}: ` : '';
+  throw new AppError(
+    `${prefix}Sell price cannot be below F.Price (₹${floor})`,
+    400,
+    'UNIT_PRICE_BELOW_FRANCHISE'
+  );
+};
+
 const normalizeStateCode = (value) => {
   if (value == null || String(value).trim() === '') return null;
   const raw = String(value).trim();
@@ -330,6 +357,8 @@ module.exports = {
   roundMoney,
   sellPriceExceedsMrp,
   assertSellPriceNotAboveMrp,
+  sellPriceBelowFranchiseFloor,
+  assertSellPriceNotBelowFranchiseFloor,
   normalizeStateCode,
   stateCodeFromGstin,
   resolvePlaceOfSupplyStateCode,

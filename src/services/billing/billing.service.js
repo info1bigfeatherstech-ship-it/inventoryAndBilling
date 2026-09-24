@@ -26,6 +26,7 @@ const {
 const {
   roundMoney,
   assertSellPriceNotAboveMrp,
+  assertSellPriceNotBelowFranchiseFloor,
   isIntraStateSupply,
   buildTaxSummaryFromLines,
   calculateLineAmounts,
@@ -43,6 +44,7 @@ const ShopBankAccountService = require('../shop/shopBankAccount.service');
 const ShopStaffCodeService = require('../shop/shopStaffCode.service');
 const AppSettingsService = require('../settings/appSettings.service');
 const { calculateWholesaleUnitPriceFromSelling } = require('../../utils/wholesalePrice.utils');
+const { calculateFranchiseUnitPrice } = require('../../utils/franchisePrice.utils');
 const logger = require('../../utils/logger.utils');
 
 const TX_OPTIONS = { isolationLevel: 'Serializable', maxWait: 10000, timeout: 30000 };
@@ -398,6 +400,27 @@ const BillingService = {
         ? await AppSettingsService.getWholesaleMarkupPercent()
         : null;
 
+      // Franchise floor only when cashier manually overrides a line (combo/auto untouched).
+      const needsFranchiseFloor =
+        shop.shop_type === 'FRANCHISE' &&
+        data.items.some((item) => item.price_overridden === true);
+      let franchiseMarkupPercent = null;
+      if (needsFranchiseFloor) {
+        try {
+          franchiseMarkupPercent = await AppSettingsService.getFranchiseMarkupPercent();
+        } catch (markupErr) {
+          logger.warn('Franchise markup unavailable for bill price floor', {
+            error: markupErr?.message,
+            shop_id: shopId,
+          });
+          throw new AppError(
+            'Unable to validate franchise minimum price. Please try again.',
+            503,
+            'FRANCHISE_MARKUP_UNAVAILABLE'
+          );
+        }
+      }
+
       const computedLines = data.items.map((item, index) => {
         const variant = variantMap.get(item.variant_id);
         const qty = Number(item.quantity);
@@ -453,6 +476,28 @@ const BillingService = {
 
         unitPrice = roundMoney(unitPrice);
         assertSellPriceNotAboveMrp(unitPrice, variant.mrp, variant.product?.name || variant.product_code);
+
+        if (priceOverridden && franchiseMarkupPercent != null) {
+          try {
+            const franchiseFloor = calculateFranchiseUnitPrice(variant, franchiseMarkupPercent);
+            assertSellPriceNotBelowFranchiseFloor(
+              unitPrice,
+              franchiseFloor,
+              variant.product?.name || variant.product_code
+            );
+          } catch (floorErr) {
+            if (floorErr instanceof AppError) throw floorErr;
+            logger.warn('Franchise floor check failed', {
+              error: floorErr?.message,
+              variant_id: variant.variant_id,
+            });
+            throw new AppError(
+              'Unable to validate franchise minimum price for this item',
+              500,
+              'FRANCHISE_FLOOR_CHECK_FAILED'
+            );
+          }
+        }
 
         const lineGstType =
           billType === 'GST_INVOICE'

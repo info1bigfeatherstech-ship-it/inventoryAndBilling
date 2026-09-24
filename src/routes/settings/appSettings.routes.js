@@ -13,12 +13,14 @@ const {
 
 const READ_ROLES = ['SUPER_ADMIN', 'ORG_MANAGER', 'WH_MANAGER', 'WH_STOCK_LISTER', 'SHOP_OWNER', 'SHOP_MANAGER'];
 const WHOLESALE_READ_ROLES = [...READ_ROLES, 'BILLING_STAFF'];
+/** Billing staff need franchise markup to enforce F.Price floor on the counter. */
+const FRANCHISE_READ_ROLES = [...READ_ROLES, 'BILLING_STAFF'];
 
 router.use(requireAuth);
 
 router.get(
   '/franchise',
-  authorizeRoles(...READ_ROLES),
+  authorizeRoles(...FRANCHISE_READ_ROLES),
   AppSettingsController.getFranchiseSettings
 );
 
