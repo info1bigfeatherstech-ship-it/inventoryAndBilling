@@ -56,12 +56,18 @@ const assertGstConfigForShop = async (gstConfigId, shopId, tx = prisma) => {
   return config;
 };
 
+/**
+ * Ensure the shop has an active GST config to attach bank accounts.
+ * Prefer any active registration; otherwise reuse (reactivate) an existing
+ * UNREGISTERED row instead of creating a duplicate — unique(shop_id, gst_number).
+ * No schema change; does not auto-reactivate soft-deactivated bank accounts.
+ */
 const ensureDefaultGstConfig = async (shopId, tx = prisma) => {
-  const existing = await tx.shopGstRegistration.findFirst({
+  const active = await tx.shopGstRegistration.findFirst({
     where: { shop_id: shopId, is_active: true },
     orderBy: [{ is_default: 'desc' }, { created_at: 'asc' }],
   });
-  if (existing) return existing;
+  if (active) return active;
 
   const shop = await tx.shop.findUnique({
     where: { shop_id: shopId },
@@ -69,16 +75,75 @@ const ensureDefaultGstConfig = async (shopId, tx = prisma) => {
   });
   if (!shop) throw new AppError('Shop not found', 404, 'SHOP_NOT_FOUND');
 
-  return tx.shopGstRegistration.create({
-    data: {
-      shop_id: shopId,
-      gst_number: 'UNREGISTERED',
-      legal_name: shop.shop_name,
-      is_default: true,
-      is_active: true,
-      remarks: 'Auto-created for bank account and UPI billing',
+  const existingUnregistered = await tx.shopGstRegistration.findUnique({
+    where: {
+      shop_id_gst_number: { shop_id: shopId, gst_number: 'UNREGISTERED' },
     },
   });
+
+  if (existingUnregistered) {
+    await tx.shopGstRegistration.updateMany({
+      where: {
+        shop_id: shopId,
+        is_default: true,
+        gst_config_id: { not: existingUnregistered.gst_config_id },
+      },
+      data: { is_default: false },
+    });
+
+    return tx.shopGstRegistration.update({
+      where: { gst_config_id: existingUnregistered.gst_config_id },
+      data: {
+        is_active: true,
+        is_default: true,
+        legal_name: existingUnregistered.legal_name || shop.shop_name,
+        remarks:
+          existingUnregistered.remarks ||
+          'Reactivated for bank account and UPI billing',
+      },
+    });
+  }
+
+  try {
+    return await tx.shopGstRegistration.create({
+      data: {
+        shop_id: shopId,
+        gst_number: 'UNREGISTERED',
+        legal_name: shop.shop_name,
+        is_default: true,
+        is_active: true,
+        remarks: 'Auto-created for bank account and UPI billing',
+      },
+    });
+  } catch (err) {
+    // Race / leftover unique row: reuse instead of failing the bank create.
+    if (err?.code === 'P2002') {
+      const raced = await tx.shopGstRegistration.findUnique({
+        where: {
+          shop_id_gst_number: { shop_id: shopId, gst_number: 'UNREGISTERED' },
+        },
+      });
+      if (raced) {
+        await tx.shopGstRegistration.updateMany({
+          where: {
+            shop_id: shopId,
+            is_default: true,
+            gst_config_id: { not: raced.gst_config_id },
+          },
+          data: { is_default: false },
+        });
+        return tx.shopGstRegistration.update({
+          where: { gst_config_id: raced.gst_config_id },
+          data: {
+            is_active: true,
+            is_default: true,
+            legal_name: raced.legal_name || shop.shop_name,
+          },
+        });
+      }
+    }
+    throw err;
+  }
 };
 
 const clearOtherDefaults = async (gstConfigId, exceptId, tx) => {
